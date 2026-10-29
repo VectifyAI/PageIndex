@@ -10,13 +10,14 @@ Either way the tool set reaches the framework as an MCP server (an
 in-process one over the bridge or the local store), and the FunctionTools
 are the framework's own conversion of it: the schema goes to the model
 verbatim, and tool results reach it in the framework's shapes (text as
-text, images as images). The SDK carries MCP types and renders nothing.
+text, images as images, except on its OpenAIChatCompletionsModel, which
+keeps only text). The SDK carries MCP types and renders nothing.
 """
 from __future__ import annotations
 
 import asyncio
 
-from ..errors import PageIndexAPIError, _pageindex_cause
+from ..errors import _pageindex_cause
 
 
 def _tool_failure(ctx, error):
@@ -76,14 +77,8 @@ def build_mcp_server(client, include_management: bool = False, doc_ids=None):
 
 def build_openai_tools(client, include_management: bool = False,
                        hosted: bool = False, doc_ids=None) -> list:
-    try:
-        from agents import HostedMCPTool
-        from agents.mcp import MCPUtil
-    except ImportError as exc:
-        raise PageIndexAPIError(
-            "as_openai_tools requires the OpenAI Agents SDK — "
-            "pip install openai-agents."
-        ) from exc
+    from agents import HostedMCPTool
+    from agents.mcp import MCPUtil
     if getattr(client, "api_key", None) and hosted:
         # include_management picks the endpoint — the URL itself is the
         # gate (?tools=read serves only readOnlyHint-annotated tools), so

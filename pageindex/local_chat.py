@@ -6,15 +6,19 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import functools
 import hashlib
 import inspect
 import json
+import os
 import queue
+import re
 import threading
 import time
 import uuid
 import warnings
 from typing import Any, Generator, Iterator, Mapping, Optional, Union
+from urllib.parse import urlparse
 
 from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import (ChatStream, MessagesStream, ChatObject,
@@ -53,9 +57,16 @@ def _system_text(content: Any) -> str:
     )
 
 
+def _text_reply(message: dict) -> bool:
+    """An assistant turn of text alone: no tool calls, no refusal."""
+    return (isinstance(message.get("content"), str)
+            and not message.get("tool_calls") and not message.get("refusal"))
+
+
 def _assistant_items(message) -> list:
-    """An assistant turn beyond plain text as the Agents SDK's items, by the
-    SDK's own converter for a model reply: the items its run held."""
+    """An assistant turn as the Agents SDK's items, by the SDK's own
+    converter for a model reply: the items its run held, from the model it
+    names."""
     from openai.types.chat import ChatCompletionMessage
     from pydantic import ValidationError
     from agents.models.chatcmpl_converter import Converter
@@ -66,8 +77,11 @@ def _assistant_items(message) -> list:
         raise PageIndexAPIError(
             f"Invalid assistant message: {error['msg']} at "
             f"{'.'.join(map(str, error['loc']))}.") from exc
+    writer = message.get(_WRITER)
     items = [item.model_dump(exclude_unset=True)
-             for item in Converter.message_to_output_items(parsed)]
+             for item in Converter.message_to_output_items(
+                 parsed, provider_data={"model": writer}
+                 if isinstance(writer, str) else None)]
     if any(item.get("type") != "reasoning" for item in items):
         return items
     if isinstance(message.get("content"), str):
@@ -80,11 +94,12 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
                          ) -> "tuple[list[str], list[dict]]":
     """Validate the chat_completions surface's messages: system/developer
     content joins the managed instructions; user/assistant text passes
-    through; assistant turns carrying more (tool calls, a refusal,
-    reasoning) and tool results become the Agents SDK's items, so a
-    returned ``messages`` transcript appends back verbatim. ``text_only``
-    names a model that takes text alone (claude-code/): its errors say so
-    and point to what takes more."""
+    through, a text reply's other fields coming back through the fill (as
+    a reply item, the SDK would fold the next tool call into it); assistant
+    turns with tool calls or a refusal, and tool results, become the Agents
+    SDK's items, so a returned ``messages`` transcript appends back
+    verbatim. ``text_only`` names a model that takes text alone
+    (claude-code/): its errors say so and point to what takes more."""
     lanes = 'chat(protocol="responses") or chat(protocol="messages")'
     messages = list(messages)
     if not messages:
@@ -99,8 +114,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         if role in ("system", "developer"):
             system_texts.append(_system_text(message.get("content")))
         elif (role == "assistant" and not text_only
-              and (set(message) - {"role", "content"}
-                   or not isinstance(message.get("content"), str))):
+              and not _text_reply(message)):
             history.extend(_assistant_items(message))
         elif role == "tool" and not text_only:
             call_id = message.get("tool_call_id")
@@ -229,24 +243,407 @@ class _ChatCompletionChunk(ChatObject):
         return construct_type(type_=ChatCompletionChunk, value=data)
 
 
-def _require_openai_agents(method: str) -> None:
-    try:
-        import agents  # noqa: F401
-    except ImportError as exc:
-        raise PageIndexAPIError(
-            f"{method} with your own chat model requires the OpenAI "
-            "Agents SDK — "
-            "pip install openai-agents. "
-            "chat(protocol='messages') runs on the anthropic extra "
-            "instead."
-        ) from exc
-
-
 def _sdk_backend(backend) -> dict:
     """chat_backend for an SDK constructor: LiteLLM takes either endpoint
     spelling, the openai and anthropic SDKs only ``base_url``."""
     return {("base_url" if key == "api_base" else key): value
             for key, value in (backend or {}).items()}
+
+
+# LitellmModel rebuilds each reply into the Agents SDK's items and back,
+# dropping what it doesn't convert (signed or encrypted reasoning, thought
+# signatures, ...): every request of a chat run gets that back, unchanged,
+# for the model that wrote it. The hook fills only the requests listed
+# here, by their LiteLLM call id. A test fails once the Agents SDK keeps
+# those fields itself; the fill can go then.
+_REQUESTS: dict = {}
+_FILL_LOCK = threading.Lock()
+_fill_hook = None
+# Returned assistant messages name the model that wrote them.
+_WRITER = "model"
+# What the Agents SDK writes itself, with the writer's name, a tool
+# call's identity, and the stream delta fields LiteLLM's own assembler
+# keeps.
+_REBUILT = frozenset({"role", "content", "tool_calls", _WRITER})
+_CALL_IDENTITY = frozenset({"id", "type", "function", "index"})
+_ASSEMBLED = frozenset({"content", "role", "tool_calls", "function_call",
+                        "refusal", "audio", "reasoning_content",
+                        "thinking_blocks", "provider_specific_fields",
+                        "annotations", "images"})
+
+
+def _reply_fields(message: dict, nested: bool = False) -> dict:
+    """A reply's fields as LiteLLM parsed them, empty ones too; a field it
+    lacks is None. LiteLLM's provider_specific_fields stay nested where its
+    own adapter reads them, and go on top for an OpenAI-protocol host."""
+    fields = {key: value for key, value in message.items()
+              if key != "provider_specific_fields" and value is not None}
+    provider = message.get("provider_specific_fields") or {}
+    if nested and provider:
+        fields["provider_specific_fields"] = provider
+    elif not nested:
+        for key, value in provider.items():
+            if value is not None:
+                fields.setdefault(key, value)
+    return fields
+
+
+def _nth(records: dict, key, seen: dict):
+    """The record for this request's next message under key: records keep
+    conversation order, so a repeated answer or reused call id still
+    finds its own reply."""
+    n = seen[key] = seen.get(key, -1) + 1
+    found = records.get(key) or ()
+    return found[n] if n < len(found) else None
+
+
+class _Replies:
+    """A chat run's replies as their model returned them, and its latest
+    request as sent."""
+
+    def __init__(self, model: str, nested: bool = False):
+        self.model = model
+        self.nested = nested  # LiteLLM's adapter reads provider fields itself
+        self.messages: dict = {}  # ("call", first call id) | ("text", text)
+        self.calls: dict = {}     # call id -> the call's own fields
+        self.streams: list = []   # (chunks, raw delta parts) to assemble
+        self.first: Optional[int] = None  # messages in the first request
+        self.last: list = []
+        self.request: Optional[str] = None  # the latest filled call id
+        self.missed = False  # a request went out without the fill
+        self.unanswered: Optional[bool] = None  # the latest stream, so far
+        self.sent: set = set()  # latest request's fields a 400 may refuse
+        self.refused: set = set()  # fields a 400 refused in this call
+
+    def _call_id(self, call: dict) -> str:
+        # LiteLLM folds a Gemini signature into the id; the SDK strips it
+        from agents.models.chatcmpl_helpers import ChatCmplHelpers
+        return ChatCmplHelpers.clean_gemini_tool_call_id(
+            call.get("id") or "", self.model)
+
+    def record(self, message: dict, own: bool = True) -> None:
+        """A reply's fields under its first call id or its text; another
+        model's message, or one this SDK didn't return, holds its place
+        with nothing to put back."""
+        fields = _reply_fields(message, self.nested)
+        # history may hold the OpenAI SDK's call objects; the fill sees dicts
+        calls = [call if isinstance(call, dict) else call.model_dump()
+                 for call in fields.get("tool_calls") or ()]
+        for call in calls:
+            self.calls.setdefault(self._call_id(call), []).append(
+                {key: value for key, value in call.items()
+                 if own and key not in _CALL_IDENTITY and value is not None})
+        key = (("call", self._call_id(calls[0])) if calls
+               else ("text", fields["content"])
+               if isinstance(fields.get("content"), str) else None)
+        if key is not None:
+            self.messages.setdefault(key, []).append(
+                {k: v for k, v in fields.items()
+                 if own and k not in _REBUILT})
+
+    def _assemble(self) -> None:
+        """Streamed replies: LiteLLM's assembler over its parsed chunks,
+        plus the raw delta fields its parser drops."""
+        import litellm
+        while self.streams:
+            chunks, raw = self.streams.pop(0)
+            try:
+                built = (litellm.stream_chunk_builder(chunks)
+                         if chunks else None)
+            except Exception:  # LiteLLM's APIError: nothing to put back
+                built = None
+            choices = getattr(built, "choices", None)
+            reply = getattr(choices[0], "message", None) if choices else None
+            if reply is None:
+                continue
+            message = reply.model_dump()
+            nested = message.get("provider_specific_fields") or {}
+            for key, parts in raw.items():
+                if message.get(key) is None and not nested.get(key):
+                    message[key] = ("".join(parts) if isinstance(parts[0], str)
+                                    else [x for part in parts for x in part])
+            self.record(message)
+
+    def _put(self, target: dict, fields, own: frozenset) -> dict:
+        """Put back what the reply had, as it had it, then drop what a
+        provider refused; what's left beside ``own`` counts as sent."""
+        target.update(fields or {})
+        for key in [key for key in target if key not in own]:
+            if key in self.refused:
+                del target[key]
+            else:
+                self.sent.add(key)
+        return target
+
+    def fill(self, messages: list) -> list:
+        """Each assistant message with its own model's reply fields as the
+        reply had them, over what the Agents SDK wrote in their place (its
+        Gemini signature placeholder): a reply it split per call fills its
+        first message, each call by id. Every assistant message has
+        content, as the SDK writes it for history, so a split reply's later
+        messages read the same on the next turn."""
+        self._assemble()
+        self.sent = set()
+        seen: dict = {}
+        out = []
+        for message in messages:
+            if not (isinstance(message, dict)
+                    and message.get("role") == "assistant"):
+                out.append(message)
+                continue
+            message = {"role": "assistant", "content": None, **message}
+            calls = message.get("tool_calls") or []
+            ids = [self._call_id(call) for call in calls]
+            content = message.get("content")
+            key = (("call", ids[0]) if calls
+                   else ("text", content) if isinstance(content, str)
+                   else None)
+            self._put(message, _nth(self.messages, key, seen), _REBUILT)
+            if calls:
+                message["tool_calls"] = [
+                    self._put(dict(call), _nth(self.calls, call_id, seen),
+                              _CALL_IDENTITY)
+                    for call, call_id in zip(calls, ids)]
+            out.append(message)
+        return out
+
+
+def _sending(data) -> bool:
+    """Encrypted reasoning that a run's request carries right now, as the
+    fill put it back."""
+    return bool(data) and any(
+        isinstance(block, dict) and block.get("data") == data
+        for replies in tuple(_REQUESTS.values())
+        for message in replies.last if isinstance(message, dict)
+        for block in message.get("thinking_blocks") or ())
+
+
+def _keep_redacted(translate):
+    """LiteLLM's Converse thinking converter, except that a run's encrypted
+    reasoning, which it turns into a blank text its assembly then drops,
+    goes back as Bedrock's redactedContent, as Bedrock returned it."""
+    @functools.wraps(translate)
+    def converting(thinking_blocks, *args, **kwargs):
+        out = []
+        for block in thinking_blocks:
+            converted = translate([block], *args, **kwargs)
+            blank = converted == [
+                {"reasoningContent": {"reasoningText": {"text": ""}}}]
+            if (blank and block.get("type") == "redacted_thinking"
+                    and _sending(block.get("data"))):
+                converted = [{"reasoningContent": {
+                    "redactedContent": block["data"]}}]
+            out += converted
+        return out
+    return converting
+
+
+def _register_fill() -> None:
+    """The LiteLLM pre-request hook that fills a run's requests, in
+    litellm.callbacks: added before each request, again if a caller
+    replaced the list. The first call also wraps LiteLLM's Converse
+    thinking converter (_keep_redacted)."""
+    global _fill_hook
+    import litellm
+    from litellm.integrations.custom_logger import CustomLogger
+    with _FILL_LOCK:
+        if _fill_hook is None:
+            name = "translate_thinking_blocks_to_reasoning_content_blocks"
+            try:
+                from litellm.litellm_core_utils.prompt_templates.factory \
+                    import BedrockConverseMessagesProcessor as converse
+                translate = getattr(converse, name)
+            except (ImportError, AttributeError):
+                pass  # LiteLLM moved it: Converse drops it, as before
+            else:
+                setattr(converse, name,
+                        staticmethod(_keep_redacted(translate)))
+            class _Fill(CustomLogger):
+                async def async_pre_call_deployment_hook(self, kwargs,
+                                                         call_type):
+                    replies = _REQUESTS.get(kwargs.get("litellm_call_id"))
+                    if (replies is None
+                            or not isinstance(kwargs.get("messages"), list)):
+                        return None
+                    messages = replies.fill(kwargs["messages"])
+                    if (kwargs.get("cache_control_injection_points")
+                            and _gateway(str(kwargs.get("model") or ""),
+                                         kwargs.get("base_url"))):
+                        if "cache_control" in replies.refused:
+                            kwargs = {key: value for key, value
+                                      in kwargs.items() if key
+                                      != "cache_control_injection_points"}
+                        else:
+                            # A gateway keeps a mark only inside a content
+                            # block and merges adjacent text messages, so
+                            # user text goes as a block on every request.
+                            messages = [
+                                {**m, "content": [{"type": "text",
+                                                   "text": m["content"]}]}
+                                if m.get("role") == "user"
+                                and isinstance(m.get("content"), str)
+                                and m["content"] else m
+                                for m in messages]
+                            replies.sent.add("cache_control")
+                    if replies.first is None:
+                        replies.first = len(messages)
+                    replies.last = messages
+                    replies.request = kwargs["litellm_call_id"]
+                    return {**kwargs, "messages": messages}
+            _fill_hook = _Fill()
+        if _fill_hook not in litellm.callbacks:
+            litellm.callbacks.append(_fill_hook)
+
+
+def _recording(create, replies: _Replies):
+    """LiteLLM's per-chunk parser, observed: what it returns assembles the
+    reply, and the raw delta fields beside it keep what its filter drops.
+    A thinking block's closing repeat of its text is blanked here, for the
+    Agents SDK and the record alike."""
+    chunks: list = []
+    raw: dict = {}  # key -> its fragments, all str or all list
+    thinking: list = []
+    replies.streams.append((chunks, raw))
+
+    def creating(chunk):
+        choices = getattr(chunk, "choices", None)
+        delta = getattr(choices[0], "delta", None) if choices else None
+        dump = getattr(delta, "model_dump", None)
+        fields = delta if isinstance(delta, dict) else dump() if dump else {}
+        for key, value in fields.items():
+            if key in _ASSEMBLED or not isinstance(value, (str, list)):
+                continue
+            parts = raw.setdefault(key, [])
+            if not parts or type(parts[0]) is type(value):
+                parts.append(value)
+        # a stream is empty when its chunks' choices lists all came empty;
+        # LiteLLM's dict and str chunks (Snowflake, Cohere, its [DONE]
+        # sentinel) tell neither way
+        if choices:
+            replies.unanswered = False
+        elif isinstance(choices, list) and replies.unanswered is None:
+            replies.unanswered = True
+        processed = create(chunk=chunk)
+        if processed is not None:
+            _drop_repeated_thinking(processed, thinking)
+            chunks.append(processed)
+        return processed
+    return creating
+
+
+async def _again_with_published_models():
+    from agents import RetryDecision
+    from .utils import learn_published_models
+    if await learn_published_models():
+        return RetryDecision(retry=True, delay=0)
+    return False
+
+
+def _chat_retry(replies: _Replies):
+    """Once again after LiteLLM refused the request itself, with the
+    entries its packaged model map lacks taken from the published one (a
+    model newer than the package). Again at once without the fields a 400
+    names, of those the request had that may be refused, for the rest of
+    the call: each retry refuses what its 400 named. A reply with no
+    choices goes again, as on the index lane. Anything else by the SDK's
+    one retry rule, within retry.CHAT_RETRIES."""
+    from agents import ModelRetrySettings, RetryDecision
+    from litellm.exceptions import UnsupportedParamsError
+    from .retry import CHAT_RETRIES, SDK_MAX_DELAY, agent_policy, delay
+    learned = False
+
+    def policy(context):
+        nonlocal learned
+        if context.normalized.status_code in (400, 422):
+            if (isinstance(context.error, UnsupportedParamsError)
+                    and not learned):
+                learned = True
+                return _again_with_published_models()
+            text = str(context.error)
+            named = {key for key in replies.sent
+                     if re.search(rf"\b{re.escape(key)}\b", text)}
+            if named:
+                replies.refused.update(named)
+                return RetryDecision(retry=True, delay=0)
+        if getattr(context.error, "no_choices", False):
+            return RetryDecision(retry=True, delay=delay(
+                context.attempt - 1, None, SDK_MAX_DELAY))
+        return agent_policy(context)
+    return ModelRetrySettings(max_retries=CHAT_RETRIES, policy=policy)
+
+
+def _no_choices(model: str):
+    """A reply with no choices, raised as LiteLLM raises one whose choices
+    are missing and marked for _chat_retry: an empty answer never passes
+    as the model's."""
+    from litellm.exceptions import APIError
+    error = APIError(500, "the model returned a reply with no choices", "",
+                     model)
+    setattr(error, "no_choices", True)
+    return error
+
+
+def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
+    """Records the caller's history and each reply around LitellmModel's
+    _fetch_response; the hook fills each request it sends, known by the
+    call id it passes LiteLLM."""
+    from agents.extensions.models.litellm_model import LitellmModel
+    model = agent.model
+    if not isinstance(model, LitellmModel):
+        return None
+    fetch = model._fetch_response
+    replies = _Replies(model.model, nested=not _openai_protocol(model.model))
+    for message in messages:
+        if not (isinstance(message, dict)
+                and message.get("role") == "assistant"):
+            continue
+        if isinstance(message.get(_WRITER), str) or not _text_reply(message):
+            replies.record(message, own=message.get(_WRITER) == model.model)
+        else:  # it names no model: what the Agents SDK itself replays
+            replies.record(_as_sent(agent, _assistant_items(message))[-1])
+
+    async def fetching(system_instructions, input, model_settings, *args,
+                       **kwargs):
+        call_id = str(uuid.uuid4())
+        model_settings = dataclasses.replace(model_settings, extra_args={
+            **(model_settings.extra_args or {}), "litellm_call_id": call_id})
+        _register_fill()
+        _REQUESTS[call_id] = replies
+        try:
+            result = await fetch(system_instructions, input, model_settings,
+                                 *args, **kwargs)
+        finally:
+            del _REQUESTS[call_id]
+        if replies.request != call_id:
+            replies.missed = True
+        if not isinstance(result, tuple):
+            if not result.choices:
+                raise _no_choices(model.model)
+            replies.record(result.choices[0].message.model_dump())
+            return result
+        create = getattr(result[1], "chunk_creator", None)
+        if create is not None:  # LiteLLM's CustomStreamWrapper
+            setattr(result[1], "chunk_creator", _recording(create, replies))
+        replies.unanswered = None
+        return result
+
+    stream_response = model.stream_response
+
+    async def streaming(*args, **kwargs):
+        from contextlib import aclosing
+        # an async generator, typed AsyncIterator by openai-agents
+        async with aclosing(stream_response(*args, **kwargs)) as events:  # type: ignore[arg-type]
+            async for event in events:
+                # before the end, the SDK's retry may still send it again
+                if event.type == "response.completed" and replies.unanswered:
+                    raise _no_choices(model.model)
+                yield event
+
+    model._fetch_response = fetching
+    model.stream_response = streaming
+    agent.model_settings = dataclasses.replace(
+        agent.model_settings, retry=_chat_retry(replies))
+    return replies
 
 
 def _openai_model(protocol: str, model_name: str, backend=None):
@@ -267,14 +664,12 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     try:
         from agents.extensions.models.litellm_model import LitellmModel
         import litellm
-    except ImportError:
+    except ImportError as exc:
         raise PageIndexAPIError(
-            f"'{model_name}' routes through LiteLLM, but litellm is not "
-            "installed. Run:  pip install -U litellm"
-        )
+            f"'{model_name}' routes through LiteLLM, which failed to "
+            f"import: {exc}") from exc
     from .utils import (_litellm_model, _mute_litellm_bridge_usage_warning,
-                        _quiet_litellm, _repair_litellm_types)
-    _repair_litellm_types()
+                        _quiet_litellm)
     _mute_litellm_bridge_usage_warning()
     _quiet_litellm()
     try:
@@ -311,20 +706,43 @@ def _litellm_claude_marks(wire: str) -> Optional[dict]:
     if provider == "anthropic" or (
             provider in ("bedrock", "vertex_ai", "azure_ai")
             and "claude" in model.lower()):
-        # The stable prefix plus the newest message, so each turn re-reads
-        # the turns before it. LiteLLM seeds nothing unprompted, so this
-        # pair is the marks' sole source.
-        return {"cache_control_injection_points": [
-            {"location": "message", "role": "system"},
-            {"location": "message", "index": -1}]}
+        return _injected_marks()
     return None
 
 
-def _cache_extra_args(model_name: str) -> Optional[dict]:
+def _injected_marks() -> dict:
+    # The stable prefix plus the newest message, so each turn re-reads
+    # the turns before it. LiteLLM seeds nothing unprompted, so this
+    # pair is the marks' sole source.
+    return {"cache_control_injection_points": [
+        {"location": "message", "role": "system"},
+        {"location": "message", "index": -1}]}
+
+
+def _gateway(wire: str, base_url=None) -> bool:
+    """A relay serving other vendors' models: the OpenAI protocol to a
+    host that isn't OpenAI's own (with no base URL passed, the one LiteLLM
+    reads from OPENAI_BASE_URL or OPENAI_API_BASE), or LiteLLM's
+    OpenRouter adapter."""
+    if "/" not in wire or wire.startswith("openai/"):
+        base_url = (base_url or os.environ.get("OPENAI_BASE_URL")
+                    or os.environ.get("OPENAI_API_BASE"))
+        host = urlparse(base_url).hostname if base_url else None
+        return bool(host) and not host.endswith(".openai.com")
+    return wire.startswith("openrouter/")
+
+
+def _cache_extra_args(model_name: str,
+                      base_url: Optional[str] = None) -> Optional[dict]:
     """The chat lane's marks: normalized exactly as _litellm_model
     normalizes the wire (bare names get openai/), so this predicate
-    cannot disagree with where chat_completions actually routes."""
+    cannot disagree with where chat_completions actually routes. Claude
+    caches only on marks, so it gets them on every route, a gateway too;
+    every other model caches by itself, and on OpenAI's own API marks
+    turn on explicit caching, which loses its automatic hits."""
     wire = model_name.removeprefix("litellm/")
+    if _gateway(wire, base_url):
+        return _injected_marks() if "claude" in wire.lower() else None
     if "/" not in wire or wire.startswith("openai/"):
         return None
     return _litellm_claude_marks(wire)
@@ -335,20 +753,23 @@ def _openai_protocol(model_name: str) -> bool:
     prompt_cache_key means something and extra_body lands in the request
     body. Resolution is LiteLLM's own (same as _cache_extra_args), so the
     answer follows actual routing; azure and openrouter ride the OpenAI
-    protocol without appearing in openai_compatible_providers."""
+    protocol without appearing in openai_compatible_providers, and
+    azure_ai's Claude rides Anthropic's although azure_ai appears."""
     wire = model_name.removeprefix("litellm/")
     if "/" not in wire or wire.startswith("openai/"):
         return True
     try:
         import litellm
+        from litellm.constants import openai_compatible_providers
         from .utils import _quiet_litellm
         _quiet_litellm()
-        _, provider, _, _ = litellm.get_llm_provider(model=wire)
+        model, provider, _, _ = litellm.get_llm_provider(model=wire)
     except Exception:
         return False
+    if provider == "azure_ai" and "claude" in model.lower():
+        return False
     return (provider in ("openai", "azure", "openrouter")
-            or provider in getattr(litellm, "openai_compatible_providers",
-                                   ()))
+            or provider in openai_compatible_providers)
 
 
 def _merged_backend(client, backend):
@@ -363,8 +784,16 @@ _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
 _ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
                   "folder_id": "folder_id=", "model": "model=",
+                  "reasoning_effort":
+                      "reasoning_effort= (own chat models only)",
                   **dict.fromkeys(("api_key", "base_url", "api_base"),
                                   "backend= (API chat models only)")}
+# The ModelSettings fields openai-agents' LitellmModel reads.
+_LITELLM_MODEL_SETTINGS = frozenset({
+    "temperature", "top_p", "frequency_penalty", "presence_penalty",
+    "max_tokens", "tool_choice", "parallel_tool_calls", "reasoning",
+    "top_logprobs", "include_usage", "extra_headers", "extra_query",
+    "metadata"})
 
 
 def _refuse_skeleton(extra_body) -> None:
@@ -398,22 +827,26 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   max_tokens=None, backend=None, extra_headers=None):
     _refuse_skeleton(extra_body)
     from agents import Agent, ModelSettings
+    from openai.types.shared import Reasoning
+    from pydantic import ValidationError
     from .integrations.openai_agents import build_openai_tools
     # ModelSettings.extra_body is the one channel all three engines put on
-    # the wire: LiteLLM drops the bare prompt_cache_key kwarg (wire-verified),
-    # and both OpenAI model classes pass extra_body through verbatim. OpenAI
+    # the wire verbatim: LiteLLM and both OpenAI model classes. OpenAI
     # destinations only — LiteLLM plants extra_body as a literal field in
     # other providers' request bodies, which Anthropic rejects as unknown.
     # The responses lane is the OpenAI SDK whatever the name says.
     openai_backend = protocol == "responses" or _openai_protocol(model_name)
-    # Chat-lane effort rides extra_args: LiteLLM takes it as its own
-    # top-level kwarg on every supported openai-agents version, and the
-    # channel admits values outside the OpenAI enum ("none").
-    extra_args = _cache_extra_args(model_name) if protocol == "chat" else None
+    conn = _sdk_backend(backend)
+    # LiteLLM's own retries off: the runner's (_chat_retry) are the chat lane's one layer.
+    extra_args = ({"max_retries": 0,
+                   **(_cache_extra_args(model_name, conn.get("base_url")) or {})}
+                  if protocol == "chat" else None)
     if reasoning_effort:
-        extra_args = {**(extra_args or {}),
-                      "reasoning_effort": reasoning_effort}
-    conn = _sdk_backend(backend) if backend else {}
+        try:
+            reasoning = Reasoning(effort=reasoning_effort)
+        except ValidationError:
+            extra_args = {**(extra_args or {}),
+                          "reasoning_effort": reasoning_effort}
     if conn and protocol == "chat":
         # LiteLLM takes connection params per call, except the two names
         # LitellmModel pins as its own keywords — those ride its constructor.
@@ -432,14 +865,20 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         if openai_backend:
             body = {**(body or {}), **extra_body}
         else:
-            # openai-agents passes ModelSettings' own fields to litellm by
-            # name beside **extra_args, so those ride their field.
-            own = {field.name for field in dataclasses.fields(ModelSettings)}
-            routed = {k: v for k, v in extra_body.items() if k in own}
-            rest = {k: v for k, v in extra_body.items() if k not in own}
+            routed = {k: v for k, v in extra_body.items()
+                      if k in _LITELLM_MODEL_SETTINGS}
+            given = routed.get("reasoning")
+            if isinstance(given, Reasoning):
+                given = given.model_dump()
+            if reasoning is not None and "reasoning" in routed and (
+                    given is None or isinstance(given, Mapping)):
+                # reasoning_effort's effort, unless extra_body names one
+                routed["reasoning"] = {"effort": reasoning.effort, **{
+                    k: v for k, v in (given or {}).items() if v is not None}}
+            rest = {k: v for k, v in extra_body.items()
+                    if k not in _LITELLM_MODEL_SETTINGS}
             if rest:
                 extra_args = {**(extra_args or {}), **rest}
-    from pydantic import ValidationError
     try:
         settings = ModelSettings(**{
             "temperature": temperature, "top_p": top_p,
@@ -453,6 +892,19 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             **routed})
     except ValidationError as exc:
         raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
+    effort = settings.reasoning.effort if settings.reasoning else None
+    args = settings.extra_args or {}
+    if protocol == "chat" and "none" in (effort, args.get("reasoning_effort")) \
+            and "thinking" not in args:
+        from .utils import _claude_none, thinking_stays_on
+        if thinking_stays_on(model_name):
+            raise PageIndexAPIError(
+                f"{model_name} can't turn thinking off, so it can't honor "
+                "reasoning_effort='none'; pass 'low' or leave it unset.")
+        swap = _claude_none(model_name)
+        if swap:
+            # LiteLLM keeps a thinking switch and drops the "none" beside it
+            settings = dataclasses.replace(settings, extra_args={**args, **swap})
     return Agent(
         name="PageIndex",
         instructions=instructions,
@@ -470,18 +922,7 @@ def _validate_max_turns(max_turns) -> None:
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
                             items, folder_id=None) -> str:
-    """Stable per-conversation cache-routing key, sent as the OpenAI
-    ``prompt_cache_key`` through ModelSettings.extra_body (openai-agents
-    0.20 no longer derives it from RunConfig.group_id — verified against a
-    captured wire). Keyed on the prefix identity — model, instructions,
-    doc targeting, first conversation item — so a conversation's
-    continuations share one route without pooling unrelated conversations.
-    Callers pass the conversation's own items, never the SDK-prepended
-    doc-targeting block: that block is byte-identical for every
-    conversation about a document and would pool them all under one key.
-    doc_id and folder_id carry the targeting identity instead — the same
-    opening question against different documents is different
-    conversations."""
+    """prompt_cache_key per conversation; items exclude the targeting block."""
     scope = [doc_id] if isinstance(doc_id, str) else doc_id
     seed = json.dumps([model_name, instructions, scope,
                        *([folder_id] if folder_id else []),
@@ -490,28 +931,37 @@ def _conversation_cache_key(model_name: str, instructions: str, doc_id,
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
+def _mcp_too_old(exc):
+    """What fixes LiteLLM's MCP handler failing to import from the installed
+    mcp (LiteLLM imports it on calls with tools), else None."""
+    from importlib.metadata import PackageNotFoundError, version
+    seen = []
+    while exc is not None and exc not in seen:
+        if isinstance(exc, ImportError) and (exc.name or "").split(".")[0] == "mcp":
+            try:
+                mcp, litellm = version("mcp"), version("litellm")
+            except PackageNotFoundError:
+                return None
+            return (f"LiteLLM {litellm} needs a newer version of `mcp` than the "
+                    f"installed {mcp}. Run `pip install -U mcp`, or use a different "
+                    f"version of LiteLLM that works with mcp {mcp}.")
+        seen.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 def _model_backend_error(exc, lane: str, client=None) -> PageIndexAPIError:
-    """Wrap a provider failure; the sol-class refusal (chatcmpl rejects
-    function tools while reasoning is on) gets its documented exits
-    appended, since the fix is a different route, not a retry. The exits
-    are per-lane: of the chat lane's three, two are dead ends for a
-    Responses-lane caller — it IS the other lane, and its reasoning knob is
-    ``reasoning``, not ``reasoning_effort``. On a cloud client an
-    auth-shaped failure gets the own-model architecture spelled out —
-    the misreading it corrects ("the cloud runs my model") surfaces
-    exactly here."""
+    """Wrap a provider failure, appending the hint that fixes it, if any."""
+    fix = _mcp_too_old(exc)
+    if fix:
+        return PageIndexAPIError(fix)
     message = f"The model backend failed: {exc}"
-    if "Function tools with reasoning_effort" in str(exc):
+    if lane == "chat" and "Function tools with reasoning_effort" in str(exc):
         message += (
-            " — this model runs tools on the Responses lane: upgrade "
-            "litellm (newer releases route it there automatically)"
-        )
-        message += (
-            ", pass reasoning_effort (older litellm routes explicit "
-            "efforts), or use chat(protocol='responses') instead."
-            if lane == "chat"
-            else "."
-        )
+            " — this model runs tools on the Responses lane, where LiteLLM "
+            "sends it from a custom base URL only with reasoning_effort "
+            "set: pass reasoning_effort, or use chat(protocol='responses') "
+            "instead.")
     if (getattr(client, "api_key", None)
             and (getattr(exc, "status_code", None) == 401
                  or "api key" in str(exc).lower().replace("_", " "))):
@@ -556,7 +1006,9 @@ def _record_response_status(agent, recorded: dict) -> None:
     final turn truncated at the output cap would otherwise report as a clean
     completion. A response cut short ends the run there, as from 0.22 and on
     the stream: before 0.22 it ran the cut turn's half-written tool calls.
-    No-op for backends without an OpenAI responses resource
+    From 0.24 openai-agents raises on such a response itself
+    (response_terminal_failure_error): this raise goes once the floor gets
+    there. No-op for backends without an OpenAI responses resource
     (the streaming path records from lifecycle events instead)."""
     responses = getattr(getattr(getattr(agent, "model", None), "_client", None),
                         "responses", None)
@@ -599,13 +1051,28 @@ def _cut_text(output) -> list:
                 and after.get("type") == "message")]
 
 
+def _drop_repeated_thinking(chunk, streamed: list) -> None:
+    """Blank a closing thinking block's text that repeats what streamed:
+    LiteLLM's Anthropic stream sends the whole text again beside the
+    signature. A test fails once it stops; this goes then."""
+    choices = getattr(chunk, "choices", None)
+    delta = getattr(choices[0], "delta", None) if choices else None
+    for block in getattr(delta, "thinking_blocks", None) or ():
+        if not isinstance(block, dict) or block.get("type") != "thinking":
+            continue
+        text = block.get("thinking") or ""
+        if block.get("signature"):
+            if text and text == "".join(streamed):
+                block["thinking"] = ""
+            streamed.clear()
+        elif text:
+            streamed.append(text)
+
+
 def _record_chat_finish(agent, recorded: dict) -> None:
-    """Capture each turn's native finish_reason from the raw LiteLLM
-    response: openai-agents' ModelResponse drops it, so a truncated or
-    content-filtered final turn would otherwise report as a clean "stop".
-    The chat protocol has no transport client to hook (cf.
-    _record_response_status), so this wraps the model's response fetch;
-    no-op if that private seam moves."""
+    """Record each turn's finish_reason, which openai-agents' ModelResponse
+    drops (0.24 too), so a truncated or filtered final turn would report
+    "stop". A test fails once ModelResponse carries it; this goes then."""
     model = getattr(agent, "model", None)
     fetch = getattr(model, "_fetch_response", None)
     if fetch is None:
@@ -780,9 +1247,11 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
                 folder_id=None,
-                ) -> "tuple[Any, list, str]":
+                ) -> "tuple[Any, list, str, Optional[_Replies]]":
     """The chat lane's shared prologue: validated history, doc targeting,
-    and the configured agent. Returns (agent, input items, model name)."""
+    and the configured agent. Returns (agent, input items, model name,
+    the run's replies)."""
+    messages = list(messages)
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
@@ -798,31 +1267,46 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
                           extra_headers=extra_headers)
-    name = "_convert_gemini_extra_content_to_provider_specific_fields"
-    convert = getattr(agent.model, name, None)
-    if convert is not None:
-        def every_turn(converted):
-            # with no user message, LitellmModel converts every turn's calls
-            convert([m for m in converted if m.get("role") != "user"])
-            return converted
-        setattr(agent.model, name, every_turn)
-    return agent, items, model_name
+    return agent, items, model_name, _keep_reply_fields(agent, messages)
 
 
-def _chat_transcript(agent, new_items) -> list:
-    """The run's new items as Chat Completions messages, converted as
-    LitellmModel converts each request (ahead of its per-provider fixups),
-    so a caller who appends them resends what the model saw."""
+def _as_sent(agent, items) -> list:
+    """Items as Chat Completions messages, converted as LitellmModel
+    converts each request."""
     from agents.models.chatcmpl_converter import Converter
     model, reasoning = agent.model, agent.model_settings.reasoning
     return Converter.items_to_messages(
-        new_items, model=getattr(model, "model", None),
+        items, model=getattr(model, "model", None),
         base_url=getattr(model, "base_url", None),
         preserve_thinking_blocks=(reasoning is not None
                                   and reasoning.effort is not None),
         preserve_tool_output_all_content=True,
         should_replay_reasoning_content=getattr(
             model, "should_replay_reasoning_content", None))
+
+
+def _chat_transcript(agent, new_items, replies=None) -> list:
+    """The run's new items as Chat Completions messages as the model saw
+    them, so a caller who appends them resends that: its last request past
+    the first one's length, then the final reply, if it has a message,
+    filled the same way, each assistant message naming its model. Calls
+    the SDK folded into the history's last message (a refusal) come first,
+    as sent, without that message's own refusal and text. With a request
+    the hook didn't see (a test double, or litellm.callbacks replaced
+    mid-call), converted as LitellmModel converts each request."""
+    converted = _as_sent(agent, new_items)
+    if replies is None or replies.first is None or replies.missed:
+        return converted
+    final = [m for m in converted[-1:] if m.get("role") == "assistant"]
+    host = replies.last[replies.first - 1]
+    folded = []
+    if host.get("tool_calls"):
+        folded = [{**{k: v for k, v in host.items() if k != "refusal"},
+                   "content": None}]
+    messages = (folded + replies.last[replies.first:] + replies.fill(
+        replies.last + final)[len(replies.last):])
+    return [{**m, _WRITER: replies.model} if m.get("role") == "assistant"
+            else m for m in messages]
 
 
 def _output_text(output) -> str:
@@ -945,7 +1429,7 @@ async def _chat_events_agen(client, agent, items, run_kwargs):
                                  client),
             _openai_usage(recorder.responses)) from exc
     finally:
-        if not completed and hasattr(streamed, "cancel"):
+        if not completed:
             streamed.cancel()  # abandoned/failed: stop the agent task
         await _aclose_backend(agent)
     if recorded.get("finish_reason") in _CUT_SHORT:
@@ -1125,12 +1609,11 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
 
         return ChatStream(text=lambda: _weave(claude_events(), options),
                           events=claude_events)
-    _require_openai_agents("chat")
-    agent, items, _ = _chat_agent(client, messages, doc_id, model,
-                                  reasoning_effort=reasoning_effort,
-                                  extra_body=extra_body, backend=backend,
-                                  extra_headers=extra_headers,
-                                  folder_id=folder_id)
+    agent, items, _, _ = _chat_agent(client, messages, doc_id, model,
+                                     reasoning_effort=reasoning_effort,
+                                     extra_body=extra_body, backend=backend,
+                                     extra_headers=extra_headers,
+                                     folder_id=folder_id)
     run_kwargs = _run_kwargs(max_turns)
 
     def events():
@@ -1176,8 +1659,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                                backend=backend)
         return _claude_code_completions(run, model or client.chat_model,
                                         stream, stream_metadata)
-    _require_openai_agents("chat")
-    agent, items, model_name = _chat_agent(
+    agent, items, model_name, replies = _chat_agent(
         client, messages, doc_id, model, temperature=temperature,
         top_p=top_p, reasoning_effort=reasoning_effort,
         extra_body=extra_body, max_tokens=max_tokens, backend=backend,
@@ -1213,7 +1695,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             }],
             "usage": _openai_usage(result.raw_responses),
             "messages": _chat_transcript(
-                agent, result.to_input_list()[len(items):]),
+                agent, result.to_input_list()[len(items):], replies),
         })
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -1248,7 +1730,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                 _translate_run_error(exc, max_turns, "chat", client),
                 _openai_usage(recorder.responses)) from exc
         finally:
-            if not completed and hasattr(streamed, "cancel"):
+            if not completed:
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
         yield chunk({}, finish=recorded.get("finish_reason") or "stop")
@@ -1257,7 +1739,7 @@ def run_chat_completions(client, messages, stream: bool = False,
             "created": created, "model": reported_model, "choices": [],
             "usage": _openai_usage(streamed.raw_responses),
             "messages": _chat_transcript(
-                agent, streamed.to_input_list()[len(items):]),
+                agent, streamed.to_input_list()[len(items):], replies),
         })
 
     if stream_metadata:
@@ -1316,7 +1798,6 @@ def run_responses(client, input, model: Optional[str] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
                   ) -> Union[ChatObject, Iterator[ChatObject]]:
-    _require_openai_agents("chat(protocol='responses')")
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
         items = [{"role": "user", "content": input}]
@@ -1396,7 +1877,7 @@ def run_responses(client, input, model: Optional[str] = None,
             if (run_data is not None
                     and recorded.get("status") in ("failed", "incomplete")):
                 # the run ended on a response cut short, before openai-agents'
-                # hooks or items saw it
+                # hooks or items saw it; this goes once they see it
                 cut = recorded["response"]
                 transcript = [item.to_input_item()
                               for item in run_data.new_items]
@@ -1475,6 +1956,7 @@ def run_responses(client, input, model: Optional[str] = None,
                             if data["type"] != "response.completed" and cut:
                                 # openai-agents raises on a call cut short
                                 # before its hooks see it; it was billed.
+                                # This goes once its hooks see it.
                                 recorder.responses.append(
                                     SimpleNamespace(usage=cut))
                         continue
@@ -1500,7 +1982,7 @@ def run_responses(client, input, model: Optional[str] = None,
                 _translate_run_error(exc, max_turns, "responses", client),
                 _responses_usage(recorder.responses)) from exc
         finally:
-            if not completed and hasattr(streamed, "cancel"):
+            if not completed:
                 streamed.cancel()  # abandoned/failed: stop the agent task
             await _aclose_backend(agent)
         transcript = streamed.to_input_list()[len(items):] + dropped
@@ -1536,24 +2018,24 @@ class _MessagesEvent(ChatObject):
 
 def _require_anthropic() -> None:
     try:
-        import anthropic  # noqa: F401
+        import anthropic
     except ImportError as exc:
         raise PageIndexAPIError(
             "chat(protocol='messages') drives your own chat model and "
             "requires the Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
-    try:
-        from anthropic import beta_tool  # noqa: F401
-        from anthropic.lib.tools import ToolError  # noqa: F401
-    except ImportError as exc:
+    if tuple(int(n) for n in anthropic.__version__.split(".")[:2]) < (0, 122):
         raise PageIndexAPIError(
-            "chat(protocol='messages') requires the anthropic SDK tool "
-            "runner (with ToolError) — pip install -U anthropic."
-        ) from exc
+            "chat(protocol='messages') requires anthropic 0.122.0 or newer, "
+            f"found {anthropic.__version__} — pip install -U anthropic.")
 
 
 _ANTHROPIC_CLIENTS: dict = {}  # (route, backend) key -> client, kept open
+if hasattr(os, "register_at_fork"):
+    # on its parent's pooled connections a forked child reads replies
+    # meant for another process
+    os.register_at_fork(after_in_child=_ANTHROPIC_CLIENTS.clear)
 
 # The transport class per routing prefix — the anthropic SDK ships one
 # client per channel, so a row here is what makes a route reachable.
@@ -1579,16 +2061,8 @@ def _anthropic_client(backend, route):
         key = None
     if key in _ANTHROPIC_CLIENTS:
         return _ANTHROPIC_CLIENTS[key]
-    cls = getattr(anthropic, _ROUTE_CLIENTS[route], None)
-    if cls is None:
-        # A build predating this route's client class: same contract as
-        # the tool-runner probe, one step earlier.
-        raise PageIndexAPIError(
-            f"messages on this route needs the anthropic SDK's "
-            f"{_ROUTE_CLIENTS[route]} client, which this anthropic build "
-            "lacks — pip install -U anthropic.")
     try:
-        client = cls(**kwargs)
+        client = getattr(anthropic, _ROUTE_CLIENTS[route])(**kwargs)
     except (anthropic.AnthropicError, ValueError, TypeError) as exc:
         # Vertex/Foundry refuse a missing region or credential right at
         # construction, each with its own type; same contract for all.
@@ -1755,8 +2229,10 @@ def run_messages(client, messages, model: str, route: str,
     # Top-level cache_control: the server re-marks the newest block each
     # turn, so the loop re-reads the growing conversation from cache.
     # Counts toward the 4-breakpoint limit (live-verified 400 past it).
-    # Bedrock's InvokeModel integration rejects the field for Opus 4.6 and
-    # earlier: there each turn's tool results carry the breakpoint instead.
+    # Bedrock's InvokeModel rejects the field for Sonnet 4.5 and Opus 4.5
+    # (live-verified), so every Bedrock request, whatever the model, puts
+    # the breakpoint on each turn's tool results instead. The field can cover
+    # Bedrock once those models are gone.
     marks_fit = _cache_marks(system_blocks, prepared) < 4
     cached: dict[str, Any] = (
         {"cache_control": {"type": "ephemeral"}}
@@ -1775,13 +2251,6 @@ def run_messages(client, messages, model: str, route: str,
                       and backend_client
                       not in list(_ANTHROPIC_CLIENTS.values()))
     try:
-        if not hasattr(backend_client.beta.messages, "tool_runner"):
-            # An anthropic build predating this route's tool runner passes
-            # _require_anthropic (its probes are older): name the gap here.
-            raise PageIndexAPIError(
-                "messages on this route needs the anthropic SDK's tool "
-                "runner, which this anthropic build lacks — "
-                "pip install -U anthropic.")
         if max_tokens is None:
             max_tokens = _default_max_tokens(
                 (extra_body or {}).get("thinking", thinking))
@@ -1808,8 +2277,8 @@ def run_messages(client, messages, model: str, route: str,
         if owns_transport:
             backend_client.close()
         raise
-    # Older Anthropic versions also execute tools on max_tokens turns, newer
-    # ones skip them: check right after the runner's own tool step.
+    # anthropic before 1.1 also executes tools on max_tokens turns, 1.1 and
+    # later skip them: check right after the runner's own tool step.
     generate_tool_response = runner.generate_tool_call_response
     moved: list = []  # the block holding the bedrock breakpoint
 
@@ -1889,7 +2358,7 @@ def run_messages(client, messages, model: str, route: str,
 
     def envelope(turns):
         final = turns[-1]
-        message = _Message(final.model_dump(mode="json", warnings=False))
+        message = _Message(final.model_dump(mode="json"))
         message["content"] = [_dump_block(item) for item in final.content]
         message["usage"] = run_usage(turns)
         message["messages"] = transcript(turns)
@@ -1901,10 +2370,7 @@ def run_messages(client, messages, model: str, route: str,
             try:
                 for turn_stream in runner:
                     for event in turn_stream:
-                        # the SDK's streamed Parsed* subclasses trip
-                        # pydantic's union check
-                        yield _MessagesEvent(event.model_dump(
-                            mode="json", warnings=False))
+                        yield _MessagesEvent(event.model_dump(mode="json"))
                     message = turn_stream.get_final_message()
                     if message.stop_reason is None:
                         raise PageIndexAPIError(
@@ -1968,6 +2434,10 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         raise PageIndexAPIError(
             f"{model_name} runs the Claude Code CLI, which takes no "
             f"{', '.join(given)} — drop them.")
+    if reasoning_effort == "none":
+        raise PageIndexAPIError(
+            f"{model_name} takes no reasoning_effort='none'; pass 'low' "
+            "or leave it unset.")
     from contextlib import aclosing
     from .integrations.claude_agent_sdk import (
         claude_code_messages, claude_code_options, tool_server)

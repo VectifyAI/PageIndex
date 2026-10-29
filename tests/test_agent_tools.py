@@ -600,12 +600,6 @@ def test_unknown_tool_envelope_uses_standard_formatting(client):
 
 # ── framework adapters ──
 
-def test_as_openai_tools_missing_dependency(client, monkeypatch):
-    monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="openai-agents"):
-        client.as_openai_tools()
-
-
 def test_as_openai_tools_local_in_process(client):
     pytest.importorskip("agents")
     tools = client.as_openai_tools()
@@ -853,6 +847,25 @@ def test_as_claude_mcp_cloud_needs_an_sdk_that_serves_the_relay(monkeypatch):
     assert cloud.as_claude_mcp()["type"] == "sdk"
 
 
+def test_as_claude_mcp_local_needs_an_sdk_that_keeps_results_whole(
+        client, monkeypatch):
+    """Locally, an SDK below the claude extra's floor is refused."""
+    pytest.importorskip("claude_agent_sdk")
+    import importlib.metadata
+
+    def version(name):
+        if installed is None:
+            raise importlib.metadata.PackageNotFoundError(name)
+        return installed
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    for installed in ("0.2.165", None):
+        with pytest.raises(PageIndexAPIError, match="claude-agent-sdk 0.2.166"):
+            client.as_claude_mcp()
+    installed = "0.2.166"
+    assert client.as_claude_mcp()["type"] == "sdk"
+
+
 def test_as_claude_mcp_local_missing_dependency(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     with pytest.raises(PageIndexAPIError, match="claude-agent-sdk"):
@@ -1085,18 +1098,14 @@ def test_non_string_doc_name_stays_not_found(client, store_path):
     assert is_error and payload["errorCode"] == "NOT_FOUND"
 
 
-@pytest.mark.parametrize("repair", ["_repair_litellm_types",
-                                    "_mute_litellm_bridge_usage_warning",
-                                    "_quiet_litellm"])
-def test_openai_agent_config_repairs_litellm_types(tmp_path, monkeypatch,
-                                                   repair):
-    """The BYO path resolves its model through LiteLLM in the caller's
-    process, outside our completion helpers — the LiteLLM repairs must
-    run at config time, and only for LiteLLM-routed models."""
+@pytest.mark.parametrize("mute", ["_mute_litellm_bridge_usage_warning",
+                                  "_quiet_litellm"])
+def test_openai_agent_config_quiets_litellm(tmp_path, monkeypatch, mute):
+    """LiteLLM's noise mutes run at config time, for LiteLLM models only."""
     pytest.importorskip("agents")
     import pageindex.utils
     calls = []
-    monkeypatch.setattr(pageindex.utils, repair,
+    monkeypatch.setattr(pageindex.utils, mute,
                         lambda: calls.append(True))
     client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
                                   chat_model="anthropic/claude-x")
@@ -1193,6 +1202,58 @@ def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
     assert config["thinking"] == {"type": "enabled", "budget_tokens": 10000}
     assert "thinking" not in client.anthropic_runner_config(
         model="claude-sonnet-4-5")
+
+
+def test_mcp_bridge_never_resends_a_tool_call_after_a_tls_error():
+    """A reply a TLS error cut off may come from a tool that already ran
+    (an upload, a delete): the call is not sent again."""
+    from urllib3.exceptions import MaxRetryError, SSLError
+    from pageindex.mcp_bridge import _pooled_session
+    retry = _pooled_session().get_adapter("https://api.pageindex.ai/mcp").max_retries
+    with pytest.raises(MaxRetryError):
+        retry.increment("POST", "/mcp", error=SSLError("bad record mac"))
+
+
+def test_mcp_bridge_opens_its_own_session_in_a_forked_child(monkeypatch):
+    """A forked worker opens its own connections and MCP session: on its
+    parent's pooled sockets it read replies meant for another process, and
+    a stateful server routes replies by JSON-RPC id within a session, which
+    forked workers repeat."""
+    import requests as requests_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    posts, sessions, mounts = [], [], []
+
+    def new_session():
+        index = len(sessions) + 1
+        sessions.append(index)
+
+        def post(url, json, headers, timeout):
+            posts.append((index, json["method"], headers.get("Mcp-Session-Id")))
+            result = {} if json["method"] == "initialize" else {"tools": []}
+            return types.SimpleNamespace(
+                status_code=200, json=lambda: {"jsonrpc": "2.0",
+                                               "id": json.get("id"),
+                                               "result": result},
+                headers={"Content-Type": "application/json",
+                         "Mcp-Session-Id": f"sess-{index}"})
+
+        def mount(prefix, adapter):
+            mounts.append((index, prefix, adapter.max_retries is mcp_bridge._RETRY))
+        return types.SimpleNamespace(post=post, mount=mount)
+
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        Session=new_session, RequestException=requests_mod.RequestException))
+    bridge = mcp_bridge.McpBridge("https://api.pageindex.ai/mcp", {})
+    bridge.list_tools()
+    monkeypatch.setattr("pageindex.mcp_bridge.os.getpid", lambda: -1)
+    bridge.list_tools()
+    assert posts == [
+        (1, "initialize", None), (1, "notifications/initialized", "sess-1"),
+        (1, "tools/list", "sess-1"),
+        (2, "initialize", None), (2, "notifications/initialized", "sess-2"),
+        (2, "tools/list", "sess-2")]
+    assert mounts == [(n, scheme, True) for n in (1, 2)
+                      for scheme in ("https://", "http://")]
 
 
 def test_bridge_invoker_reraises_auth_and_transport_failures():
