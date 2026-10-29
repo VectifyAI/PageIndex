@@ -1351,18 +1351,26 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
             structure, pdf_pages, small_node_tokens=0))
 
 
+@pytest.mark.parametrize("fatal", [True, False], ids=["out-of-retries", "400"])
 @pytest.mark.parametrize("check", ["start", "verify", "fix"])
-def test_standard_checks_stop_on_a_call_out_of_retries(monkeypatch, check):
+def test_standard_checks_stop_on_a_call_out_of_retries(monkeypatch, check, fatal):
     """A standard-mode check whose call ran out of retries stops the run,
     as summaries do: taken as a "no" or skipped, it kept a section on a
-    page no check confirmed."""
+    page no check confirmed. A 400 (a prompt over the context) stays that
+    item's own miss, as there."""
+    import logging
     from pageindex import page_index_classic as classic
 
-    async def exhausted(model, prompt):
-        raise pageindex.utils.LLMRetriesExhausted(
-            "LLM completion failed after 10 attempts: rate limited",
-            status_code=429)
-    monkeypatch.setattr(classic, "llm_acompletion", exhausted)
+    class Refused(Exception):
+        status_code = 400
+
+    async def failing(model, prompt):
+        if fatal:
+            raise pageindex.utils.LLMRetriesExhausted(
+                "LLM completion failed after 10 attempts: rate limited",
+                status_code=429)
+        raise Refused("context_length_exceeded")
+    monkeypatch.setattr(classic, "llm_acompletion", failing)
     pages = [("Alpha starts here", 4), ("Beta starts here", 4)]
     toc = [{"title": "Alpha", "physical_index": 1},
            {"title": "Beta", "physical_index": 2}]
@@ -1372,9 +1380,13 @@ def test_standard_checks_stop_on_a_call_out_of_retries(monkeypatch, check):
         "verify": lambda: classic.verify_toc(pages, toc),
         "fix": lambda: classic.fix_incorrect_toc(
             toc, pages, [{"list_index": 1, "title": "Beta",
-                          "physical_index": 1}]),
+                          "physical_index": 1}],
+            logger=logging.getLogger(__name__)),
     }[check]
-    with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+    if fatal:
+        with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+            asyncio.run(run())
+    else:
         asyncio.run(run())
 
 
@@ -3132,12 +3144,14 @@ def test_cloud_client_sends_through_its_retrying_session(monkeypatch, call, stat
 def test_cloud_client_pools_apart_from_its_forked_children(monkeypatch):
     """A forked worker opens its own connections: on its parent's pooled ones, it would read a reply meant for
     another process, another document's."""
+    from pageindex.retry import SDK_RETRIES
     api = PageIndexClient(api_key="k")._api
     parent = api._http
     assert api._http is parent
     monkeypatch.setattr("pageindex.cloud_api.os.getpid", lambda: -1)
     child = api._http
     assert child is not parent and api._http is child
+    assert child.get_adapter("https://api.pageindex.ai/").max_retries.total == SDK_RETRIES
 
 
 @pytest.mark.parametrize("retry_after, bounds", [

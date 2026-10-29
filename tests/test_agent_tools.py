@@ -1211,13 +1211,13 @@ def test_mcp_bridge_opens_its_own_session_in_a_forked_child(monkeypatch):
     forked workers repeat."""
     import requests as requests_mod
     import pageindex.mcp_bridge as mcp_bridge
-    posts, sessions = [], []
+    posts, sessions, mounts = [], [], []
 
     def new_session():
         index = len(sessions) + 1
         sessions.append(index)
 
-        def post(url, json=None, headers=None, timeout=None):
+        def post(url, json, headers, timeout):
             posts.append((index, json["method"], headers.get("Mcp-Session-Id")))
             result = {} if json["method"] == "initialize" else {"tools": []}
             return types.SimpleNamespace(
@@ -1226,7 +1226,10 @@ def test_mcp_bridge_opens_its_own_session_in_a_forked_child(monkeypatch):
                                                "result": result},
                 headers={"Content-Type": "application/json",
                          "Mcp-Session-Id": f"sess-{index}"})
-        return types.SimpleNamespace(post=post, mount=lambda *a: None)
+
+        def mount(prefix, adapter):
+            mounts.append((index, prefix, adapter.max_retries is mcp_bridge._RETRY))
+        return types.SimpleNamespace(post=post, mount=mount)
 
     monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
         Session=new_session, RequestException=requests_mod.RequestException))
@@ -1239,6 +1242,8 @@ def test_mcp_bridge_opens_its_own_session_in_a_forked_child(monkeypatch):
         (1, "tools/list", "sess-1"),
         (2, "initialize", None), (2, "notifications/initialized", "sess-2"),
         (2, "tools/list", "sess-2")]
+    assert mounts == [(n, scheme, True) for n in (1, 2)
+                      for scheme in ("https://", "http://")]
 
 
 def test_bridge_invoker_reraises_auth_and_transport_failures():
