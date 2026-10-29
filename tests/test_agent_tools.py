@@ -1204,6 +1204,43 @@ def test_anthropic_runner_config_thinking_lifts_max_tokens(client):
         model="claude-sonnet-4-5")
 
 
+def test_mcp_bridge_opens_its_own_session_in_a_forked_child(monkeypatch):
+    """A forked worker opens its own connections and MCP session: on its
+    parent's pooled sockets it read replies meant for another process, and
+    a stateful server routes replies by JSON-RPC id within a session, which
+    forked workers repeat."""
+    import requests as requests_mod
+    import pageindex.mcp_bridge as mcp_bridge
+    posts, sessions = [], []
+
+    def new_session():
+        index = len(sessions) + 1
+        sessions.append(index)
+
+        def post(url, json=None, headers=None, timeout=None):
+            posts.append((index, json["method"], headers.get("Mcp-Session-Id")))
+            result = {} if json["method"] == "initialize" else {"tools": []}
+            return types.SimpleNamespace(
+                status_code=200, json=lambda: {"jsonrpc": "2.0",
+                                               "id": json.get("id"),
+                                               "result": result},
+                headers={"Content-Type": "application/json",
+                         "Mcp-Session-Id": f"sess-{index}"})
+        return types.SimpleNamespace(post=post, mount=lambda *a: None)
+
+    monkeypatch.setattr(mcp_bridge, "requests", types.SimpleNamespace(
+        Session=new_session, RequestException=requests_mod.RequestException))
+    bridge = mcp_bridge.McpBridge("https://api.pageindex.ai/mcp", {})
+    bridge.list_tools()
+    monkeypatch.setattr("pageindex.mcp_bridge.os.getpid", lambda: -1)
+    bridge.list_tools()
+    assert posts == [
+        (1, "initialize", None), (1, "notifications/initialized", "sess-1"),
+        (1, "tools/list", "sess-1"),
+        (2, "initialize", None), (2, "notifications/initialized", "sess-2"),
+        (2, "tools/list", "sess-2")]
+
+
 def test_bridge_invoker_reraises_auth_and_transport_failures():
     """Auth failures and what survives the bridge's own retries (429/5xx)
     escape to the caller; a status-less JSON-RPC failure (the model's own

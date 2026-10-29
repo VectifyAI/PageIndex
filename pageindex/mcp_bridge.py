@@ -15,6 +15,7 @@ retries; a 400 is an ordinary bad request and is never replayed.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from typing import Any, Optional
 
@@ -51,13 +52,18 @@ def _parse_sse(text: str) -> list[dict]:
     return messages
 
 
+def _pooled_session() -> requests.Session:
+    session = requests.Session()  # agent tool calls come in bursts
+    for scheme in ("https://", "http://"):
+        session.mount(scheme, HTTPAdapter(max_retries=_RETRY))
+    return session
+
+
 class McpBridge:
     def __init__(self, url: str, headers: dict[str, str]):
         self._url = url
         self._auth_headers = dict(headers)
-        self._session = requests.Session()  # agent tool calls come in bursts
-        for scheme in ("https://", "http://"):
-            self._session.mount(scheme, HTTPAdapter(max_retries=_RETRY))
+        self._session, self._pid = _pooled_session(), os.getpid()
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
@@ -156,6 +162,13 @@ class McpBridge:
 
     def _ensure_initialized(self) -> None:
         with self._lock:
+            if self._pid != os.getpid():
+                # a forked process opens its own connections and MCP session:
+                # on its parent's, it read replies meant for another process,
+                # and a stateful server routes them by JSON-RPC id, which
+                # forked processes repeat
+                self._session, self._pid = _pooled_session(), os.getpid()
+                self._initialized = False
             if self._initialized:
                 return
             self._next_id += 1
