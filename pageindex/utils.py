@@ -9,6 +9,7 @@ import PyPDF2
 import copy
 import asyncio
 import heapq
+import sys
 import threading
 from contextlib import asynccontextmanager, contextmanager
 from io import BytesIO
@@ -153,8 +154,18 @@ def _forget_published():
     _published = None
 
 
+def _drop_litellm_clients():
+    # on its parent's pooled connections a forked child reads replies meant
+    # for another process; created lazily, so only one LiteLLM already made
+    litellm = sys.modules.get("litellm")
+    cache = litellm and vars(litellm).get("in_memory_llm_clients_cache")
+    if cache is not None:
+        cache.flush_cache()
+
+
 if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_forget_published)
+    os.register_at_fork(after_in_child=_drop_litellm_clients)
 
 
 async def learn_published_models() -> bool:

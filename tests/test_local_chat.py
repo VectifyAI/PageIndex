@@ -1207,6 +1207,22 @@ def test_a_forked_child_drops_its_parents_pending_download(monkeypatch):
     assert exit_code_in_forked_child(lambda: utils._published is None) == 0
 
 
+def test_a_forked_child_drops_litellms_pooled_clients():
+    """On its parent's pooled connections a forked child reads replies
+    meant for another process: LiteLLM's client cache, under the name the
+    fork hook reads, starts empty in the child and stays in the parent."""
+    litellm = pytest.importorskip("litellm")
+    from conftest import exit_code_in_forked_child
+    import pageindex.utils  # noqa: F401  registers the hook
+    cache, key = litellm.in_memory_llm_clients_cache, "pageindex-test-client"
+    cache.set_cache(key, object())
+    try:
+        assert exit_code_in_forked_child(lambda: cache.get_cache(key) is None) == 0
+        assert cache.get_cache(key) is not None
+    finally:
+        cache.delete_cache(key)
+
+
 @needs_agents
 @pytest.mark.parametrize("settings", [{}, {"stream": True}])
 def test_unpackaged_model_goes_again_with_the_published_map(
