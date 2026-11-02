@@ -262,30 +262,18 @@ def parse_charlevel_meta(doc_handle: Union[str, Path, BytesIO]) -> tuple[list[li
             if any(_type3_sized(char) for char in raw_chars):
                 held[page_idx] = page
                 continue
-            try:
-                out[page_idx] = _page_spans(_page_pass2(raw_chars, page_vb, {}))
-            finally:
-                page.close()
+            out[page_idx] = _page_spans(_page_pass2(raw_chars, page_vb, {}))
+            page.close()
         size_by_font = _type3_size_by_font(type3_ext)
         for page_idx in held:
             page, raw_chars, page_vb, _page_rot = _page_pass1(
                 pdf, pdf_doc, page_idx, {}, font_map_cache)
-            try:
-                out[page_idx] = _page_spans(_page_pass2(raw_chars, page_vb, size_by_font))
-            finally:
-                page.close()
+            out[page_idx] = _page_spans(_page_pass2(raw_chars, page_vb, size_by_font))
+            page.close()
     finally:
-        for page_handle in held.values():
-            try:
-                page_handle.close()
-            except Exception:
-                pass
-        if pdf_doc is not None and pdf_doc is not doc_handle:
-            try:
-                pdf_doc.close()
-            except Exception:
-                pass
-        pdf.close()
+        if pdf_doc is not None:
+            pdf_doc.close()  # swallows its own errors
+        pdf.close()  # also closes every page still open: the held ones, or one an error left
     # Per-page viewport metadata (text extraction normalized page view = cropbox clamped to the
     # mediabox, via _page_view_rect, + /Rotate) parallel to out, so heading
     # coordinates can apply span merger viewport-coordinate transform.
