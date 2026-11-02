@@ -384,7 +384,7 @@ def test_optimize_wins_over_deprecated_optimize_expand(tmp_path, monkeypatch):
 
     monkeypatch.setattr(flash_api, "_optimize", fake_optimize)
     monkeypatch.setattr(flash_api, "extract_toc",
-                        lambda pdf, use_embedded_toc=True: {
+                        lambda pdf, **kw: {
                             "structure": [{"title": "T", "start_index": 1,
                                            "end_index": 1, "nodes": []}],
                             "page_texts": ["body"]})
@@ -504,7 +504,7 @@ def test_optimize_full_skips_expand_without_page_texts(tmp_path, monkeypatch):
 
     monkeypatch.setattr(flash_api, "_optimize", fake_optimize)
     monkeypatch.setattr(flash_api, "extract_toc",
-                        lambda pdf, use_embedded_toc=True: {
+                        lambda pdf, **kw: {
                             "structure": [{"title": "T", "start_index": 1,
                                            "end_index": 1, "nodes": []}]})
     pdf = tmp_path / "doc.pdf"
@@ -529,7 +529,7 @@ def test_optimize_full_skips_expand_on_textless_pages(tmp_path, monkeypatch):
 
     monkeypatch.setattr(flash_api, "_optimize", fake_optimize)
     monkeypatch.setattr(flash_api, "extract_toc",
-                        lambda pdf, use_embedded_toc=True: {
+                        lambda pdf, **kw: {
                             "structure": [{"title": "T", "start_index": 1,
                                            "end_index": 2, "nodes": []}],
                             "page_texts": ["", ""]})
@@ -548,7 +548,7 @@ def test_optimize_expand_warning_names_the_behavior_change(tmp_path,
     from pageindex.flash import api as flash_api
 
     monkeypatch.setattr(flash_api, "extract_toc",
-                        lambda pdf, use_embedded_toc=True: {"structure": []})
+                        lambda pdf, **kw: {"structure": []})
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(build_pdf(["x"]))
     with pytest.warns(DeprecationWarning, match="now runs"):
@@ -1374,3 +1374,15 @@ def test_sequential_parse_defers_only_type3_sized_pages(tmp_path, monkeypatch):
     assert calls == [0, 1, 2, 3, 1, 3]  # only the Type-3 pages are extracted twice
     assert meta == want_meta
     assert _fields(got) == _fields(want)
+
+
+def test_page_index_flash_passes_workers_to_the_parser(monkeypatch):
+    from pageindex.flash import api as flash_api
+
+    seen = {}
+    monkeypatch.setattr(flash_api, "extract_toc",
+                        lambda pdf, **kw: seen.update(kw) or {"structure": []})
+    flash_api.page_index_flash(str(PDF), summary=False, optimize=False, workers=1)
+    assert seen["workers"] == 1
+    with pytest.raises(ValueError, match="workers"):
+        flash_api.page_index_flash(str(PDF), summary=False, optimize=False, workers=0)
