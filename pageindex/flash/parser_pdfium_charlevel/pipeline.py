@@ -73,12 +73,14 @@ def _page_pass1(pdf, pdf_doc, page_idx: int, type3_ext: dict, font_map_cache: di
     show_tzs: list[float] = []
     vert_names: set[bytes] = set()
     if pdf_doc is not None and page_idx < pdf_doc.page_count:
+        page_tokens = None
         try:
             # show-op flush ids (q/Q flush scope) are no longer used -- the merge-id
             # grouping was removed; only show_fonts (per-op font resname)
-            # feeds vertical tagging.
-            show_flush_ids, show_fonts, show_text_units, horizontal_scales, xobject_paints = _tokenize_show_operators(
-                pdf_doc[page_idx].read_contents())
+            # feeds vertical tagging. The same tokens seed _page_show_codes'
+            # walk, so the stream is parsed once.
+            page_tokens = _tokenize_show_operators(pdf_doc[page_idx].read_contents())
+            show_fonts = page_tokens[1]
         except Exception:
             show_fonts = []
         vert_names = _page_vertical_resource_names(pdf_doc, page_idx)
@@ -88,7 +90,7 @@ def _page_pass1(pdf, pdf_doc, page_idx: int, type3_ext: dict, font_map_cache: di
         # the page's own stream alone under-counts every form page and the
         # ordinal gate below would then drop the tag for the whole page.
         try:
-            show_codes = _page_show_codes(pdf_doc, page_idx)
+            show_codes = _page_show_codes(pdf_doc, page_idx, page_tokens)
             if show_codes:
                 show_tzs = [horizontal_scale for _fx, _s, horizontal_scale in show_codes]
                 # Patch per-char unicode to span merger glyph Unicode where
