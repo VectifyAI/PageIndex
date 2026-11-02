@@ -37,6 +37,7 @@ from .char_extract import (
     _accumulate_type3_extents,
     _type3_size_by_font,
     _apply_type3_sizes,
+    _type3_sized,
     _finalize_chars,
     _inherited_box,
     _page_view_rect,
@@ -53,8 +54,8 @@ def _page_pass1(pdf, pdf_doc, page_idx: int, type3_ext: dict, font_map_cache: di
     """Pass-1 body for ONE page: extract raw chars, tag objects, accumulate
     Type-3 extents into ``type3_ext``. Returns ``(page, raw_chars, page_vb,
     page_rot)``; the PAGE is returned still open — the caller owns closing it
-    (the sequential driver must keep every page open until pass 2's Type-3
-    size lookups are done; see keep_pages in ``parse_charlevel_meta``)."""
+    (the sequential driver holds pages with Type-3 sized glyphs open until
+    their pass 2 is done; see ``parse_charlevel_meta``)."""
     page = pdf[page_idx]
     text_page = page.get_textpage()
     raw_chars, objects = _extract_raw_chars(page, text_page.raw)
@@ -231,62 +232,62 @@ def parse_charlevel_meta(doc_handle: Union[str, Path, BytesIO]) -> tuple[list[li
     except Exception:
         pdf_doc = None
 
-    # Pass 1: extract raw chars for every page (including each glyph's raw
-    # advance) and accumulate per-font identity-matrix Type-3 glyph-bbox
-    # extents document-wide, so each Type-3 font is sized once over every
-    # glyph it renders anywhere (coverage-independent), matching span merger
-    # synthesizing font.bbox once from the CharProcs. Font handles are only
-    # stable per document while their pages stay open (see keep_pages below).
-    per_page: list[list[dict]] = []
-    page_view_boxes: list = []   # parallel to per_page: text extraction page view box per page
-    page_rotations: list = []   # parallel: PDFium page /Rotate in degrees per page
-    type3_ext: dict = {}
-    font_map_cache: dict = {}
-    # Hold every page open until pass 2's Type-3 size lookups are done.
+    # Pages are parsed one at a time and closed at once, so memory holds one
+    # page's chars, not the whole document's. The one cross-page input is the
+    # document-wide identity-matrix Type-3 extent union (``type3_ext``): each
+    # Type-3 font is sized once over every glyph it renders anywhere
+    # (coverage-independent), matching span merger synthesizing font.bbox once
+    # from the CharProcs. A page carrying chars ``_apply_type3_sizes`` may
+    # resize is therefore held open with its chars dropped, and re-extracted
+    # once the union is complete. Held pages stay open to the end:
     # type3_ext / size_by_font key on the raw FPDF_FONT pointer VALUE, and
     # PDFium frees a font once the last page using it closes -- a later
-    # page's (different) font can then be allocated at the same address,
-    # silently merging two fonts' extent bins. Which addresses get reused
-    # depends on the process's prior malloc state, so the output could vary
-    # with whatever ran earlier in the process. Keeping the pages alive makes
-    # the handle a true per-document
-    # font identity (PDFium's document-level font cache returns one handle
-    # per font redefinition).
-    keep_pages = []
-    for page_idx in range(len(pdf)):
-        page, raw_chars, page_vb, page_rot = _page_pass1(
-            pdf, pdf_doc, page_idx, type3_ext, font_map_cache)
-        keep_pages.append(page)
-        per_page.append(raw_chars)
-        page_view_boxes.append(page_vb)
-        page_rotations.append(page_rot)
-    if pdf_doc is not None and pdf_doc is not doc_handle:
-        try:
-            pdf_doc.close()
-        except Exception:
-            pass
-    size_by_font = _type3_size_by_font(type3_ext)
-
-    # Pass 2: apply the document-wide Type-3 sizes, finalize glyph widths,
-    # then run text extraction text merger.
-    raw_pages: list[list[dict]] = []
-    for page_view_index, raw_chars in enumerate(per_page):
-        raw_pages.append(_page_pass2(raw_chars, page_view_boxes[page_view_index], size_by_font))
-    for page_handle in keep_pages:
-        try:
-            page_handle.close()
-        except Exception:
-            pass
-    keep_pages.clear()
-
-    out: list[list[Span]] = []
-    for raw in raw_pages:
-        out.append(_page_spans(raw))
-    pdf.close()
+    # page's (different) font could then be allocated at the same address,
+    # silently merging two fonts' extent bins. Pages closed early carry no
+    # such chars, so their fonts never key the union; font_map_cache keys on
+    # xref, not on font pointers.
+    n_pages = len(pdf)
+    out: list = [None] * n_pages
+    page_meta: list = [None] * n_pages  # (text extraction page view box, PDFium /Rotate)
+    type3_ext: dict = {}
+    font_map_cache: dict = {}
+    held: dict = {}
+    try:
+        for page_idx in range(n_pages):
+            page, raw_chars, page_vb, page_rot = _page_pass1(
+                pdf, pdf_doc, page_idx, type3_ext, font_map_cache)
+            page_meta[page_idx] = (page_vb, page_rot)
+            if any(_type3_sized(char) for char in raw_chars):
+                held[page_idx] = page
+                continue
+            try:
+                out[page_idx] = _page_spans(_page_pass2(raw_chars, page_vb, {}))
+            finally:
+                page.close()
+        size_by_font = _type3_size_by_font(type3_ext)
+        for page_idx in held:
+            page, raw_chars, page_vb, _page_rot = _page_pass1(
+                pdf, pdf_doc, page_idx, {}, font_map_cache)
+            try:
+                out[page_idx] = _page_spans(_page_pass2(raw_chars, page_vb, size_by_font))
+            finally:
+                page.close()
+    finally:
+        for page_handle in held.values():
+            try:
+                page_handle.close()
+            except Exception:
+                pass
+        if pdf_doc is not None and pdf_doc is not doc_handle:
+            try:
+                pdf_doc.close()
+            except Exception:
+                pass
+        pdf.close()
     # Per-page viewport metadata (text extraction normalized page view = cropbox clamped to the
     # mediabox, via _page_view_rect, + /Rotate) parallel to out, so heading
     # coordinates can apply span merger viewport-coordinate transform.
-    return out, list(zip(page_view_boxes, page_rotations))
+    return out, page_meta
 
 
 def parse_charlevel(doc_handle: Union[str, Path, BytesIO]) -> list[list[Span]]:
