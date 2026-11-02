@@ -137,6 +137,8 @@ def _parse_tounicode_cmap(data: bytes) -> dict[int, str]:
         elif candidate_item in b"[]":
             tokens.append(("delim", chr(candidate_item)))
             index_value += 1
+        elif candidate_item in b"){}":  # stray delimiter
+            index_value += 1
         elif candidate_item == 0x2F:  # /name
             state_item = index_value + 1
             while state_item < count_item and data[state_item] not in _PDF_WHITESPACE_BYTES and data[state_item] not in _PDF_DELIMITER_BYTES:

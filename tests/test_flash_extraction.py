@@ -1374,3 +1374,15 @@ def test_sequential_parse_defers_only_type3_sized_pages(tmp_path, monkeypatch):
     assert calls == [0, 1, 2, 3, 1, 3]  # only the Type-3 pages are extracted twice
     assert meta == want_meta
     assert _fields(got) == _fields(want)
+
+
+@pytest.mark.parametrize("stray", [")", "{", "}"])
+def test_tounicode_parser_gets_past_a_stray_delimiter(stray):
+    import subprocess
+    import sys
+
+    code = ("from pageindex.flash.parser_pdfium_charlevel.cmap_parse import _parse_tounicode_cmap\n"
+            f"print(_parse_tounicode_cmap(b'1 beginbfrange <01> <02> [<0041> {stray} <0042>] endbfrange'))")
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         cwd=Path(__file__).parent.parent, timeout=15)
+    assert res.stdout.strip() == b"{1: 'A', 2: 'B'}", res.stderr.decode()
