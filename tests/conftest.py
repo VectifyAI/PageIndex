@@ -3,9 +3,40 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _llm_key(monkeypatch):
-    """Deterministic key presence for every test; missing-key tests delenv."""
+    """Deterministic key presence for every test; missing-key tests delenv.
+    claude-code/ index calls run in processes unless a test opens workflows."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_published_model_map(monkeypatch):
+    """No test downloads LiteLLM's published model map; the tests of that
+    download fake it (test_local_chat._publish)."""
+    from pageindex import utils
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
+
+
+def exit_code_in_forked_child(check, timeout=5):
+    """``check()`` run in a forked child of this process: exit code 0 when it
+    returns true, 1 when false or raising, minus SIGALRM when it hangs."""
+    import os
+    import signal
+    import warnings
+    if not hasattr(os, "fork"):
+        pytest.skip("fork is POSIX only")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # forks a threaded process
+        pid = os.fork()
+    if pid == 0:
+        code = 1
+        try:
+            signal.alarm(timeout)
+            code = 0 if check() else 1
+        finally:
+            os._exit(code)
+    return os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
 
 
 def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):

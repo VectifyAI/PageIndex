@@ -162,7 +162,7 @@ def test_sdk_submodules_reachable_and_dunder_probes_stay_lazy():
     probe = (
         "import sys, pageindex\n"
         "pageindex.agent_tools; pageindex.local_chat\n"
-        "pageindex.mcp_bridge; pageindex.integrations\n"
+        "pageindex.mcp_bridge; pageindex.integrations; pageindex.retry\n"
         "assert not hasattr(pageindex, '__wrapped__')\n"
         "heavy = [m for m in ('pageindex.page_index_classic', "
         "'pageindex.flash', 'pageindex.utils') if m in sys.modules]\n"
@@ -225,3 +225,21 @@ def test_utils_import_keeps_litellm_off_the_network():
     chosen = subprocess.run([sys.executable, "-c", probe], env=env,
                             capture_output=True, text=True, check=True)
     assert chosen.stdout.strip() == "False"
+
+
+def test_a_spawned_worker_inherits_the_no_fetch_default_as_the_sdks():
+    """A worker started from a process that imported utils inherits its
+    no-fetch default and still learns the published map; a value the
+    caller set stays theirs, in the worker too."""
+    probe = ("import subprocess, sys, pageindex.utils as u\n"
+             "child = 'import pageindex.utils as u; print(u._MAP_SET_BY_USER)'\n"
+             "print(u._MAP_SET_BY_USER, subprocess.run([sys.executable, '-c', child],"
+             " capture_output=True, text=True, check=True).stdout)")
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("LITELLM_LOCAL_MODEL_COST_MAP", "_PAGEINDEX_LOCAL_MODEL_MAP")}
+    for chosen, expected in ((None, ["False", "False"]), ("False", ["True", "True"])):
+        out = subprocess.run([sys.executable, "-c", probe],
+                             env={**env, **({"LITELLM_LOCAL_MODEL_COST_MAP": chosen}
+                                            if chosen else {})},
+                             capture_output=True, text=True, check=True)
+        assert out.stdout.split() == expected, chosen
