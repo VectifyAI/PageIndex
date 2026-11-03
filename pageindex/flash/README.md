@@ -62,14 +62,17 @@ Writes the tree to `results/<name>_structure.json`.
 detected sections. `"pages"` means the layout yielded no hierarchy, so every
 page became one node titled `Page N`; past `FLAT_TREE_MAX_NODES` (10) pages that
 flat tree comes back without summaries or optimization, and the local client and
-CLI refuse it. `"unreadable"` means no page carries text and `structure` is
-empty.
+CLI refuse it. `"unreadable"` means no page retains text after layout processing
+and `structure` is empty; the parser may still have extracted text initially.
 
 ### Diagnosing extraction failures
 
 `diagnostics` records what the layout pipeline found, before bookmarks, the
 page fallback, or model optimization. It contains counts and page numbers,
-without document text. `section_opener_count` counts the candidates returned
+without document text. `text_page_count` and `textless_pages` measure non-whitespace
+text in the parser's spans before layout cleanup, including line-number removal.
+They do not measure whether the text is meaningful or whether it survives cleanup.
+`section_opener_count` counts the candidates returned
 by the section-opener detector; it is not a count of every possible heading.
 `assembled_heading_count` includes nested headings before outline validation.
 `layout_status` is one of:
@@ -85,6 +88,8 @@ A bookmark tree can still succeed when the layout outline fails; check
 text without the visual heading signals Flash needs to form a hierarchy.
 Zero extracted text does not prove that a PDF is scanned: its text encoding
 may also be unreadable to the parser.
+If `text_page_count` is positive but `toc_source` is `"unreadable"`, text was
+extracted but none remained after layout processing; inspect layout filtering.
 
 Inspect the result without model calls:
 

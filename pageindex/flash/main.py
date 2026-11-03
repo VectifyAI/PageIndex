@@ -131,6 +131,9 @@ def extract_toc(
     # per-page (view box, /Rotate) comes from the same engine (PDFium) that
     # produced the block coordinates, so the geometry frame is consistent.
     parsed, page_meta = parse_charlevel_meta_parallel(doc_handle, workers=workers)
+    # Snapshot parser output before layout cleanup (for example line-number removal).
+    textless_pages = [i for i, spans in enumerate(parsed, 1)
+                      if not any(span.text.strip() for span in spans)]
 
     # ----- 2) Per-page layout classification ----------------------------------
     # Heading coordinate projection uses the page viewport.
@@ -229,6 +232,8 @@ def extract_toc(
     from .heading_detection import find_section_openers as _find_section_openers
     title_page_idx = title_winner.page.page_index if title_winner is not None else 0
     section_openers = _find_section_openers(doc, title_page_idx)
+    # Outline assembly can append general candidates to this list in place.
+    section_opener_count = len(section_openers)
 
     # ----- 10) Extend labeled sections and claim body blocks ------------
     # Each labeled heading keeps its label type; body blocks are marked with
@@ -307,10 +312,9 @@ def extract_toc(
         "toc_source": "detected",
         "diagnostics": {
             "page_count": len(pages),
-            "text_page_count": sum(bool(text.strip()) for text in page_texts),
-            "textless_pages": [i for i, text in enumerate(page_texts, 1)
-                               if not text.strip()],
-            "section_opener_count": len(section_openers),
+            "text_page_count": len(parsed) - len(textless_pages),
+            "textless_pages": textless_pages,
+            "section_opener_count": section_opener_count,
             "assembled_heading_count": assembled_heading_count,
             "layout_status": layout_status,
         },

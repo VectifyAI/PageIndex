@@ -2,6 +2,7 @@
 import json
 import runpy
 import sys
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,6 +55,47 @@ def test_unreadable_pdf_reports_zero_extracted_pages(tmp_path):
     assert "standard" not in reason
 
 
+def test_text_counts_precede_line_number_cleanup():
+    from pageindex.flash import api
+
+    # These are readable glyphs, but layout cleanup removes the number column.
+    pdf = BytesIO(build_pdf([
+        [(10, 720 - i * 25, 12, str(i + 1)) for i in range(6)],
+        "   ",
+    ]))
+    result = api.page_index_flash(pdf, summary=False, optimize=False)
+    assert result["diagnostics"]["page_count"] == 2
+    assert result["diagnostics"]["text_page_count"] == 1
+    assert result["diagnostics"]["textless_pages"] == [2]
+    # Diagnostics must not make a previously refused document acceptable.
+    assert result["toc_source"] == "unreadable"
+    assert result["structure"] == []
+    reason = api.flash_rejection_reason(result)
+    assert "1/2 pages contain extracted text" in reason
+    assert "no usable page text remained after layout processing" in reason
+    assert "OCR" not in reason and "no text layer" not in reason
+
+
+def test_section_opener_count_precedes_assembly_mutation(monkeypatch):
+    from pageindex.flash import main, heading_detection
+
+    detector = heading_detection.find_section_openers
+    observed = {}
+
+    def observe_detector(*args):
+        nodes = detector(*args)
+        observed["count"] = len(nodes)
+        observed["nodes"] = nodes
+        return nodes
+
+    monkeypatch.setattr(heading_detection, "find_section_openers", observe_detector)
+    pdf = Path(__file__).resolve().parents[1] / "examples/documents/attention-residuals.pdf"
+    result = main.extract_toc(pdf, workers=1, use_embedded_toc=False)
+    # Run the real assembly: this fixture adds general headings to the same list.
+    assert len(observed["nodes"]) > observed["count"] > 0
+    assert result["diagnostics"]["section_opener_count"] == observed["count"]
+
+
 @pytest.mark.parametrize("structured,status", [
     (True, "chapter_validation_failed"),
     (False, "heading_gap_too_large"),
@@ -78,16 +120,25 @@ def test_validation_failure_keeps_pre_rejection_heading_count(
             "gap between headings is too large") in reason
 
 
-def test_bookmarks_can_rescue_layout_without_erasing_diagnostics(plain_pdf, monkeypatch):
-    from pageindex.flash import main, embedded_toc, api
+def test_bookmarks_can_rescue_layout_without_erasing_diagnostics(plain_pdf):
+    from PyPDF2 import PdfReader, PdfWriter
+    from pageindex.flash import api
 
-    monkeypatch.setattr(main, "assemble_outline", lambda *a: [])
-    node = {"title": "Bookmark", "start_index": 1, "end_index": 3}
-    monkeypatch.setattr(embedded_toc, "apply_embedded_toc",
-                        lambda *a, **kw: ([node], "bookmarks"))
-    result = api.page_index_flash(plain_pdf, summary=False, optimize=False)
-    assert result["toc_source"] == "bookmarks"
+    writer = PdfWriter()
+    for page in PdfReader(plain_pdf).pages:
+        writer.add_page(page)
+    chapter = writer.add_outline_item("Chapter One", 0)
+    writer.add_outline_item("Section A", 0, parent=chapter)
+    writer.add_outline_item("Section B", 1, parent=chapter)
+    writer.add_outline_item("Chapter Two", 2)
+    pdf = BytesIO()
+    writer.write(pdf)
+    pdf.seek(0)
+    result = api.page_index_flash(pdf, summary=False, optimize=False)
+    assert result["toc_source"] == "hybrid"
+    assert result["structure"][0]["title"] == "Chapter One"
     assert result["diagnostics"]["layout_status"] == "no_headings"
+    assert result["diagnostics"]["text_page_count"] == 2
     assert api.flash_rejection_reason(result) is None
 
 
