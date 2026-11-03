@@ -1,13 +1,22 @@
 """Local chat surfaces: three protocols over fake backends — no network,
 no LLM keys. Tool execution runs for real against a seeded local store."""
 import asyncio
+import contextlib
+import copy
+import dataclasses
 import inspect
 import json
+import pickle
 import sys
+import threading
 import types
+import warnings
+
+import yaml
 
 import httpx  # via the hard `openai` dependency
 import pytest
+from openai.types.shared import Reasoning
 
 try:  # anthropic >= 1.0 validates http_client against httpx2
     import httpx2 as anthropic_httpx
@@ -16,7 +25,8 @@ except ImportError:  # older anthropic rides classic httpx
 
 import pageindex.local_chat as local_chat
 from pageindex import (PageIndexAPIError, PageIndexClient,
-                       PageIndexCloudClient, PageIndexLocalClient)
+                       PageIndexCloudClient, PageIndexLocalClient,
+                       ChatObject)
 from pageindex.local_chat import CHAT_HEADER
 from pageindex.local_store import DocStore
 
@@ -112,8 +122,10 @@ class FakeModel(Model):
         transport = getattr(getattr(self, "_client", None), "responses", None)
         if transport is not None:
             await transport.create()
-        return ModelResponse(output=self.turns.pop(0), usage=_usage(),
-                             response_id=None)
+        output = self.turns.pop(0)
+        if isinstance(output, BaseException):
+            raise output  # the backend fails this turn
+        return ModelResponse(output=output, usage=_usage(), response_id=None)
 
     async def stream_response(self, system_instructions, input,
                               model_settings, tools, output_schema, handoffs,
@@ -129,6 +141,8 @@ class FakeModel(Model):
                 await aio.sleep(0.01)
         self._record(system_instructions, input)
         output = self.turns.pop(0)
+        if isinstance(output, BaseException):
+            raise output  # the backend fails this turn
         sequence = 0
         for index, piece in enumerate(getattr(self, "thinking_pieces", ())):
             from openai.types.responses import (
@@ -220,18 +234,26 @@ def test_chat_completions_end_to_end(client, store_path, fake_model):
     assert result["choices"][0]["message"] == {"role": "assistant",
                                                "content": "The answer"}
     assert result["choices"][0]["finish_reason"] == "stop"
-    assert result["usage"] == {"prompt_tokens": 20, "completion_tokens": 10,
-                               "total_tokens": 30,
-                               "prompt_tokens_details": {"cached_tokens": 0},
-                               "completion_tokens_details":
-                                   {"reasoning_tokens": 0}}
+    call = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+            "prompt_tokens_details": {"cached_tokens": 0,
+                                      "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 0}}
+    assert result["usage"] == {
+        "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+        "request_usage_entries": [call, call]}
+    from openai.types import CompletionUsage
+    typed = CompletionUsage.model_validate(result["usage"])
+    assert typed.prompt_tokens_details is not None
+    assert typed.prompt_tokens_details.cache_write_tokens == 0
     assert fake_model.state["protocols"][0][0] == "chat"
     # The tool ran for real: turn 2's input carries its output.
     turn2 = json.dumps(fake.inputs[1])
     assert "report.pdf" in turn2 and "completed" in turn2
     # Managed instructions: header + the local agent guidance.
     assert fake.instructions[0].startswith(CHAT_HEADER)
-    assert "READING WORKFLOW" in fake.instructions[0]
+    assert "PERSISTENCE" in fake.instructions[0]
 
 
 @needs_agents
@@ -264,8 +286,18 @@ def test_chat_completions_validation(client, store_path, fake_model):
     with pytest.raises(PageIndexAPIError, match="managed chat endpoint"):
         client.chat_completions([{"role": "user", "content": "x"}],
                                 enable_citations=True)
-    with pytest.raises(PageIndexAPIError, match="chat\\(protocol="):
+    with pytest.raises(PageIndexAPIError, match="tool_call_id"):
         client.chat_completions([{"role": "tool", "content": "x"}])
+    with pytest.raises(PageIndexAPIError, match="needs content"):
+        client.chat_completions([{"role": "assistant", "content": None}])
+    with pytest.raises(PageIndexAPIError, match="needs content"):
+        client.chat_completions([{"role": "assistant", "content": None,
+                                  "reasoning_content": "x"}])
+    with pytest.raises(PageIndexAPIError, match="Invalid assistant message"):
+        client.chat_completions([{"role": "assistant",
+                                  "tool_calls": [{"id": "c"}]}])
+    with pytest.raises(PageIndexAPIError, match="Unsupported role"):
+        client.chat_completions([{"role": "function", "content": "x"}])
     with pytest.raises(PageIndexAPIError, match="must be a string"):
         client.chat_completions([{"role": "user", "content": [1]}])
     with pytest.raises(PageIndexAPIError, match="non-empty"):
@@ -293,12 +325,6 @@ def test_chat_completions_stream_modes(client, store_path, fake_model):
     assert chunks[-1]["choices"] == []
     assert chunks[-1]["usage"]["total_tokens"] == 15
     assert all(c["object"] == "chat.completion.chunk" for c in chunks[:-1])
-
-
-def test_chat_completions_missing_framework(client, monkeypatch):
-    monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
-        client.chat_completions([{"role": "user", "content": "x"}])
 
 
 def test_cloud_guards(monkeypatch):
@@ -352,12 +378,12 @@ def test_anthropic_routed_models_mark_managed_prefix_for_cache(
                  "bedrock/us.anthropic.claude-sonnet-5",
                  "vertex_ai/claude-sonnet-4-5"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        assert agent.model_settings.extra_args == marked
+        assert agent.model_settings.extra_args == {"max_retries": 0, **marked}
     for name in ("gpt-5", "openai/Qwen/x", "litellm/groq/x",
                  "bedrock/meta.llama3-70b-instruct-v1:0",
                  "vertex_ai/gemini-2.5-pro"):
         agent = _openai_agent(client, "chat", name, "sys", None, None)
-        assert agent.model_settings.extra_args is None
+        assert agent.model_settings.extra_args == {"max_retries": 0}
 
 
 @needs_agents
@@ -376,14 +402,9 @@ def test_status_recorder_attaches_to_the_real_responses_model(monkeypatch):
     asyncio.run(backend.close())
 
 
-@needs_agents
-def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
-                                                 monkeypatch):
-    # End-to-end guard for the injection flag: through the real
-    # LitellmModel and litellm's request build, the marker must appear in
-    # the HTTP body — a regression in either vendor hop silently reverts
-    # anthropic-routed calls to full price.
-    pytest.importorskip("litellm")
+def _anthropic_wire(monkeypatch, client, model, messages: str | list = "hi",
+                    **settings):
+    """One chat_completions call via the real stack: (request, envelope)."""
     from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
                                                         HTTPHandler)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -411,14 +432,1529 @@ def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
 
     monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
     monkeypatch.setattr(HTTPHandler, "post", fake_post)
-    result = client.chat_completions(
-        "hi", model="anthropic/claude-3-5-sonnet-20240620")
+    return captured, client.chat_completions(messages, model=model, **settings)
+
+
+@needs_agents
+def test_foundry_claude_gets_no_openai_fields(client, monkeypatch):
+    """LiteLLM sends azure_ai's Claude to Foundry's Anthropic API, which
+    refuses prompt_cache_key like Anthropic's own (400, extra inputs)."""
+    pytest.importorskip("litellm")
+    captured, _ = _anthropic_wire(
+        monkeypatch, client, "azure_ai/claude-sonnet-5-5",
+        backend={"api_base": "https://x.services.ai.azure.com",
+                 "api_key": "k"})
+    assert captured["url"].endswith("/anthropic/v1/messages")
+    assert "prompt_cache_key" not in captured["body"]
+
+
+@needs_agents
+def test_cache_marker_reaches_the_anthropic_wire(client, store_path,
+                                                 monkeypatch):
+    pytest.importorskip("litellm")
+    captured, result = _anthropic_wire(
+        monkeypatch, client, "anthropic/claude-3-5-sonnet-20240620")
     assert "/v1/messages" in captured["url"]
     assert '"cache_control"' in json.dumps(captured["body"])
     # The OpenAI cache-routing hint must not leak here: LiteLLM plants
     # extra_body as a literal field, and Anthropic rejects unknown fields.
     assert "extra_body" not in json.dumps(captured["body"])
     assert result["choices"][0]["message"]["content"] == "ok"
+
+
+@needs_agents
+def test_chat_completions_messages_on_both_paths(client, store_path,
+                                                 fake_model):
+    """The run's new messages ride the envelope and the closing usage
+    chunk alike."""
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+
+    def run():
+        return [[_call_item("get_document", {"doc_name": "report.pdf"})],
+                [_msg_item("The answer")]]
+
+    fake_model(run())
+    envelope = client.chat_completions("q", doc_id=doc_id)
+    fake_model(run())
+    *_, closing = client.chat_completions("q", doc_id=doc_id, stream=True,
+                                          stream_metadata=True)
+    assert closing["messages"] == envelope["messages"]
+    assert [m["role"] for m in envelope["messages"]] == [
+        "assistant", "tool", "assistant"]
+    assert envelope["messages"][0]["tool_calls"][0]["id"] == "call_1"
+    assert envelope["messages"][-1] == {"role": "assistant",
+                                        "content": "The answer"}
+
+
+def _litellm_reply(content=None, tool_calls=None, **extra):
+    import litellm
+    return litellm.ModelResponse(
+        choices=[litellm.Choices(
+            finish_reason="tool_calls" if tool_calls else "stop",
+            message=litellm.Message(content=content, role="assistant",
+                                    tool_calls=tool_calls, **extra))],
+        usage=litellm.Usage(prompt_tokens=10, completion_tokens=5,
+                            total_tokens=15))
+
+
+def _litellm_chunks(*deltas, finish="tool_calls"):
+    """A streamed turn as LiteLLM's parser yields it."""
+    from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
+    return [ModelResponseStream(choices=[StreamingChoices(
+        delta=Delta(**delta), finish_reason=None)]) for delta in deltas] + [
+        ModelResponseStream(choices=[StreamingChoices(
+            delta=Delta(), finish_reason=finish)])]
+
+
+_TWO_CALLS = [{"id": f"call_{n}", "type": "function",
+               "function": {"name": "get_document",
+                            "arguments": '{"doc_name": "report.pdf"}'}}
+              for n in (1, 2)]
+
+
+def _mock_litellm(monkeypatch, replies, marks=None):
+    """Real LiteLLM answering each request with the next reply, after the
+    SDK's own hook has filled it: a ModelResponse, a list of chunks to
+    stream (an exception in it breaks the stream there), or an exception
+    to raise. Returns each request's messages as sent; ``marks`` collects
+    each request's cache injection points."""
+    import litellm
+    import litellm.main
+    from litellm.integrations.custom_logger import CustomLogger
+    sent = []
+    replies = list(replies)
+    streaming = litellm.main.async_mock_completion_streaming_obj
+
+    class Answer(CustomLogger):
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            sent.append(json.loads(json.dumps(kwargs["messages"])))
+            if marks is not None:
+                marks.append(kwargs.get("cache_control_injection_points"))
+            return {**kwargs, "mock_response": replies.pop(0)}
+
+    async def stream(model_response, mock_response, **kwargs):
+        if isinstance(mock_response, list):
+            for chunk in mock_response:
+                if isinstance(chunk, Exception):
+                    raise chunk
+                yield chunk
+            return
+        async for chunk in streaming(model_response,
+                                     mock_response=mock_response, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(litellm.main, "async_mock_completion_streaming_obj",
+                        stream)
+    local_chat._register_fill()
+    # LiteLLM copies litellm.callbacks into these lists on each call
+    for name in ("input_callback", "success_callback", "failure_callback",
+                 "_async_input_callback", "_async_success_callback",
+                 "_async_failure_callback"):
+        monkeypatch.setattr(litellm, name, list(getattr(litellm, name)))
+    monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Answer()])
+    return sent
+
+
+def _two_turns(store_path, monkeypatch, client, model, first_reply,
+               marks=None, **settings):
+    """Two calls through the real LitellmModel and LiteLLM, the second
+    appending the first's ``messages``: the first envelope (or closing
+    chunk), and each request's messages as LiteLLM sends them."""
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = _mock_litellm(monkeypatch, [first_reply, _litellm_reply("A1"),
+                                       _litellm_reply("A2")], marks)
+
+    def call(history):
+        out = client.chat_completions(history, doc_id=doc_id, model=model,
+                                      **settings)
+        return list(out)[-1] if settings.get("stream") else out
+
+    question = {"role": "user", "content": "q1"}
+    first = call([question])
+    call([question, *first["messages"], {"role": "user", "content": "q2"}])
+    return first, sent
+
+
+@needs_agents
+@pytest.mark.parametrize("model, extra, settings", [
+    ("gpt-test", {}, {}),
+    # streamed turns are rebuilt by agents' own stream handler; OpenAI
+    # streams open with an empty content delta
+    ("gpt-test", {"content": ""}, {"stream": True, "stream_metadata": True}),
+    ("anthropic/claude-sonnet-5-5", {
+        "reasoning_content": "hmm", "thinking_blocks": [
+            {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+     {"extra_body": {"reasoning": {"effort": "high"}}, "stream": True,
+      "stream_metadata": True}),
+    # LitellmModel sends parallel calls one per message here
+    ("anthropic/claude-test", {}, {}),
+    ("anthropic/claude-sonnet-5-5", {"thinking_blocks": [
+        {"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]},
+     {"extra_body": {"reasoning": {"effort": "high"}}}),
+    # replayed as reasoning_content beside the calls
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}, {}),
+])
+def test_chat_completions_messages_resend_the_wire(client, store_path,
+                                                   monkeypatch, model, extra,
+                                                   settings):
+    """The returned messages are what the model saw, each assistant
+    message naming its model, so appending them opens the next call's
+    first request with the previous call's last one, unchanged: the
+    provider's cached prefix carries over."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS, **extra),
+                             **settings)
+    writers = {m.pop("model") for m in first["messages"]
+               if m["role"] == "assistant"}
+    assert writers == {model if "/" in model else f"openai/{model}"}
+    assert first["messages"][:-1] == sent[1][len(sent[0]):]
+    assert first["messages"][-1]["content"] == "A1"
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+@pytest.mark.parametrize("model, extra", [
+    ("gpt-test", {}),
+    # the reply's own fields come back through the fill
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}),
+])
+def test_messages_continuing_a_reply_keep_their_tool_call(client, store_path,
+                                                          monkeypatch, model,
+                                                          extra):
+    """A history ending with a returned reply: the run's tool call stays
+    its own assistant message, on the wire and in the returned messages,
+    so they append back whole and the next call opens with this one's
+    last request."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply("A0", **extra),
+        _litellm_reply(tool_calls=_TWO_CALLS[:1]), _litellm_reply("A1"),
+        _litellm_reply("A2")])
+    question = {"role": "user", "content": "q"}
+    first = client.chat_completions([question], doc_id=doc_id, model=model)
+    out = client.chat_completions([question, *first["messages"]],
+                                  doc_id=doc_id, model=model)
+    assert [m["role"] for m in out["messages"]] == ["assistant", "tool",
+                                                    "assistant"]
+    assert out["messages"][0]["tool_calls"][0]["id"] == "call_1"
+    assert sent[1][-1].get("reasoning_content") == extra.get(
+        "reasoning_content")
+    assert sent[2][:len(sent[1])] == sent[1]
+    client.chat_completions([question, *first["messages"], *out["messages"],
+                             {"role": "user", "content": "q2"}],
+                            doc_id=doc_id, model=model)
+    assert sent[3][:len(sent[2])] == sent[2]
+
+
+@needs_agents
+@pytest.mark.parametrize("model, extra, split, text, stream", [
+    ("gpt-test", {}, False, None, False),
+    ("gpt-test", {}, False, None, True),
+    # LitellmModel sends each call in its own message
+    ("anthropic/claude-test", {}, True, None, False),
+    ("deepseek/deepseek-chat", {"reasoning_content": "think"}, False, None,
+     False),
+    ("gpt-test", {}, False, "Sorry.", False),
+])
+def test_messages_continuing_a_refusal_keep_their_tool_calls(
+        client, store_path, monkeypatch, model, extra, split, text, stream):
+    """A history ending with a refusal: the SDK folds the run's first tool
+    calls into it on the wire, and the returned messages open with them,
+    the refusal and its text left in the history, so they append back
+    whole and the next call opens with this one's last request."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=_TWO_CALLS, **extra), _litellm_reply("A1"),
+        _litellm_reply("A2")])
+    settings = {"stream": True, "stream_metadata": True} if stream else {}
+
+    def call(history):
+        out = client.chat_completions(history, doc_id=doc_id, model=model,
+                                      **settings)
+        return list(out)[-1] if stream else out
+
+    history = [{"role": "user", "content": "q"},
+               {"role": "assistant", "content": text, "refusal": "No."}]
+    out = call(history)
+    one = [("assistant", ["call_1", "call_2"]), ("tool", []), ("tool", [])]
+    each = [("assistant", ["call_1"]), ("tool", []),
+            ("assistant", ["call_2"]), ("tool", [])]
+    assert [(m["role"], [c["id"] for c in m.get("tool_calls") or ()])
+            for m in out["messages"]] == (each if split else one) + [
+        ("assistant", [])]
+    assert "refusal" not in out["messages"][0]
+    assert out["messages"][0]["content"] is None
+    assert out["messages"][0].get("reasoning_content") == extra.get(
+        "reasoning_content")
+    call([*history, *out["messages"], {"role": "user", "content": "q2"}])
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [
+    {"reasoning_effort": "high"},
+    {"extra_body": {"reasoning": {"effort": "high"}}},
+])
+def test_claude_thinking_goes_back_with_its_calls(client, store_path,
+                                                  monkeypatch, settings):
+    """Thinking goes back once, as thinking_blocks."""
+    pytest.importorskip("litellm")
+    thinking = [{"type": "thinking", "thinking": "hmm", "signature": "SIG1"}]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "anthropic/claude-sonnet-5-5",
+                             _litellm_reply(tool_calls=_TWO_CALLS,
+                                            thinking_blocks=thinking,
+                                            reasoning_content="hmm"),
+                             **settings)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [
+    {}, {"extra_body": {"thinking": {"type": "adaptive"}}},
+    {"stream": True, "stream_metadata": True}])
+@pytest.mark.parametrize("calls", [1, 2])
+def test_claude_thinking_goes_back_with_no_effort_set(client, store_path,
+                                                      monkeypatch, settings,
+                                                      calls):
+    """Claude's thinking goes back with no effort set, on the first
+    message of a reply sent one call per message."""
+    pytest.importorskip("litellm")
+    thinking = [{"type": "thinking", "thinking": "", "signature": "SIG1"}]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "anthropic/claude-sonnet-5-5",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:calls],
+                                            thinking_blocks=thinking),
+                             **settings)
+    for messages in (first["messages"], sent[1], sent[2]):
+        sent_calls = [m for m in messages if m.get("tool_calls")]
+        assert sent_calls[0].get("thinking_blocks") == thinking
+        assert all("thinking_blocks" not in m for m in sent_calls[1:])
+
+
+@needs_agents
+@pytest.mark.parametrize("model", [
+    "moonshot/kimi-k2-thinking", "zai/glm-4.6", "dashscope/qwen3-test",
+    "openrouter/qwen/qwen3-test-thinking", "deepseek/deepseek-chat"])
+def test_reasoning_content_goes_back_to_its_model(client, store_path,
+                                                  monkeypatch, model):
+    """Each model's reasoning_content goes back to it."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            reasoning_content="think"))
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("reasoning_content") == "think"
+
+
+@needs_agents
+def test_reasoning_content_never_reaches_claude(client, monkeypatch):
+    """Another model's reasoning_content stays out of Claude's request."""
+    pytest.importorskip("litellm")
+    history = [{"role": "user", "content": "q1"},
+               {"role": "assistant", "content": None,
+                "reasoning_content": "Kimi's own plan",
+                "tool_calls": _TWO_CALLS[:1]},
+               {"role": "tool", "tool_call_id": "call_1", "content": "r"},
+               {"role": "assistant", "content": "A1"},
+               {"role": "user", "content": "q2"}]
+    captured, _ = _anthropic_wire(monkeypatch, client, "anthropic/claude-test",
+                                  messages=history)
+    assert captured["body"]["messages"]
+    assert "Kimi's own plan" not in json.dumps(captured["body"])
+
+
+def _history(writer=None):
+    reply = {"role": "assistant", "content": None,
+             "tool_calls": _TWO_CALLS[:1], "reasoning_content": "plan",
+             "thinking_blocks": [{"type": "thinking", "thinking": "plan",
+                                  "signature": "SIG"}],
+             "id": "msg_1", "finish_reason": "tool_calls"}
+    answer = {"role": "assistant", "content": "A1", "reasoning_content": "sum",
+              "id": "msg_2", "finish_reason": "stop"}
+    tag = {"model": writer} if writer else {}
+    return [{"role": "user", "content": "q1"}, {**reply, **tag},
+            {"role": "tool", "tool_call_id": "call_1", "content": "r"},
+            {**answer, **tag}, {"role": "user", "content": "q2"}]
+
+
+@needs_agents
+@pytest.mark.parametrize("writer, model, settings", [
+    (None, "gemini/gemini-test", {}),
+    ("anthropic/claude-test", "gemini/gemini-test", {}),
+    # the Agents SDK's own replays read the writer too
+    ("anthropic/claude-test", "anthropic/claude-sonnet-5-5",
+     {"reasoning_effort": "high"}),
+    ("anthropic/claude-test", "deepseek/deepseek-chat", {})])
+def test_history_fields_go_back_to_their_own_model_only(client, monkeypatch,
+                                                        writer, model,
+                                                        settings):
+    """A history message's fields go back only to the model its ``model``
+    names: another model's reasoning, and the keys of a message that
+    names none, stay off the request, a text reply's too."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions(_history(writer), model=model, **settings)
+    turn = next(m for m in sent[0] if m.get("tool_calls"))
+    answer = next(m for m in sent[0] if m.get("content") == "A1")
+    for message in (turn, answer):
+        assert not {"reasoning_content", "thinking_blocks", "id",
+                    "finish_reason", "model"} & set(message)
+
+
+@needs_agents
+@pytest.mark.parametrize("model, fields, settings", [
+    ("deepseek/deepseek-chat", {"reasoning_content": "plan"}, {}),
+    ("anthropic/claude-sonnet-5-5", {"thinking_blocks": [
+        {"type": "thinking", "thinking": "plan", "signature": "SIG"}]},
+     {"reasoning_effort": "high"})])
+@pytest.mark.parametrize("tail", [[{"role": "user", "content": "q2"}], []])
+def test_untagged_replies_keep_the_sdk_replay(client, monkeypatch, model,
+                                              fields, settings, tail):
+    """A reply that names no model goes in as it did before ``model``
+    existed, a run going on from it too: with the reasoning the Agents SDK
+    replays, which DeepSeek needs on a reply in the current turn and Claude
+    binds each later thinking block to."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions([
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "A1", **fields}, *tail],
+        model=model, **settings)
+    reply = next(m for m in sent[0] if m.get("content") == "A1")
+    assert {key: reply.get(key) for key in fields} == fields
+
+
+@needs_agents
+def test_own_history_given_as_a_generator_goes_back(client, monkeypatch):
+    pytest.importorskip("litellm")
+    model = "moonshot/kimi-k2-thinking"
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A2")])
+    client.chat_completions(iter(_history(model)), model=model)
+    turn = next(m for m in sent[0] if m.get("tool_calls"))
+    assert turn["reasoning_content"] == "plan" and "model" not in turn
+
+
+@needs_agents
+@pytest.mark.parametrize("final, stream", [("", False), (None, True)])
+def test_a_final_reply_with_no_text_adds_no_message(client, store_path,
+                                                    monkeypatch, final,
+                                                    stream):
+    """A run that ends with no text after a tool result returns that
+    result once, with no message after it."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                                _litellm_reply(final)])
+    out = client.chat_completions("q", doc_id=doc_id, model="gpt-test",
+                                  stream=stream, stream_metadata=stream)
+    out = list(out)[-1] if stream else out
+    assert [m["role"] for m in out["messages"]] == ["assistant", "tool"]
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("empty, sent, answered", [(1, 3, True),
+                                                   (4, 5, False)],
+                         ids=["recovers", "exhausted"])
+def test_reply_with_no_choices_goes_again(client, store_path, monkeypatch,
+                                          stream, empty, sent, answered):
+    """A reply with no choices (Gemini with no candidates, as after a tool
+    result) goes again, as on the index lane, and never passes as an empty
+    answer."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.types.utils import ModelResponseStream
+    monkeypatch.setattr("pageindex.retry.delay", lambda *args: 0)
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    # streamed as LiteLLM streams OpenRouter: the chunk, then the dict it
+    # makes of the provider's [DONE]
+    none = ModelResponseStream(choices=[])
+    done = {"text": "", "is_finished": True, "finish_reason": "stop",
+            "usage": None, "index": 0}
+    replies = [_litellm_chunks({"tool_calls": [{"index": 0, **_TWO_CALLS[0]}]})
+               if stream else _litellm_reply(tool_calls=_TWO_CALLS[:1])]
+    replies += [[none, done] if stream
+                else litellm.ModelResponse(choices=[])] * empty
+    # a streamed answer can open on a chunk with no choices (Azure), and
+    # ends on one when it carries usage
+    replies.append([none, *_litellm_chunks({"content": "A"}, finish="stop"),
+                    none] if stream else _litellm_reply("A"))
+    requests = _mock_litellm(monkeypatch, replies)
+
+    def ask():
+        out = client.chat("q", doc_id=doc_id, model="gpt-test", stream=stream)
+        return "".join(out) if stream else out
+
+    if answered:  # a stream shows the tool turn first
+        assert ask().split("\n\n")[-1] == "A"
+    else:
+        with pytest.raises(PageIndexAPIError, match="no choices"):
+            ask()
+    assert len(requests) == sent
+
+
+@needs_agents
+@pytest.mark.parametrize("pieces, finish", [(["Hello", " there"], "stop"),
+                                            ([""], "")],
+                         ids=["answer", "empty"])
+def test_a_stream_of_plain_dict_chunks_is_an_answer(client, monkeypatch,
+                                                    pieces, finish):
+    """Some LiteLLM parsers (Snowflake, Cohere) yield plain dict chunks,
+    which carry no choices list: their answer, an empty one too (Cohere's,
+    with no finish LiteLLM reads), passes as the non-streamed reply does."""
+    pytest.importorskip("litellm")
+    requests = _mock_litellm(monkeypatch, [[
+        {"text": text, "is_finished": False, "finish_reason": "",
+         "usage": None} for text in pieces[:-1]] + [
+        {"text": pieces[-1], "is_finished": bool(finish),
+         "finish_reason": finish, "usage": None}]])
+    out = client.chat("q", model="gpt-test", stream=True)
+    assert "".join(out) == "".join(pieces)
+    assert len(requests) == 1
+
+
+@needs_agents
+def test_a_stream_of_a_finish_reason_alone_is_an_answer(client, monkeypatch):
+    """A Gemini candidate with a finish reason and no parts (thinking used
+    up max_tokens) streams one chunk whose choice LiteLLM's Gemini parser
+    holds for its own closing chunk: an answer cut short, not a reply with
+    no choices."""
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+    chunk = {"candidates": [{"finishReason": "MAX_TOKENS", "index": 0}],
+             "usageMetadata": {"promptTokenCount": 7, "totalTokenCount": 7}}
+    sent = []
+
+    async def fake_apost(self, url=None, *args, **kwargs):
+        sent.append(url)
+        return httpx.Response(
+            200, content=f"data: {json.dumps(chunk)}\r\n\r\n".encode(),
+            request=httpx.Request("POST", str(url)),
+            headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
+    # a dead local port, should LiteLLM ever send past the patch
+    backend = {"base_url": "http://127.0.0.1:9", "api_key": "test"}
+    with pytest.raises(PageIndexAPIError, match="stopped before finishing"):
+        "".join(client.chat("q", model="gemini/gemini-2.5-flash", stream=True,
+                            backend=backend))
+    assert len(sent) == 1 and sent[0].startswith("http://127.0.0.1:9/")
+
+
+def _refusal(field):
+    from litellm.exceptions import BadRequestError
+    return BadRequestError(message=f"property '{field}' is unsupported",
+                           model="m", llm_provider="groq")
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [{}, {"stream": True}])
+def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
+                                             settings):
+    """A field a 400 names goes again at once without it and stays out for
+    the rest of the call; the next call tries it afresh."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    sent = _mock_litellm(monkeypatch, [
+        call, _refusal("reasoning_content"),
+        _litellm_reply(tool_calls=_TWO_CALLS[1:]), _litellm_reply("A"),
+        call, _litellm_reply("A")])
+    for _ in range(2):
+        out = client.chat_completions("q", doc_id=doc_id,
+                                      model="groq/qwen/qwen3-32b", **settings)
+        if settings:
+            assert "A" in "".join(out)
+        else:
+            assert out.choices[0].message.content == "A"
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False, False, False, True]
+
+
+@needs_agents
+def test_missing_field_400_costs_one_retry_at_most(client, store_path,
+                                                    monkeypatch):
+    """A 400 naming a field the provider wants rather than refuses gets one
+    retry without it; the provider's own error then surfaces, and the next
+    call sends the field again."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import BadRequestError
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    model = "deepseek/deepseek-chat"
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    missing = "Missing `reasoning_content` field in the assistant message"
+    sent = _mock_litellm(monkeypatch, [
+        call, *[BadRequestError(message=missing, model="m",
+                                llm_provider="deepseek") for _ in range(2)],
+        call, _litellm_reply("A")])
+    with pytest.raises(PageIndexAPIError, match=missing):
+        client.chat_completions("q", doc_id=doc_id, model=model)
+    client.chat_completions("q", doc_id=doc_id, model=model)
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False, False, True]
+
+
+@needs_agents
+def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
+    """Each 400 refuses the field it names, the Agents SDK's own too
+    (reasoning_content, for a DeepSeek name), until one goes through."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    model = "groq/deepseek-r1-distill-llama-70b"
+    details = [{"type": "reasoning.text", "text": "plan"}]
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="plan",
+                       provider_specific_fields={"reasoning_details": details}),
+        _refusal("reasoning_content"), _refusal("reasoning_details"),
+        _litellm_reply("A")])
+    out = client.chat_completions("q", doc_id=doc_id, model=model)
+    assert out.choices[0].message.content == "A"
+    assert [sorted({"reasoning_content", "reasoning_details"} & set(m))
+            for messages in sent[1:] for m in messages
+            if m.get("tool_calls")] == [
+        ["reasoning_content", "reasoning_details"], ["reasoning_details"], []]
+
+
+def _aborted(*chunks):
+    """A stream OpenRouter cuts off after chunks, as LiteLLM reads it."""
+    from litellm.exceptions import APIConnectionError
+    return [*chunks, APIConnectionError(
+        message="The operation was aborted", llm_provider="openai",
+        model="m")]
+
+
+@needs_agents
+@pytest.mark.parametrize("breaks", [1, 3, 4])
+def test_stream_broken_before_output_goes_again(client, monkeypatch, breaks):
+    """A stream the server breaks before any output goes again, three
+    times at most."""
+    pytest.importorskip("litellm")
+    sent = _mock_litellm(monkeypatch, [_aborted() for _ in range(breaks)]
+                         + [_litellm_reply("A")])
+    out = client.chat_completions("q", model="gpt-test", stream=True)
+    if breaks <= 3:
+        assert "".join(out) == "A"
+    else:
+        with pytest.raises(PageIndexAPIError):
+            "".join(out)
+    assert len(sent) == min(breaks + 1, 4)
+
+
+@needs_agents
+def test_stream_broken_after_output_is_not_replayed(client, monkeypatch):
+    """The runner won't replay a stream that already showed text, nor
+    does the lane retry a request that wasn't streamed."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import InternalServerError
+    sent = _mock_litellm(monkeypatch, [
+        _aborted(*_litellm_chunks({"content": "Hi"})[:1]),
+        InternalServerError(message="boom", llm_provider="openai", model="m"),
+        _litellm_reply("A")])
+    with pytest.raises(PageIndexAPIError):
+        "".join(client.chat_completions("q", model="gpt-test", stream=True))
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", model="gpt-test")
+    assert len(sent) == 2
+
+
+@needs_agents
+def test_other_400s_are_not_retried(client, monkeypatch):
+    """A 400 that doesn't name reasoning_content is not retried."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.exceptions import BadRequestError
+    calls = []
+
+    async def acompletion(**kwargs):
+        calls.append(kwargs)
+        raise BadRequestError(message="bad request", model=kwargs["model"],
+                              llm_provider="groq")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", model="groq/never-sent-reasoning")
+    assert len(calls) == 1
+
+
+@needs_agents
+@pytest.mark.parametrize("error", [
+    # names fields this request didn't get back, or only as part of a name
+    "messages.1.content.0: Invalid `signature` in `thinking` block",
+    "reasoning_content_mode is unsupported"])
+def test_unrelated_400s_refuse_nothing(client, store_path, monkeypatch,
+                                       error):
+    """A 400 naming no field the request carried is not retried."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import BadRequestError
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    sent = _mock_litellm(monkeypatch, [call, BadRequestError(
+        message=error, model="m", llm_provider="anthropic")])
+    with pytest.raises(PageIndexAPIError):
+        client.chat_completions("q", doc_id=doc_id,
+                                model="moonshot/kimi-k2-thinking")
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True]
+
+
+_UNPACKAGED = {"litellm_provider": "bedrock_converse", "mode": "chat",
+               "supports_function_calling": True}
+
+
+def _publish(monkeypatch, entries, offline=False):
+    """LiteLLM's published model map, fetched afresh by this process: the
+    entries its packaged map lacks. Returns the URLs fetched."""
+    from pageindex import utils
+    fetched = []
+
+    def get(url, timeout):
+        fetched.append(url)
+        if offline:
+            raise httpx.ConnectError("offline")
+        return httpx.Response(200, json=entries,
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(utils, "_published", None)
+    monkeypatch.setattr(utils, "_filled", False)
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
+    return fetched
+
+
+def test_published_entries_lift_litellms_own_refusal(monkeypatch):
+    """LiteLLM refuses tools for a Bedrock model its packaged map lacks;
+    the published map's entry lifts that, by LiteLLM's own rules."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import UnsupportedParamsError
+    from litellm.utils import get_optional_params
+    from pageindex.utils import learn_published_models
+    key = "global.openai.gpt-test-lifted"
+    _publish(monkeypatch, {key: _UNPACKAGED})
+    tools = [{"type": "function", "function": {
+        "name": "read", "parameters": {"type": "object", "properties": {}}}}]
+    with pytest.raises(UnsupportedParamsError):
+        get_optional_params(model=key, custom_llm_provider="bedrock",
+                            tools=tools)
+    assert asyncio.run(learn_published_models())
+    assert get_optional_params(model=key, custom_llm_provider="bedrock",
+                               tools=tools)["tools"]
+
+
+def test_indexing_learns_a_model_whose_effort_litellm_would_drop(monkeypatch):
+    """LiteLLM drops a summary's reasoning_effort, unseen, for a Fireworks
+    model its packaged map lacks; the published map's entry, learned before
+    the summaries, keeps it. A model whose effort LiteLLM sends, or one its
+    packaged map has, downloads nothing."""
+    pytest.importorskip("litellm")
+    from litellm.utils import get_optional_params
+    from pageindex.utils import learn_model_if_effort_dropped
+    name = "accounts/fireworks/models/test-unpackaged"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {f"fireworks_ai/{name}": {
+        "litellm_provider": "fireworks_ai", "mode": "chat",
+        "supports_reasoning": True}})
+
+    def sent():
+        return get_optional_params(model=name, custom_llm_provider="fireworks_ai",
+                                   reasoning_effort="none",
+                                   drop_params=True).get("reasoning_effort")
+    for model in ("openrouter/vendor/model-test-unlisted", "gpt-4o"):
+        learn_model_if_effort_dropped(model)
+    assert not fetched and sent() is None
+    learn_model_if_effort_dropped(f"fireworks_ai/{name}")
+    assert len(fetched) == 1 and sent() == "none"
+
+
+def test_a_cancelled_wait_leaves_the_download_to_the_others(monkeypatch):
+    """A chat cancelled while the published map downloads (a closed
+    stream, Ctrl-C) leaves the one download running for every later one."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import learn_published_models
+    fetched = _publish(monkeypatch, {"global.openai.gpt-test-cancel":
+                                     _UNPACKAGED})
+    get, release = httpx.get, threading.Event()
+
+    def slow(url, timeout):
+        release.wait(5)
+        return get(url, timeout=timeout)
+    monkeypatch.setattr(httpx, "get", slow)
+
+    async def cancel_one():
+        task = asyncio.create_task(learn_published_models())
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(cancel_one())
+    release.set()
+    assert asyncio.run(learn_published_models())
+    assert len(fetched) == 1
+
+
+def test_a_forked_child_drops_its_parents_pending_download(monkeypatch):
+    """A worker forked while the published map downloads lacks the thread
+    that download runs on: it starts its own instead of waiting forever."""
+    from concurrent.futures import Future
+    from conftest import exit_code_in_forked_child
+    from pageindex import utils
+    monkeypatch.setattr(utils, "_published", Future())
+    assert exit_code_in_forked_child(lambda: utils._published is None) == 0
+
+
+def test_a_forked_child_drops_litellms_pooled_clients():
+    """On its parent's pooled connections a forked child reads replies
+    meant for another process: LiteLLM's client cache, under the name the
+    fork hook reads, starts empty in the child and stays in the parent."""
+    litellm = pytest.importorskip("litellm")
+    from conftest import exit_code_in_forked_child
+    import pageindex.utils  # noqa: F401  registers the hook
+    cache, key = litellm.in_memory_llm_clients_cache, "pageindex-test-client"
+    cache.set_cache(key, object())
+    try:
+        assert exit_code_in_forked_child(lambda: cache.get_cache(key) is None) == 0
+        assert cache.get_cache(key) is not None
+    finally:
+        cache.delete_cache(key)
+
+
+@needs_agents
+@pytest.mark.parametrize("settings", [{}, {"stream": True}])
+def test_unpackaged_model_goes_again_with_the_published_map(
+        client, monkeypatch, settings):
+    """A request LiteLLM refuses for a model its packaged map lacks goes
+    again with the published map's entries in, downloaded once per
+    process; the next call goes straight through."""
+    pytest.importorskip("litellm")
+    key = f"global.openai.gpt-test-again-{len(settings)}"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {key: _UNPACKAGED})
+    # the hook sees each try, the refused one too (LiteLLM checks after it)
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 3)
+    for _ in range(2):
+        out = client.chat_completions("q", model=f"bedrock/{key}", **settings)
+        assert ("".join(out) if settings
+                else out.choices[0].message.content) == "A"
+    assert len(fetched) == 1 and len(sent) == 3
+
+
+@needs_agents
+@pytest.mark.parametrize("case", ["unpublished", "offline", "user's map"])
+def test_refusal_the_published_map_cannot_lift_surfaces(client, monkeypatch,
+                                                        case):
+    """LiteLLM's refusal surfaces after one more try when the published map
+    lacks the model too, at once when the download fails or the caller set
+    LITELLM_LOCAL_MODEL_COST_MAP: never a loop, never a second download."""
+    pytest.importorskip("litellm")
+    from pageindex import utils
+    fetched = _publish(monkeypatch, {"global.openai.gpt-test-other":
+                                     _UNPACKAGED}, offline=case == "offline")
+    if case == "user's map":
+        monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 4)
+    for _ in range(2):
+        with pytest.raises(PageIndexAPIError, match="does not support"):
+            client.chat_completions(
+                "q", model="bedrock/global.openai.gpt-test-unpublished")
+    assert len(fetched) == (0 if case == "user's map" else 1)
+    assert len(sent) == (4 if case == "unpublished" else 2)
+
+
+@needs_agents
+def test_a_request_litellm_takes_downloads_nothing(client, monkeypatch):
+    """A model LiteLLM doesn't refuse, in its packaged map or not, never
+    downloads the published one."""
+    pytest.importorskip("litellm")
+    fetched = _publish(monkeypatch, {})
+    _mock_litellm(monkeypatch, [_litellm_reply("A")] * 2)
+    for model in ("gpt-6-luna", "openrouter/vendor/model-test-unlisted"):
+        client.chat_completions("q", model=model)
+    assert fetched == []
+
+
+@needs_agents
+def test_unset_effort_sends_none(client, monkeypatch):
+    """No effort reaches the wire unless the caller sets one."""
+    pytest.importorskip("litellm")
+    model = "anthropic/claude-sonnet-5-5"
+    unset, _ = _anthropic_wire(monkeypatch, client, model)
+    assert not {"thinking", "output_config"} & set(unset["body"])
+    chosen, _ = _anthropic_wire(monkeypatch, client, model,
+                                reasoning_effort="high")
+    assert chosen["body"]["output_config"] == {"effort": "high"}
+
+
+@needs_agents
+@pytest.mark.parametrize("effort", [{"reasoning_effort": "high"}, {}])
+def test_streamed_claude_thinking_goes_back_once(client, store_path,
+                                                 monkeypatch, effort):
+    """Streamed thinking goes back once, not doubled."""
+    pytest.importorskip("litellm")
+    call = {"index": 0, **_TWO_CALLS[0]}
+    first, sent = _two_turns(
+        store_path, monkeypatch, client, "anthropic/claude-sonnet-5-5",
+        _litellm_chunks(
+            {"reasoning_content": "plan", "thinking_blocks": [
+                {"type": "thinking", "thinking": "plan"}]},
+            {"reasoning_content": " step", "thinking_blocks": [
+                {"type": "thinking", "thinking": " step"}]},
+            {"reasoning_content": "", "thinking_blocks": [
+                {"type": "thinking", "thinking": "plan step",
+                 "signature": "SIG1"}]},
+            {"tool_calls": [call]}),
+        **effort, stream=True, stream_metadata=True)
+    thinking = [{"type": "thinking", "thinking": "plan step",
+                 "signature": "SIG1"}]
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("thinking_blocks") == thinking
+
+
+@needs_agents
+@pytest.mark.parametrize("model, effort, extra_body", [
+    ("anthropic/claude-test", "high", None),
+    ("gemini/gemini-test", "disable", None),
+    # extra_body's reasoning names no effort, so the argument's stays
+    ("anthropic/claude-test", "high", {"reasoning": {"summary": "auto"}}),
+    ("anthropic/claude-test", "high", {"reasoning": Reasoning(summary="auto")}),
+    ("anthropic/claude-test", "high",
+     {"reasoning": Reasoning(summary="auto").model_dump()}),
+    ("anthropic/claude-test", "high", {"reasoning": None}),
+])
+def test_reasoning_effort_reaches_litellm_as_given(client, monkeypatch,
+                                                   model, effort, extra_body):
+    pytest.importorskip("litellm")
+    import litellm
+    seen = []
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs.get("reasoning_effort"))
+        return _litellm_reply("ok")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    client.chat_completions("q", model=model, reasoning_effort=effort,
+                            extra_body=extra_body)
+    assert seen == [effort]
+
+
+@needs_agents
+def test_extra_body_settings_litellm_model_skips_reach_litellm(client,
+                                                               monkeypatch):
+    """Settings LitellmModel ignores reach LiteLLM as kwargs."""
+    pytest.importorskip("litellm")
+    import litellm
+    seen = []
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs)
+        return _litellm_reply("ok")
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    extras = {"context_management": {"edits": []}, "verbosity": "low",
+              "store": False, "retry": {"max_retries": 2}}
+    client.chat_completions("q", model="anthropic/claude-test",
+                            extra_body=extras)
+    assert {key: seen[0].get(key) for key in extras} == extras
+
+
+@needs_agents
+def test_chat_completions_messages_keep_gemini_signatures(client, store_path,
+                                                          monkeypatch):
+    """Gemini thought signatures ride messages back in LiteLLM's own field,
+    as the model was sent them, and stay on every turn's calls, so the next
+    request opens with the previous one unchanged."""
+    pytest.importorskip("litellm")
+    signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
+        "thought_signature": "sig1"}}, _TWO_CALLS[1]]
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "gemini/gemini-test",
+                             _litellm_reply(tool_calls=signed))
+    assert first["messages"][0]["tool_calls"][0][
+        "provider_specific_fields"] == {"thought_signature": "sig1"}
+    assert sent[2][:len(sent[1])] == sent[1]
+    calls = next(m["tool_calls"] for m in sent[2] if m.get("tool_calls"))
+    assert calls[0]["provider_specific_fields"] == {
+        "thought_signature": "sig1"}
+
+
+@needs_agents
+def test_gemini_signatures_go_back_on_a_continued_run(client, store_path,
+                                                      monkeypatch):
+    """A run that goes on from a tool result sends the call's own thought
+    signature, not the placeholder the Agents SDK puts on calls after the
+    last user message, so it opens with the previous call's request."""
+    pytest.importorskip("litellm")
+    model = "gemini/gemini-test"
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    signed = [{**_TWO_CALLS[0], "provider_specific_fields": {
+        "thought_signature": "sig1"}}]
+    sent = _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=signed), _litellm_reply("A1"),
+        _litellm_reply("A2")])
+    question = {"role": "user", "content": "q"}
+    first = client.chat_completions([question], doc_id=doc_id, model=model)
+    client.chat_completions([question, *first["messages"][:2]],
+                            doc_id=doc_id, model=model)
+    assert sent[2][-2]["tool_calls"][0]["provider_specific_fields"] == {
+        "thought_signature": "sig1"}
+    assert sent[2] == sent[1]
+
+
+@needs_agents
+@pytest.mark.parametrize("fill", [True, False])
+@pytest.mark.parametrize("field, value", [
+    ("reasoning_details", [{"type": "reasoning.encrypted", "data": "ENC"}]),
+    ("reasoning_items", [{"id": "rs_1", "type": "reasoning",
+                          "encrypted_content": "ENC", "summary": []}]),
+])
+def test_reply_fields_the_agents_sdk_drops_go_back(client, store_path,
+                                                   monkeypatch, field, value,
+                                                   fill):
+    """What LiteLLM parsed from a reply and the Agents SDK drops
+    (OpenRouter's reasoning_details, the Responses bridge's
+    reasoning_items, ...) goes back with that reply on every later
+    request, and rides the returned messages. Without the fill the Agents
+    SDK must still drop it, or the fill goes."""
+    pytest.importorskip("litellm")
+    if not fill:
+        monkeypatch.setattr(local_chat, "_keep_reply_fields",
+                            lambda agent, messages: None)
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "openrouter/x-ai/grok-test",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            provider_specific_fields={
+                                                field: value}))
+    if not fill:
+        calls = [m for m in sent[1] if m.get("tool_calls")]
+        assert field not in calls[0], (
+            f"the Agents SDK keeps {field} now: drop _keep_reply_fields")
+        return
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0][field] == value
+
+
+def _openai_chunk(delta, finish=None):
+    from openai.types.chat import ChatCompletionChunk
+    return ChatCompletionChunk.model_validate({
+        "id": "c1", "object": "chat.completion.chunk", "created": 0,
+        "model": "m", "choices": [{"index": 0, "delta": delta,
+                                   "finish_reason": finish}]})
+
+
+@needs_agents
+def test_streamed_fields_litellm_drops_go_back(client, store_path,
+                                               monkeypatch):
+    """A delta carrying only a field LiteLLM doesn't know, as OpenRouter
+    streams a signature or encrypted reasoning, still goes back."""
+    pytest.importorskip("litellm")
+    text = {"type": "reasoning.text", "text": "plan"}
+    encrypted = {"type": "reasoning.encrypted", "data": "ENC"}
+    first, sent = _two_turns(
+        store_path, monkeypatch, client, "openrouter/x-ai/grok-test",
+        [_openai_chunk({"role": "assistant", "reasoning_details": [text],
+                        "trace": "pl"}),
+         _openai_chunk({"tool_calls": [{"index": 0, **_TWO_CALLS[0]}],
+                        "trace": "an"}),
+         _openai_chunk({"reasoning_details": [encrypted]}),
+         _openai_chunk({}, finish="tool_calls")],
+        stream=True, stream_metadata=True)
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0]["reasoning_details"] == [text, encrypted]
+        assert calls[0]["trace"] == "plan"
+
+
+def _model_rate_limited():
+    """LiteLLM's 429 as a server sent it, asking for a 0.01 s wait."""
+    from litellm.exceptions import RateLimitError
+    request = httpx.Request("POST", "https://llm.example/v1/messages")
+    response = httpx.Response(429, headers={"retry-after": "0.01"}, request=request)
+    err = RateLimitError("slow down", llm_provider="anthropic", model="claude-test",
+                         response=response)
+    setattr(err, "litellm_response_headers", response.headers)
+    err.__cause__ = httpx.HTTPStatusError("reply", request=request, response=response)
+    return err
+
+
+def _model_key_missing():
+    """LiteLLM's missing-credentials 500, raised before any request."""
+    from litellm.exceptions import InternalServerError
+    return InternalServerError("Missing credentials", llm_provider="anthropic",
+                               model="claude-test")
+
+
+@needs_agents
+@pytest.mark.parametrize("stream, blank", [(False, True), (True, True),
+                                           (True, False)])
+def test_claude_thinking_reaches_the_anthropic_wire_once(client, store_path,
+                                                         monkeypatch, stream,
+                                                         blank):
+    """Through LiteLLM's own Anthropic parsing and request building, with
+    no effort set: the run's next request carries the signed thinking
+    block once, a stream's closing repeat of its text blanked. Without the
+    blanking LiteLLM's stream must still repeat it, or the blanking goes."""
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import (AsyncHTTPHandler,
+                                                        HTTPHandler)
+    if not blank:
+        monkeypatch.setattr(local_chat, "_drop_repeated_thinking",
+                            lambda chunk, streamed: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    thinking = {"type": "thinking", "thinking": "plan step",
+                "signature": "SIG1"}
+    call = {"type": "tool_use", "id": "toolu_1", "name": "get_document",
+            "input": {"doc_name": "report.pdf"}}
+    answer = {"type": "text", "text": "done"}
+    replies = [_anthropic_message([thinking, call], "tool_use"),
+               _anthropic_message([answer], "end_turn")]
+    if stream:
+        replies = [_anthropic_sse(message) for message in replies]
+    bodies = []
+
+    def reply(url, kwargs):
+        bodies.append(json.loads(kwargs["data"]) if kwargs.get("data")
+                      else kwargs.get("json"))
+        request = httpx.Request("POST", str(url))
+        body = replies.pop(0)
+        if isinstance(body, str):
+            return httpx.Response(200, content=body.encode(), request=request,
+                                  headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json=body, request=request)
+
+    async def fake_apost(self, url=None, *args, **kwargs):
+        return reply(url, kwargs)
+
+    monkeypatch.setattr(AsyncHTTPHandler, "post", fake_apost)
+    monkeypatch.setattr(HTTPHandler, "post",
+                        lambda self, url=None, *args, **kwargs:
+                        reply(url, kwargs))
+    out = client.chat_completions("q", doc_id=doc_id,
+                                  model="anthropic/claude-sonnet-5-5",
+                                  stream=stream, stream_metadata=stream)
+    result = list(out)[-1] if stream else out
+    assert not {"thinking", "output_config"} & set(bodies[0])
+    turn = next(m for m in bodies[1]["messages"] if m["role"] == "assistant")
+    sent = [b for b in turn["content"] if b["type"] == "thinking"]
+    if not blank:
+        assert sent == [{**thinking, "thinking": "plan stepplan step"}], (
+            "LiteLLM stopped repeating streamed thinking: drop "
+            "_drop_repeated_thinking")
+        return
+    assert sent == [thinking]
+    assert result["messages"][0]["thinking_blocks"] == [thinking]
+
+
+def test_repeated_answers_keep_their_own_fields():
+    """Records keep conversation order: a repeated answer (or a reused call
+    id) gets its own reply's fields back, not the latest one's."""
+    replies = local_chat._Replies("m")
+    for n in (1, 2):
+        replies.record({"role": "assistant", "content": "OK",
+                        "reasoning_details": [n]})
+    out = replies.fill([{"role": "assistant", "content": "OK"},
+                        {"role": "user", "content": "again"},
+                        {"role": "assistant", "content": "OK"}])
+    assert [m.get("reasoning_details") for m in out
+            if m["role"] == "assistant"] == [[1], [2]]
+
+
+def test_sdk_call_objects_keep_their_own_fields():
+    """History may hold the OpenAI SDK's call objects: that reply and its
+    call keep their fields, and a later answer with the same text keeps
+    its own."""
+    from openai.types.chat import ChatCompletionMessageFunctionToolCall
+    call = {"id": "c1", "type": "function",
+            "function": {"name": "f", "arguments": "{}"}}
+    signed = {"google": {"thought_signature": "SIG"}}
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "Let me check.",
+                    "tool_calls": [ChatCompletionMessageFunctionToolCall
+                                   .model_validate({**call,
+                                                    "extra_content": signed})],
+                    "reasoning_details": ["A"]})
+    replies.record({"role": "assistant", "content": "Let me check.",
+                    "reasoning_details": ["B"]})
+    out = replies.fill([{"role": "assistant", "content": "Let me check.",
+                         "tool_calls": [call]},
+                        {"role": "assistant", "content": "Let me check."}])
+    assert [m.get("reasoning_details") for m in out] == [["A"], ["B"]]
+    assert out[0]["tool_calls"][0]["extra_content"] == signed
+
+
+def test_fill_puts_the_reply_back_as_it_was():
+    """A reply's fields go back as it had them, empty ones too, over what
+    the Agents SDK wrote in their place; a field it lacks (None) stays out;
+    LiteLLM's nested provider fields go on top."""
+    call = {"id": "c1", "type": "function",
+            "function": {"name": "f", "arguments": "{}"}}
+    signed = {**call, "caller": {"type": "direct"},
+              "provider_specific_fields": {"thought_signature": "SIG"}}
+    thinking = [{"type": "thinking", "thinking": "a", "signature": "S"}]
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "",
+                    "tool_calls": [signed], "thinking_blocks": thinking,
+                    "reasoning_content": "", "audio": None,
+                    "provider_specific_fields": {"reasoning_details": [],
+                                                 "extra": "x"}})
+    out = replies.fill([{
+        "role": "assistant",
+        "thinking_blocks": [{"type": "thinking", "thinking": "b",
+                             "signature": "T"}],
+        "tool_calls": [{**call, "provider_specific_fields": {
+            "thought_signature": "skip_thought_signature_validator"}}]}])
+    assert out == [{"role": "assistant", "content": None,
+                    "thinking_blocks": thinking, "reasoning_content": "",
+                    "reasoning_details": [], "extra": "x",
+                    "tool_calls": [signed]}]
+
+
+@needs_agents
+def test_empty_reasoning_goes_back(client, store_path, monkeypatch):
+    """A reply's empty reasoning_content goes back as it had it: DeepSeek's
+    thinking mode refuses a request whose replies in the current turn lack
+    the field, and its replies sometimes reason nothing."""
+    pytest.importorskip("litellm")
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "deepseek/deepseek-chat",
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1],
+                                            reasoning_content=""))
+    for messages in (first["messages"], sent[1], sent[2]):
+        calls = [m for m in messages if m.get("tool_calls")]
+        assert calls[0].get("reasoning_content") == ""
+
+
+@needs_agents
+def test_native_routes_keep_provider_fields_nested(client, store_path,
+                                                   monkeypatch):
+    """LiteLLM's own adapter reads provider_specific_fields nested (Gemini's
+    thought_signatures, Anthropic's web_search_results), so they go back
+    there; a Gemini call id matches without the signature LiteLLM folds in
+    and the Agents SDK strips."""
+    pytest.importorskip("litellm")
+    fields = {"thought_signatures": ["SIG"]}
+    first, sent = _two_turns(store_path, monkeypatch, client,
+                             "gemini/gemini-test", _litellm_reply(
+                                 tool_calls=[{**_TWO_CALLS[0],
+                                              "id": "call_1__thought__SIG"}],
+                                 provider_specific_fields=fields))
+    for messages in (first["messages"], sent[1], sent[2]):
+        turn = next(m for m in messages if m.get("tool_calls"))
+        assert turn["provider_specific_fields"] == fields
+        assert "thought_signatures" not in turn
+
+
+def test_fields_the_sdk_set_count_as_sent():
+    """A field the Agents SDK set itself is refusable like one put back."""
+    replies = local_chat._Replies("m")
+    replies.record({"role": "assistant", "content": "OK"}, own=False)
+    message = {"role": "assistant", "content": "OK", "reasoning_content": "r"}
+    replies.fill([message])
+    assert replies.sent == {"reasoning_content"}
+    replies.refused.add("reasoning_content")
+    assert replies.fill([message]) == [{"role": "assistant", "content": "OK"}]
+
+
+def test_unassembled_streams_are_skipped(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+
+    def fail(chunks):
+        raise ValueError("unassembled")
+
+    monkeypatch.setattr(litellm, "stream_chunk_builder", fail)
+    replies = local_chat._Replies("m")
+    replies.streams.append((["chunk"], {"reasoning_details": [[1]]}))
+    message = {"role": "assistant", "content": "OK"}
+    assert replies.fill([message]) == [message]
+
+
+def test_requests_outside_a_chat_run_pass_untouched():
+    pytest.importorskip("litellm")
+    local_chat._register_fill()
+    kwargs = {"messages": [{"role": "assistant", "content": "OK"}]}
+    assert asyncio.run(local_chat._fill_hook.async_pre_call_deployment_hook(
+        kwargs, None)) is None
+
+
+def test_converse_sends_a_runs_encrypted_reasoning_back(monkeypatch):
+    """Bedrock's encrypted reasoning, as LiteLLM parses it, goes back to
+    Converse as Bedrock returned it when a run's request carries it.
+    Another request converts exactly as LiteLLM alone does, which drops
+    it: once LiteLLM keeps it itself, _keep_redacted goes. What LiteLLM
+    converts itself stays."""
+    pytest.importorskip("litellm")
+    from litellm.litellm_core_utils.prompt_templates.factory import (
+        BedrockConverseMessagesProcessor as converse)
+    from litellm.llms.bedrock.chat.converse_transformation import (
+        AmazonConverseConfig)
+    local_chat._register_fill()
+    name = "translate_thinking_blocks_to_reasoning_content_blocks"
+    blob = "cnNuX2VuY3J5cHRlZA=="  # GPT's: base64 of "rsn_encrypted"
+    thinking = AmazonConverseConfig()._transform_thinking_blocks(
+        [{"redactedContent": blob}])
+    messages = [{"role": "user", "content": "q"},
+                {"role": "assistant", "content": "a",
+                 "thinking_blocks": thinking},
+                {"role": "user", "content": "q2"}]
+
+    def sent():
+        return asyncio.run(converse._bedrock_converse_messages_pt_async(
+            messages, "global.openai.gpt-6-sol", "bedrock_converse"))
+
+    def reasoning(converted):
+        return [block for message in converted
+                for block in message["content"] if "reasoningContent" in block]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(converse, name, staticmethod(
+            getattr(converse, name).__wrapped__))
+        alone = sent()
+    assert reasoning(alone) == [], "LiteLLM keeps it now: drop _keep_redacted"
+    assert sent() == alone
+    replies = local_chat._Replies("bedrock/global.openai.gpt-6-sol")
+    replies.last = messages
+    monkeypatch.setitem(local_chat._REQUESTS, "call", replies)
+    assert reasoning(sent()) == [
+        {"reasoningContent": {"redactedContent": blob}}]
+    own = [{"reasoningContent": {"redactedContent": "LiteLLM's"}}]
+    assert local_chat._keep_redacted(lambda blocks: own)(thinking) == own
+
+
+@needs_agents
+def test_fill_hook_returns_when_callbacks_are_replaced(client, store_path,
+                                                       monkeypatch):
+    """A caller replacing litellm.callbacks mid-run doesn't turn the fill
+    off: each request puts the hook back."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.integrations.custom_logger import CustomLogger
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                                _litellm_reply("A")])
+
+    class Replace(CustomLogger):
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            litellm.callbacks = [callback for callback in litellm.callbacks
+                                 if callback is not local_chat._fill_hook]
+
+    monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Replace()])
+    messages = client.chat_completions("q", doc_id=doc_id,
+                                       model="gpt-test")["messages"]
+    assert [m["role"] for m in messages] == ["assistant", "tool", "assistant"]
+    assert all(m.get("model") == "openai/gpt-test" for m in messages
+               if m["role"] == "assistant")
+
+
+@needs_agents
+def test_a_request_the_fill_missed_returns_the_sdks_messages(
+        client, store_path, monkeypatch):
+    """A request that went out without the fill (here a hook ahead of it
+    drops the call id) leaves no record of what was sent, so the returned
+    messages are the SDK's own conversion, tool turns whole."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.integrations.custom_logger import CustomLogger
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                                _litellm_reply("A")])
+
+    class Strip(CustomLogger):
+        requests = 0
+
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            Strip.requests += 1
+            if Strip.requests == 2:
+                return {key: value for key, value in kwargs.items()
+                        if key != "litellm_call_id"}
+
+    monkeypatch.setattr(litellm, "callbacks", [Strip(), *litellm.callbacks])
+    messages = client.chat_completions("q", doc_id=doc_id,
+                                       model="gpt-test")["messages"]
+    assert [m["role"] for m in messages] == ["assistant", "tool", "assistant"]
+    assert not any("model" in m for m in messages)
+
+
+@needs_agents
+def test_another_callbacks_own_call_is_not_the_runs(client, store_path,
+                                                    monkeypatch):
+    """A LiteLLM call another callback makes during a chat request is
+    neither filled nor recorded as the run's, so the returned messages
+    keep the run's tool turns."""
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.integrations.custom_logger import CustomLogger
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    _mock_litellm(monkeypatch, [
+        _litellm_reply(tool_calls=_TWO_CALLS[:1]), _litellm_reply("checked"),
+        _litellm_reply("A"), _litellm_reply("checked")])
+    check = {"role": "user", "content": "check"}
+
+    class Guard(CustomLogger):
+        async def async_pre_call_deployment_hook(self, kwargs, call_type):
+            if kwargs["messages"][-1] != check:
+                await litellm.acompletion(model="openai/guard",
+                                          messages=[check], api_key="k")
+
+    monkeypatch.setattr(litellm, "callbacks", [*litellm.callbacks, Guard()])
+    messages = client.chat_completions("q", doc_id=doc_id,
+                                       model="gpt-test")["messages"]
+    assert [m["role"] for m in messages] == ["assistant", "tool", "assistant"]
+    assert all(m.get("model") == "openai/gpt-test" for m in messages
+               if m["role"] == "assistant")
+    assert messages[-1]["content"] == "A"
+
+
+def test_gateways_get_cache_marks_for_claude():
+    """Claude caches only on marks, so it gets them through a gateway too.
+    Every other model caches by itself and gets none, as on OpenAI's own
+    API, where marks turn on explicit caching and lose its automatic
+    hits."""
+    pytest.importorskip("litellm")
+    relay = "https://openrouter.ai/api/v1"
+    for name in ("openai/anthropic/claude-x", "litellm/openai/Claude-x"):
+        assert local_chat._cache_extra_args(name, relay), name
+    assert local_chat._cache_extra_args("openrouter/anthropic/claude-x")
+    for name, base in (("openai/x-ai/grok-x", relay), ("gpt-x", relay),
+                       ("litellm/openai/qwen/x", relay),
+                       ("openai/deepseek-chat", "https://api.deepseek.com"),
+                       ("openrouter/x-ai/grok-x", None), ("gpt-x", None),
+                       ("openai/gpt-x", "https://api.openai.com/v1"),
+                       ("openai/gpt-x", "https://us.api.openai.com/v1"),
+                       ("gemini/gemini-x", relay)):
+        assert local_chat._cache_extra_args(name, base) is None, (name, base)
+
+
+@needs_agents
+@pytest.mark.parametrize("model, backend, env, blocks", [
+    ("openai/anthropic/claude-test",
+     {"base_url": "https://openrouter.ai/api/v1", "api_key": "k"}, None,
+     True),
+    # the gateway LiteLLM reads from the environment
+    ("openai/anthropic/claude-test", None, "https://openrouter.ai/api/v1",
+     True),
+    ("anthropic/claude-test", None, None, False),
+])
+def test_gateway_requests_send_user_text_as_blocks(client, store_path,
+                                                   monkeypatch, model,
+                                                   backend, env, blocks):
+    """Through a gateway every request carries the marks with user text
+    as content blocks: a gateway keeps a mark only inside a block and
+    merges adjacent text messages, so a message keeps one shape whether
+    or not it holds this request's mark. A Claude route sends the text as
+    is, and LiteLLM places the marks itself."""
+    pytest.importorskip("litellm")
+    if env:
+        monkeypatch.setenv("OPENAI_BASE_URL", env)
+    marks = []
+    first, sent = _two_turns(store_path, monkeypatch, client, model,
+                             _litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                             marks, backend=backend)
+    assert len(marks) == len(sent) == 3 and all(marks)
+    users = [m for messages in sent for m in messages if m["role"] == "user"]
+    assert users and all(isinstance(m["content"], list) == blocks
+                         for m in users)
+    assert sent[2][:len(sent[1])] == sent[1]
+
+
+@needs_agents
+def test_gateway_refusing_marks_goes_again_without_them(client, store_path,
+                                                        monkeypatch):
+    """A gateway that refuses cache_control gets the request again without
+    the marks, and none for the rest of the call; the next call tries them
+    afresh."""
+    pytest.importorskip("litellm")
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    marks = []
+    _mock_litellm(monkeypatch, [
+        _refusal("cache_control"), _litellm_reply(tool_calls=_TWO_CALLS[:1]),
+        _litellm_reply("A"), _refusal("cache_control"), _litellm_reply("A")],
+        marks)
+    backend = {"base_url": "https://gateway.example/v1", "api_key": "k"}
+    for _ in range(2):
+        out = client.chat_completions("q", doc_id=doc_id, backend=backend,
+                                      model="openai/anthropic/claude-strict")
+        assert out.choices[0].message.content == "A"
+    assert [bool(points) for points in marks] == [True, False, False, True,
+                                                  False]
+
+
+@needs_agents
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("error, fails, calls", [
+    (_model_rate_limited, 2, 3), (_model_rate_limited, 9, 4), (_model_key_missing, 9, 1)],
+    ids=["recovers", "exhausted", "local"])
+def test_chat_lane_retries_as_the_official_sdks(client, store_path, monkeypatch,
+                                                stream, error, fails, calls):
+    pytest.importorskip("litellm")
+    import litellm
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    sent = []
+
+    async def acompletion(**kwargs):
+        sent.append(kwargs.get("max_retries"))
+        if len(sent) <= fails:
+            raise error()
+        reply = _litellm_reply("ok")
+        return MockResponseIterator(reply) if kwargs.get("stream") else reply
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+
+    def ask():
+        out = client.chat_completions([{"role": "user", "content": "q"}], doc_id=doc_id,
+                                      model="anthropic/claude-test", stream=stream)
+        return list(out) if stream else out
+
+    if fails < calls:
+        ask()
+    else:
+        with pytest.raises(PageIndexAPIError):
+            ask()
+    assert sent == [0] * calls
+
+
+@needs_agents
+def test_chat_retry_waits_as_the_server_asks():
+    pytest.importorskip("litellm")
+    from agents.retry import RetryDecision
+    from pageindex.retry import agent_policy
+    assert agent_policy(types.SimpleNamespace(error=_model_rate_limited(), attempt=1)) == \
+        RetryDecision(retry=True, delay=0.01)
+    assert agent_policy(types.SimpleNamespace(error=_model_key_missing(), attempt=1)) is False
+
+
+@needs_agents
+def test_chat_retry_budget_follows_the_constant(monkeypatch):
+    monkeypatch.setattr("pageindex.retry.CHAT_RETRIES", 5)
+    assert local_chat._chat_retry(local_chat._Replies("m")).max_retries == 5
+
+
+def test_a_stream_error_retries_by_its_status():
+    """A server's error inside a stream has no httpx error behind it; its
+    status decides: OpenRouter's abort goes again, a content-policy
+    refusal (a 400 LiteLLM's Responses stream raises this way) does not."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import (APIConnectionError,
+                                    ContentPolicyViolationError,
+                                    MidStreamFallbackError)
+    from pageindex.retry import should_retry
+
+    def in_stream(error):
+        return MidStreamFallbackError(message=str(error), model="m",
+                                      llm_provider="openai",
+                                      original_exception=error)
+
+    assert should_retry(in_stream(APIConnectionError(
+        message="The operation was aborted", llm_provider="openai",
+        model="m")))
+    assert not should_retry(in_stream(ContentPolicyViolationError(
+        message="Invalid prompt", llm_provider="openai", model="m")))
 
 
 # ── chat (front door) ──
@@ -454,10 +1990,22 @@ def test_chat_multi_turn_history(client, store_path, fake_model):
 
 
 @needs_agents
+@pytest.mark.parametrize("extra", [{"refusal": None},
+                                   {"reasoning_content": "think"}])
+def test_chat_empty_answer_row_stays_text(client, store_path, fake_model,
+                                          extra):
+    fake = fake_model([[_msg_item("ok")]])
+    empty = {"role": "assistant", "content": ""}
+    client.chat([{"role": "user", "content": "q1"}, {**empty, **extra},
+                 {"role": "user", "content": "q2"}])
+    assert fake.inputs[0][-2] == empty
+
+
+@needs_agents
 def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
                                                   fake_model, monkeypatch):
     """The business door's one thinking knob rides chat_completions'
-    channel unchanged; unset sends nothing."""
+    channel unchanged; unset sends no effort."""
     seen = {}
     real = local_chat._openai_agent
 
@@ -469,10 +2017,10 @@ def test_chat_reasoning_effort_reaches_the_engine(client, store_path,
     monkeypatch.setattr(local_chat, "_openai_agent", spy)
     fake_model([[_msg_item("ok")]])
     client.chat("q", reasoning_effort="low")
-    assert seen["settings"].extra_args["reasoning_effort"] == "low"
+    assert seen["settings"].reasoning.effort == "low"
     fake_model([[_msg_item("ok")]])
     client.chat("q")
-    assert seen["settings"].extra_args is None
+    assert seen["settings"].extra_args == {"max_retries": 0}
 
 
 def test_chat_cloud_unwraps_envelope(monkeypatch):
@@ -590,6 +2138,34 @@ def test_chat_process_managed_off_is_clean_answer(monkeypatch):
     plain = "".join(cloud.chat("q", stream=True, show_process=False))
     assert plain == "Let me check.The answer"
     assert "doc_name" not in plain
+
+
+@pytest.mark.parametrize("finish", ["length", "max_tokens", "refusal",
+                                    "model_context_window_exceeded"])
+def test_managed_chat_raises_on_an_unfinished_answer(monkeypatch, finish):
+    """The managed answer lane holds an unfinished answer to the same
+    rule: a stream raises after its text, a plain call carries the text
+    on the error (no usage: it is not an own-model run)."""
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    cut = _cloud_chunk(None)
+    cut["choices"][0]["finish_reason"] = finish
+
+    def fake_cc(**kwargs):
+        if kwargs.get("stream"):
+            return iter([_cloud_chunk("The range was"), cut])
+        return {"choices": [{"message": {"content": "The range was"},
+                             "finish_reason": finish}]}
+
+    monkeypatch.setattr(cloud._api, "chat_completions", fake_cc)
+    text = []
+    with pytest.raises(PageIndexAPIError, match=finish):
+        for piece in cloud.chat("q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        cloud.chat("q")
+    assert info.value.partial_answer == "The range was"
+    assert info.value.usage is None
 
 
 def test_chat_process_managed_open_block_never_leaks(monkeypatch):
@@ -936,16 +2512,23 @@ def test_responses_end_to_end(client, store_path, fake_model):
     assert result["id"].startswith("resp_")
     assert result["object"] == "response"
     assert result["status"] == "completed"
+    call = {"input_tokens": 10,
+            "input_tokens_details": {"cached_tokens": 0,
+                                     "cache_write_tokens": 0},
+            "output_tokens": 5,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": 15}
     assert result["usage"] == {
         "input_tokens": 20,
         "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
         "output_tokens": 10,
         "output_tokens_details": {"reasoning_tokens": 0},
-        "total_tokens": 30}
+        "total_tokens": 30,
+        "request_usage_entries": [call, call]}
     assert fake_model.state["protocols"][0][0] == "responses"
     assert [item.get("type", "message") for item in result["output"]] == [
         "function_call", "message"]
-    assert [item.get("type", "message") for item in result["items"]] == [
+    assert [item.get("type", "message") for item in result["messages"]] == [
         "function_call", "function_call_output", "message"]
     # The final item is the assistant answer.
     assert "The answer" in json.dumps(result["output"][-1])
@@ -964,7 +2547,7 @@ def test_responses_round_trip_extends_prefix(client, store_path, fake_model):
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up)
     previous_final = first.inputs[-1]
@@ -984,7 +2567,7 @@ def test_responses_round_trip_prefix_with_doc_id(client, store_path, fake_model)
 
     second = fake_model([[_msg_item("Done")]])
     follow_up = ([{"role": "user", "content": "What status?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up, doc_id="pi-a")
     previous_final = first.inputs[-1]
@@ -1017,7 +2600,7 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
 
     fake_model([[_msg_item("c")]])
     follow_up = ([{"role": "user", "content": "What is the CAGR?"}]
-                 + result["items"]
+                 + result["messages"]
                  + [{"role": "user", "content": "and now?"}])
     client._responses(follow_up, doc_id="pi-a")
     assert keys[2] == keys[0]  # a continuation keeps its conversation's key
@@ -1062,7 +2645,7 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
     assert final["usage"]["total_tokens"] == 30
     assert [item.get("type", "message") for item in final["output"]] == [
         "function_call", "message"]
-    assert [item.get("type", "message") for item in final["items"]] == [
+    assert [item.get("type", "message") for item in final["messages"]] == [
         "function_call", "function_call_output", "message"]
     # output_index addresses the logical response.output: turn 2's deltas
     # are re-based past turn 1's item instead of restarting at 0.
@@ -1070,6 +2653,128 @@ def test_responses_stream_passthrough(client, store_path, fake_model):
                   if event.get("type") == "response.output_text.delta"][-1]
     assert (final["output"][last_delta["output_index"]]
             .get("type", "message") == "message")
+
+
+def _cut_response():
+    """A billed response cut at the output cap: its text, and a tool call
+    it never finished, each after its reasoning."""
+    from openai.types.responses import Response, ResponseReasoningItem
+    from openai.types.responses.response import IncompleteDetails
+    from openai.types.responses.response_usage import (
+        InputTokensDetails, OutputTokensDetails, ResponseUsage)
+    return Response(
+        id="resp_cut", created_at=0.0, model="fake", object="response",
+        output=[ResponseReasoningItem(id="rs_1", type="reasoning", summary=[]),
+                _msg_item("cut"),
+                ResponseReasoningItem(id="rs_2", type="reasoning", summary=[]),
+                _call_item("get_document", {"doc_n": 1}, "call_9")],
+        parallel_tool_calls=False, tool_choice="auto", tools=[],
+        status="incomplete",
+        incomplete_details=IncompleteDetails(reason="max_output_tokens"),
+        usage=ResponseUsage(
+            input_tokens=40, output_tokens=99, total_tokens=139,
+            input_tokens_details=InputTokensDetails(
+                cached_tokens=0, cache_write_tokens=0),
+            output_tokens_details=OutputTokensDetails(reasoning_tokens=0)))
+
+
+@needs_agents
+def test_responses_stream_counts_a_call_cut_short(client, store_path,
+                                                  fake_model):
+    """openai-agents raises on response.incomplete before its hooks or
+    items see the call, yet that call was billed and its text streamed:
+    the terminal envelope counts it and keeps the text, but not a
+    half-written tool call, which has no output to pair with."""
+    from openai.types.responses import ResponseIncompleteEvent
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                       [_msg_item("cut")]])
+    first_turn = fake.stream_response
+
+    async def stream_response(*args, **kwargs):
+        if not fake.inputs:
+            async for event in first_turn(*args, **kwargs):
+                yield event
+            return
+        fake._record(args[0], args[1])
+        yield ResponseIncompleteEvent(type="response.incomplete",
+                                      sequence_number=1,
+                                      response=_cut_response())
+
+    fake.stream_response = stream_response
+    final = list(client._responses("q", stream=True))[-1]
+    assert final["type"] == "response.incomplete"
+    usage = final["response"]["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
+    assert [item.get("id") for item in final["response"]["messages"]] == [
+        "fc_1", None, "rs_1", "msg_1"]
+    assert final["response"]["output"][-1]["content"][0]["text"] == "cut"
+
+
+@needs_agents
+def test_responses_counts_a_call_cut_short(client, store_path, fake_model):
+    """The non-streamed twin: a response cut short ends the run once the
+    transport returned it, before openai-agents' hooks see it, and the
+    envelope keeps it, as above."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake = fake_model([
+        [_call_item("get_document", {"doc_name": "report.pdf"})],
+        [_msg_item("never reached")]])
+    replies = [types.SimpleNamespace(status="completed",
+                                     incomplete_details=None, error=None),
+               _cut_response()]
+
+    async def create(*args, **kwargs):
+        return replies.pop(0)
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client._responses("q")
+    assert result["status"] == "incomplete"
+    usage = result["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
+    assert [item.get("id") for item in result["messages"]] == [
+        "fc_1", None, "rs_1", "msg_1"]
+    assert result["output"][-1]["content"][0]["text"] == "cut"
+    from openai.types.responses import Response
+    Response.model_validate(result)  # still the official shape
+
+
+def _same_thread(agen_factory):
+    """_stream_sync without its pump thread: the generator advances only
+    when the caller asks for the next event, so the caller's edits between
+    events land at a known point."""
+    loop = asyncio.new_event_loop()
+    agen = agen_factory()
+    try:
+        while True:
+            try:
+                yield loop.run_until_complete(agen.__anext__())
+            except StopAsyncIteration:
+                return
+    finally:
+        loop.run_until_complete(agen.aclose())
+        loop.close()
+
+
+@needs_agents
+def test_responses_in_progress_owns_its_snapshot_before_created_is_read(
+        client, store_path, fake_model, monkeypatch):
+    """in_progress copies the opening snapshot before created is handed
+    out: an edit to created the moment it arrives stays out of it."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")]]).emit_created = True
+    monkeypatch.setattr(local_chat, "_stream_sync", _same_thread)
+    # closed on a failed assert too: left to gc, the open run deadlocks
+    with contextlib.closing(client._responses("q", stream=True)) as events:
+        created = next(events)
+        created["response"]["status"] = "edited"
+        progress = next(events)
+        assert progress["type"] == "response.in_progress"
+        assert progress["response"]["status"] != "edited"
+        list(events)
 
 
 @needs_agents
@@ -1088,6 +2793,12 @@ def test_responses_stream_opens_with_created(client, store_path, fake_model):
     created = [e for e in events if e["type"] == "response.created"]
     assert len(created) == 1 and events[0] is created[0]
     assert events[0]["sequence_number"] == 1
+    in_progress = [e for e in events if e["type"] == "response.in_progress"]
+    assert len(in_progress) == 1 and events[1] is in_progress[0]
+    assert events[1]["sequence_number"] == 2
+    assert events[1]["response"]["id"] == events[0]["response"]["id"]
+    events[1]["response"]["status"] = "edited"  # each event owns its snapshot
+    assert events[0]["response"]["status"] != "edited"
     terminal = events[-1]
     assert terminal["type"] == "response.completed"
     assert created[0]["response"]["id"] == terminal["response"]["id"]
@@ -1111,7 +2822,80 @@ def test_responses_envelope_validates_as_official_response(client, store_path,
     parsed = Response.model_validate(result)
     assert [item.type for item in parsed.output] == ["function_call",
                                                      "message"]
-    assert parsed.model_dump()["items"] == result["items"]
+    assert parsed.model_dump()["messages"] == result["messages"]
+    assert "items" not in parsed.model_dump()
+
+
+@needs_agents
+def test_responses_items_reads_messages_with_a_warning(client, store_path,
+                                                       fake_model):
+    """The transcript's old name still reads, warned, on the envelope and the
+    stream's terminal one, and is never stored: keys and JSON carry it once."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")], [_msg_item("The answer")]])
+    for result in (client._responses("q"),
+                   list(client._responses("q", stream=True))[-1]["response"]):
+        with pytest.warns(DeprecationWarning, match='"items" is now "messages"'):
+            assert result["items"] is result["messages"]
+        with pytest.warns(DeprecationWarning):
+            assert result.get("items") is result["messages"]
+        with pytest.warns(DeprecationWarning):
+            assert "items" in result
+        assert "items" not in list(result)
+        assert '"items"' not in json.dumps(result)
+
+
+@needs_agents
+def test_openai_lanes_read_by_key_and_by_attribute(client, store_path,
+                                                   fake_model):
+    """Chat Completions and Responses envelopes, chunks and events are dicts
+    that also read as the official SDK objects: the same values both ways,
+    an official field the dict lacks reads None, any other name raises."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_msg_item("The answer")]] * 4)
+    r = client.chat_completions("q")
+    assert isinstance(r, dict) and json.loads(json.dumps(r)) == r
+    assert isinstance(r, ChatObject)
+    # yaml writes it as the plain mapping it is, safe_dump included
+    assert yaml.safe_load(yaml.safe_dump(r)) == r
+    assert yaml.safe_load(yaml.dump(r)) == r
+    for name in ("CSafeDumper", "CDumper"):  # libyaml's, when built
+        if hasattr(yaml, name):
+            assert yaml.safe_load(yaml.dump(r, Dumper=getattr(yaml, name))) == r
+    bare = ChatObject({"a": 1})  # no official type behind it
+    assert bare["a"] == 1 and not hasattr(bare, "a")
+    assert getattr(bare, "a", None) is None
+    assert (r.choices[0].message.content
+            == r["choices"][0]["message"]["content"] == "The answer")
+    assert r.system_fingerprint is None
+    assert r.choices[0].message.refusal is None
+    assert r.messages == r["messages"]
+    with pytest.raises(AttributeError):
+        r.choicez
+    chunks = list(client.chat_completions("q", stream=True,
+                                          stream_metadata=True))
+    assert "".join(chunk.choices[0].delta.content or ""
+                   for chunk in chunks if chunk.choices) == "The answer"
+    assert chunks[-1].usage.total_tokens == chunks[-1]["usage"]["total_tokens"]
+    r = client._responses("q")
+    assert r.output_text == "The answer" and r.messages == r["messages"]
+    with pytest.raises(AttributeError, match="read-only"):
+        r.model = "other"  # would shadow r["model"], which stays the truth
+    for clone in (copy.copy(r), copy.deepcopy(r), pickle.loads(pickle.dumps(r))):
+        assert type(clone) is type(r) and clone == r
+        assert clone.output_text == "The answer"
+    events = list(client._responses("q", stream=True))
+    assert [event.type for event in events] == [e["type"] for e in events]
+    assert events[-1].response.output_text == "The answer"
+    # as the SDK reads the wire: a value it doesn't know reads as sent
+    odd = local_chat._ChatCompletion({"choices": [
+        {"index": 0, "finish_reason": "max_tokens",
+         "message": {"role": "assistant", "content": "cut"}}]})
+    assert odd.choices[0].finish_reason == "max_tokens"
+    assert odd.choices[0].message.content == "cut"
+    future = local_chat._ResponsesEvent({"type": "response.future_event",
+                                         "sequence_number": 1})
+    assert future.type == "response.future_event"
 
 
 @needs_agents
@@ -1131,6 +2915,162 @@ def test_responses_stream_events_validate_as_official_events(
     assert events
     for event in events:
         adapter.validate_python(event)
+
+
+# ── conformance: the official SDKs read each lane as their own wire ──
+
+@needs_agents
+def test_chat_completions_conforms_to_the_official_sdk(client, store_path,
+                                                       monkeypatch):
+    """Through the real LitellmModel, the envelope parses as ChatCompletion
+    and the openai SDK's own stream accumulator rebuilds it from the
+    chunks: same text, finish reason and usage."""
+    import litellm
+    from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletion, ChatCompletionChunk
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+
+    def call(**settings):
+        replies = [_litellm_reply(tool_calls=_TWO_CALLS[:1]),
+                   _litellm_reply("The answer")]
+
+        async def acompletion(**kwargs):
+            reply = replies.pop(0)
+            return (MockResponseIterator(reply) if kwargs.get("stream")
+                    else reply)
+
+        monkeypatch.setattr(litellm, "acompletion", acompletion)
+        return client.chat_completions("q", doc_id=doc_id, model="gpt-test",
+                                       **settings)
+
+    envelope = ChatCompletion.model_validate(call())
+    state = ChatCompletionStreamState()
+    for chunk in call(stream=True, stream_metadata=True):
+        state.handle_chunk(ChatCompletionChunk.model_validate(chunk))
+    rebuilt = state.get_final_completion()
+    assert rebuilt.choices[0].message.content == "The answer"
+    assert (rebuilt.choices[0].message.content
+            == envelope.choices[0].message.content)
+    assert (rebuilt.choices[0].finish_reason
+            == envelope.choices[0].finish_reason == "stop")
+    assert rebuilt.usage and envelope.usage
+    assert rebuilt.usage.total_tokens == envelope.usage.total_tokens == 30
+
+
+_RESPONSES_USAGE = {"input_tokens": 10, "output_tokens": 5,
+                    "total_tokens": 15,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens_details": {"reasoning_tokens": 0}}
+
+
+def _responses_turn(response_id, item, status="completed"):
+    return {"id": response_id, "object": "response", "created_at": 1,
+            "status": status, "model": "gpt-test",
+            "output": [item] if status == "completed" else [],
+            "parallel_tool_calls": True, "tool_choice": "auto", "tools": [],
+            "usage": _RESPONSES_USAGE if status == "completed" else None}
+
+
+def _responses_sse(response_id, item):
+    """One turn as the Responses API streams it: lifecycle, item, deltas."""
+    opening = _responses_turn(response_id, item, "in_progress")
+    events = [{"type": "response.created", "response": opening},
+              {"type": "response.in_progress", "response": opening}]
+    started = ({**item, "status": "in_progress", "content": []}
+               if item["type"] == "message"
+               else {**item, "status": "in_progress", "arguments": ""})
+    events.append({"type": "response.output_item.added", "output_index": 0,
+                   "item": started})
+    if item["type"] == "function_call":
+        events += [
+            {"type": "response.function_call_arguments.delta",
+             "item_id": item["id"], "output_index": 0,
+             "delta": item["arguments"]},
+            {"type": "response.function_call_arguments.done",
+             "item_id": item["id"], "output_index": 0,
+             "arguments": item["arguments"], "name": item["name"]}]
+    else:
+        part = {"type": "output_text", "text": "", "annotations": [],
+                "logprobs": []}
+        events.append({"type": "response.content_part.added",
+                       "item_id": item["id"], "output_index": 0,
+                       "content_index": 0, "part": part})
+        events += [{"type": "response.output_text.delta",
+                    "item_id": item["id"], "output_index": 0,
+                    "content_index": 0, "delta": piece, "logprobs": []}
+                   for piece in ("The ", "answer")]
+        events += [
+            {"type": "response.output_text.done", "item_id": item["id"],
+             "output_index": 0, "content_index": 0, "text": "The answer",
+             "logprobs": []},
+            {"type": "response.content_part.done", "item_id": item["id"],
+             "output_index": 0, "content_index": 0,
+             "part": {**part, "text": "The answer"}}]
+    events += [{"type": "response.output_item.done", "output_index": 0,
+                "item": item},
+               {"type": "response.completed",
+                "response": _responses_turn(response_id, item)}]
+    return "".join(
+        f"event: {e['type']}\n"
+        f"data: {json.dumps({**e, 'sequence_number': n})}\n\n"
+        for n, e in enumerate(events, 1))
+
+
+@needs_agents
+def test_responses_conforms_to_the_official_sdk(client, store_path):
+    """Over the real OpenAIResponsesModel and an HTTP-level fake of the
+    Responses API, a two-turn run's envelope parses as Response and the
+    openai SDK's stream accumulator takes its events: one logical
+    response, opened by created then in_progress, monotonic sequence
+    numbers, each delta on the item its output_index names."""
+    from openai import omit
+    from openai.lib.streaming.responses import ResponseStreamState
+    from openai.types.responses import Response, ResponseStreamEvent
+    from pydantic import TypeAdapter
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    call_item = {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+                 "name": "get_document",
+                 "arguments": '{"doc_name": "report.pdf"}',
+                 "status": "completed"}
+    message_item = {"type": "message", "id": "msg_1", "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "The answer",
+                                 "annotations": [], "logprobs": []}]}
+
+    def call(stream):
+        turns = [("resp_1", call_item), ("resp_2", message_item)]
+
+        def handler(request):
+            response_id, item = turns.pop(0)
+            if json.loads(request.content).get("stream"):
+                return httpx.Response(
+                    200, content=_responses_sse(response_id, item).encode(),
+                    headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json=_responses_turn(response_id, item))
+
+        backend = {"http_client": httpx.AsyncClient(
+                       transport=httpx.MockTransport(handler)),
+                   "api_key": "test", "base_url": "http://responses.test/v1"}
+        return client.chat("q", protocol="responses", doc_id=doc_id,
+                           model="gpt-test", stream=stream, backend=backend)
+
+    assert Response.model_validate(call(False)).output_text == "The answer"
+    events = list(call(True))
+    adapter = TypeAdapter(ResponseStreamEvent)
+    state = ResponseStreamState(input_tools=omit, text_format=omit)
+    for event in events:
+        # it asserts each delta lands on the item output_index names
+        state.handle_event(adapter.validate_python(event))
+    assert [e["type"] for e in events[:2]] == ["response.created",
+                                               "response.in_progress"]
+    sequence = [e["sequence_number"] for e in events]
+    assert sequence == list(range(1, len(events) + 1))
+    terminal = events[-1]["response"]
+    assert terminal["id"] == events[0]["response"]["id"]
+    assert [item["type"] for item in terminal["output"]] == [
+        "function_call", "message"]
+    assert Response.model_validate(terminal).output_text == "The answer"
 
 
 # ── messages (Anthropic engine) ──
@@ -1164,21 +3104,31 @@ def _anthropic_message(content, stop_reason):
 
 
 def _anthropic_sse(message):
-    """Render text/tool turns for the real streaming tool runner."""
+    """Render text, thinking and tool turns for a real streaming parser."""
     events = [{"type": "message_start", "message": {
         **message, "content": [], "stop_reason": None}}]
     for index, block in enumerate(message["content"]):
         if block["type"] == "tool_use":
             initial = {**block, "input": {}}
-            delta = {"type": "input_json_delta",
-                     "partial_json": json.dumps(block["input"])}
+            deltas = [{"type": "input_json_delta",
+                       "partial_json": json.dumps(block["input"])}]
+        elif block["type"] == "thinking":
+            # the text in two deltas, then its signature in its own
+            initial = {**block, "thinking": "", "signature": ""}
+            half = len(block["thinking"]) // 2
+            deltas = [{"type": "thinking_delta", "thinking": text}
+                      for text in (block["thinking"][:half],
+                                   block["thinking"][half:])]
+            deltas.append({"type": "signature_delta",
+                           "signature": block["signature"]})
         else:
             initial = {**block, "text": ""}
-            delta = {"type": "text_delta", "text": block["text"]}
+            deltas = [{"type": "text_delta", "text": block["text"]}]
         events.extend([
             {"type": "content_block_start", "index": index,
              "content_block": initial},
-            {"type": "content_block_delta", "index": index, "delta": delta},
+            *({"type": "content_block_delta", "index": index, "delta": delta}
+              for delta in deltas),
             {"type": "content_block_stop", "index": index},
         ])
     events.extend([
@@ -1201,6 +3151,8 @@ def fake_anthropic(monkeypatch):
         def handler(request):
             state["calls"].append(json.loads(request.content))
             body = responses[len(state["calls"]) - 1]
+            if isinstance(body, anthropic_httpx.Response):  # an error reply
+                return body
             if isinstance(body, str):  # pre-rendered SSE
                 return anthropic_httpx.Response(
                     200, content=body.encode(),
@@ -1234,6 +3186,14 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
     assert result["content"][0]["text"] == "The answer"
     assert result["usage"]["input_tokens"] == 20
     assert result["usage"]["output_tokens"] == 10
+    # Each turn is one sampling iteration of the API's own breakdown.
+    assert result["usage"]["iterations"] == 2 * [{
+        "type": "message", "model": "claude-test", "input_tokens": 10,
+        "output_tokens": 5, "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0, "cache_creation": None}]
+    from anthropic.types.beta import BetaMessageIterationUsage, BetaUsage
+    native = BetaUsage.model_validate(result["usage"]).iterations or []
+    assert all(isinstance(it, BetaMessageIterationUsage) for it in native)
     # Full new-turn sequence, valid for verbatim history append.
     roles = [message["role"] for message in result["messages"]]
     assert roles == ["assistant", "user", "assistant"]
@@ -1249,6 +3209,280 @@ def test_messages_end_to_end(client, store_path, fake_anthropic):
     # Native prefix continuation: request 2 extends request 1's messages.
     assert calls[1]["messages"][:len(calls[0]["messages"])] \
         == calls[0]["messages"]
+
+
+@needs_anthropic
+def test_messages_usage_sums_every_count_across_turns():
+    from anthropic.types.beta import BetaUsage
+
+    def turn(usage):
+        return BetaUsage.model_validate(usage).model_dump(mode="json")
+
+    first = turn({
+        "input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 4,
+        "cache_creation": {"ephemeral_5m_input_tokens": 3,
+                           "ephemeral_1h_input_tokens": 0},
+        "output_tokens_details": {"thinking_tokens": 2},
+        "server_tool_use": {"web_search_requests": 1,
+                            "web_fetch_requests": 0},
+        "iterations": [{"type": "compaction", "input_tokens": 7,
+                        "output_tokens": 1, "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0}],
+        "service_tier": "priority",
+        "fallback_credit": {"status": {"type": "not_applied",
+                                       "reason": "expired",
+                                       "remove_to_redeem": ["speed"]}},
+        "undeclared_count": 7, "cost": 0.25,
+        "undeclared_usage": {"requests": 1, "by_tool": {"runs": 2}}})
+    last = turn({
+        "input_tokens": 20, "output_tokens": 6,
+        "cache_creation": {"ephemeral_5m_input_tokens": 1,
+                           "ephemeral_1h_input_tokens": 2},
+        "output_tokens_details": {"thinking_tokens": 3},
+        "server_tool_use": {"web_search_requests": 2,
+                            "web_fetch_requests": 1},
+        "iterations": [{"type": "message", "model": "claude-test",
+                        "input_tokens": 20, "output_tokens": 6,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0}],
+        "service_tier": "standard",
+        "fallback_credit": {"status": {"type": "redeemed"}}, "cost": 0.5,
+        "undeclared_usage": {"requests": 1, "by_tool": {"runs": 3}}})
+
+    usage = local_chat._anthropic_usage([(first, "claude-test"),
+                                         (last, "claude-test")])
+    assert usage == {
+        **last,
+        "input_tokens": 30, "output_tokens": 11,
+        "cache_read_input_tokens": 4, "cache_creation_input_tokens": None,
+        "cache_creation": {"ephemeral_5m_input_tokens": 4,
+                           "ephemeral_1h_input_tokens": 2},
+        "output_tokens_details": {"thinking_tokens": 5},
+        "server_tool_use": {"web_search_requests": 3,
+                            "web_fetch_requests": 1},
+        "iterations": first["iterations"] + last["iterations"],
+        "undeclared_count": 7, "cost": 0.75,
+        "undeclared_usage": {"requests": 2, "by_tool": {"runs": 5}},
+    }
+    assert usage["service_tier"] == "standard"
+    assert usage["fallback_credit"] == {"status": {"type": "redeemed"}}
+
+
+@needs_anthropic
+def test_messages_stream_final_message_is_the_non_stream_result(
+        client, store_path, fake_anthropic):
+    seed_doc(store_path, "pi-a", "r.pdf")
+    replies = [_anthropic_message([
+        {"type": "tool_use", "id": tool_id, "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+        for tool_id in ("tu_1", "tu_2")]
+    replies.append(_anthropic_message([{"type": "text", "text": "Done"}],
+                                      "end_turn"))
+    fake_anthropic([_anthropic_sse(reply) for reply in replies])
+    question = [{"role": "user", "content": "q"}]
+    stream = client._messages(question, model="claude-test", max_tokens=100,
+                              stream=True)
+    events = list(stream)
+    assert events[-1].type == "message_stop"
+    assert events[-1].message.content[0].text == "Done"
+    final = stream.get_final_message()
+    assert stream.get_final_text() == "Done"
+
+    # Called mid-stream, it reads the rest of the run first.
+    fake_anthropic([_anthropic_sse(reply) for reply in replies])
+    early = client._messages(question, model="claude-test", max_tokens=100,
+                             stream=True)
+    next(early)
+    early_usage = early.get_final_message()["usage"]
+
+    fake_anthropic(replies)
+    result = client._messages(question, model="claude-test", max_tokens=100)
+    assert result["usage"]["input_tokens"] == 30
+    assert final["usage"] == early_usage == result["usage"]
+    assert final.usage.input_tokens == 30
+    assert final.stop_reason == result["stop_reason"] == "end_turn"
+    assert final == result
+    # The same continuation transcript the non-stream envelope carries.
+    assert [m["role"] for m in final.messages] == [
+        "assistant", "user", "assistant", "user", "assistant"]
+    assert final.messages == result["messages"]
+
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "Do"}], "max_tokens"))])
+    cut = client._messages(question, model="claude-test", max_tokens=100,
+                           stream=True).get_final_message()
+    assert cut.stop_reason == "max_tokens"
+    # a bare string can't mark the cut, so get_final_text() raises instead
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "Do"}], "max_tokens"))])
+    with pytest.raises(PageIndexAPIError, match="unfinished") as err:
+        client._messages(question, model="claude-test", max_tokens=100,
+                         stream=True).get_final_text()
+    assert err.value.partial_answer == "Do"
+    assert err.value.usage["output_tokens"] == 5
+    # every text block joins (citations split an answer); a stop sequence
+    # is a finished answer
+    fake_anthropic([_anthropic_sse(_anthropic_message(
+        [{"type": "text", "text": "The "}, {"type": "text", "text": "answer"}],
+        "stop_sequence"))])
+    assert client._messages(question, model="claude-test", max_tokens=100,
+                            stream=True).get_final_text() == "The answer"
+
+    fake_anthropic([_anthropic_sse(_anthropic_message([], "end_turn"))])
+    with pytest.raises(PageIndexAPIError, match="no text block"):
+        client._messages(question, model="claude-test", max_tokens=100,
+                         stream=True).get_final_text()
+
+
+@needs_anthropic
+def test_messages_stream_cut_mid_message_raises(client, store_path,
+                                                fake_anthropic):
+    seed_doc(store_path, "pi-a", "r.pdf")
+    tool_turn = _anthropic_message([
+        {"type": "tool_use", "id": "tu_1", "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use")
+    answer = _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")
+    cut = _anthropic_sse(answer).rsplit("event: message_delta", 1)[0]
+    fake_anthropic([_anthropic_sse(tool_turn), cut])
+    stream = client._messages("q", model="claude-test", max_tokens=100,
+                              stream=True)
+    with pytest.raises(PageIndexAPIError, match="ended before") as err:
+        stream.get_final_message()
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["input_tokens"] == 10 and len(usage["iterations"]) == 1
+    with pytest.raises(PageIndexAPIError, match="no final message"):
+        stream.get_final_message()
+
+    # Only message_stop missing: the message itself is complete.
+    unstopped = _anthropic_sse(answer).rsplit("event: message_stop", 1)[0]
+    fake_anthropic([_anthropic_sse(tool_turn), unstopped])
+    final = client._messages("q", model="claude-test", max_tokens=100,
+                             stream=True).get_final_message()
+    assert final["usage"]["input_tokens"] == 20
+    assert final.messages[-1]["content"][0]["text"] == "Done"
+
+
+@needs_agents
+@pytest.mark.parametrize("run, key", [
+    (lambda c: c.chat_completions("q"), "prompt_tokens"),
+    (lambda c: list(c.chat_completions("q", stream=True)), "prompt_tokens"),
+    (lambda c: c.chat("q"), "prompt_tokens"),
+    (lambda c: list(c.chat("q", stream=True)), "prompt_tokens"),
+    (lambda c: c._responses("q"), "input_tokens"),
+    (lambda c: list(c._responses("q", stream=True)), "input_tokens"),
+])
+def test_failed_run_carries_the_usage_already_spent(client, store_path,
+                                                    fake_model, run, key):
+    """A provider error on turn 2: openai-agents attaches no run data to
+    it, yet turn 1 was billed and is reported."""
+    import openai
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                openai.APIConnectionError(
+                    request=httpx.Request("POST", "https://backend"))])
+    with pytest.raises(PageIndexAPIError, match="model backend failed") as err:
+        run(client)
+    usage = err.value.usage
+    assert usage is not None
+    assert usage[key] == 10 and usage["total_tokens"] == 15
+    assert len(usage["request_usage_entries"]) == 1
+
+
+def test_run_usage_with_no_finished_call_is_zero():
+    assert local_chat._openai_usage([]) == {
+        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+        "request_usage_entries": []}
+    assert local_chat._responses_usage([])["request_usage_entries"] == []
+
+
+def test_run_usage_maps_each_count_to_its_field():
+    """Distinct non-zero counts, so a swapped column cannot pass."""
+    call = types.SimpleNamespace(usage=types.SimpleNamespace(
+        input_tokens=100, output_tokens=20,
+        input_tokens_details=types.SimpleNamespace(cached_tokens=7,
+                                                   cache_write_tokens=11),
+        output_tokens_details=types.SimpleNamespace(reasoning_tokens=3)))
+    chat = local_chat._openai_usage([call, call])
+    assert chat["request_usage_entries"][0] == {
+        "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+        "prompt_tokens_details": {"cached_tokens": 7, "cache_write_tokens": 11},
+        "completion_tokens_details": {"reasoning_tokens": 3}}
+    assert chat["prompt_tokens_details"] == {"cached_tokens": 14,
+                                             "cache_write_tokens": 22}
+    responses = local_chat._responses_usage([call])
+    assert responses["input_tokens_details"] == {"cached_tokens": 7,
+                                                 "cache_write_tokens": 11}
+    assert responses["output_tokens_details"] == {"reasoning_tokens": 3}
+
+
+@needs_agents
+def test_max_turns_error_carries_the_usage_already_spent(client, store_path,
+                                                         fake_model):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_model([[_call_item("get_document", {"doc_name": "report.pdf"})],
+                [_msg_item("too late")]])
+    with pytest.raises(PageIndexAPIError, match="max_turns") as err:
+        client.chat_completions("q", max_turns=1)
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["prompt_tokens"] == 10
+    assert len(usage["request_usage_entries"]) == 1
+
+
+@needs_anthropic
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_failed_run_carries_the_usage_already_spent(
+        client, store_path, fake_anthropic, stream):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    tool_turn = _anthropic_message(
+        [{"type": "tool_use", "id": "tu_1", "name": "get_document",
+          "input": {"doc_name": "report.pdf"}}], "tool_use")
+    refused = anthropic_httpx.Response(400, json={
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": "no"}})
+    fake_anthropic([_anthropic_sse(tool_turn) if stream else tool_turn,
+                    refused])
+    with pytest.raises(PageIndexAPIError, match="model backend failed") as err:
+        result = client._messages("q", model="claude-test", max_tokens=100,
+                                  stream=stream)
+        list(result) if stream else result
+    usage = err.value.usage
+    assert usage is not None
+    assert usage["input_tokens"] == 10 and usage["output_tokens"] == 5
+    assert len(usage["iterations"]) == 1
+
+    fake_anthropic([refused])  # nothing finished before the failure
+    with pytest.raises(PageIndexAPIError) as err:
+        result = client._messages("q", model="claude-test", max_tokens=100,
+                                  stream=stream)
+        list(result) if stream else result
+    assert err.value.usage == {"input_tokens": 0, "output_tokens": 0,
+                               "iterations": []}
+
+
+@needs_anthropic
+def test_messages_turn_without_usage_counts_nothing(client, store_path,
+                                                    fake_anthropic):
+    seed_doc(store_path, "pi-a", "report.pdf")
+    fake_anthropic([
+        _anthropic_message([{"type": "tool_use", "id": "tu_1",
+                             "name": "get_document",
+                             "input": {"doc_name": "report.pdf"}}],
+                           "tool_use"),
+        {**_anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
+         "usage": None}])
+    result = client._messages("q", model="claude-test", max_tokens=100)
+    assert result["usage"]["input_tokens"] == 10
+    assert len(result["usage"]["iterations"]) == 1
+
+
+def test_validation_error_has_no_usage(client):
+    with pytest.raises(PageIndexAPIError) as err:
+        client.chat_completions("q", max_turns=0)
+    assert err.value.usage is None
 
 
 @needs_anthropic
@@ -1306,6 +3540,82 @@ def test_messages_stream_passthrough(client, store_path, fake_anthropic):
 
 
 @needs_anthropic
+def test_messages_reads_by_key_and_by_attribute(client, store_path,
+                                                fake_anthropic):
+    """The Messages envelope, each stream event and get_final_message() are
+    dicts that also read by attribute, as the Anthropic SDK's objects."""
+    reply = _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")
+    question = [{"role": "user", "content": "q"}]
+    fake_anthropic([reply])
+    r = client._messages(question, model="claude-test", max_tokens=100)
+    assert isinstance(r, dict) and json.loads(json.dumps(r)) == r
+    assert r.content[0].text == r["content"][0]["text"] == "Done"
+    assert r.stop_reason == "end_turn" and r.messages == r["messages"]
+    with pytest.raises(AttributeError):
+        r.contentz
+    fake_anthropic([_anthropic_sse(reply)])
+    stream = client._messages(question, model="claude-test", max_tokens=100,
+                              stream=True)
+    events = list(stream)
+    assert all(isinstance(event, dict) for event in events)
+    assert [event.type for event in events] == [e["type"] for e in events]
+    assert (events[-1].message.content[0].text
+            == events[-1]["message"]["content"][0]["text"] == "Done")
+    for clone in (copy.deepcopy(events[-1]),
+                  pickle.loads(pickle.dumps(events[-1]))):
+        assert type(clone) is type(events[-1]) and clone == events[-1]
+        assert clone.message.content[0].text == "Done"
+    with pytest.raises(AttributeError, match="read-only"):
+        events[-1].type = "other"
+    # the dict is the truth: an edit through the keys shows by attribute
+    delta = next(e for e in events if e["type"] == "content_block_delta")
+    delta["delta"]["text"] = "[redacted]"
+    assert delta.delta.text == "[redacted]"
+    final = stream.get_final_message()
+    assert final.usage.output_tokens == final["usage"]["output_tokens"]
+    assert final.stop_reason == final["stop_reason"] == "end_turn"
+    with pytest.raises(AttributeError):
+        final.usagez
+
+
+@needs_anthropic
+def test_messages_conforms_to_the_official_sdk(client, store_path,
+                                               fake_anthropic):
+    """The envelope parses as the Anthropic SDK's Message; the stream is
+    its tool runner's, one message sequence per turn, every raw event
+    parsing as RawMessageStreamEvent beside the SDK's convenience events."""
+    from anthropic.types import Message, RawMessageStreamEvent
+    from pydantic import TypeAdapter
+    seed_doc(store_path, "pi-a", "r.pdf")
+    turns = [_anthropic_message([
+        {"type": "tool_use", "id": "tu_1", "name": "get_document",
+         "input": {"doc_name": "r.pdf"}}], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "Done"}], "end_turn")]
+    fake_anthropic(turns)
+    envelope = Message.model_validate(
+        client._messages("q", model="claude-test", max_tokens=100))
+    assert envelope.content[0].type == "text"
+    fake_anthropic([_anthropic_sse(turn) for turn in turns])
+    with warnings.catch_warnings():  # the dict views dump the SDK's objects
+        warnings.filterwarnings("error", message="Pydantic serializer")
+        events = list(client._messages("q", model="claude-test",
+                                       max_tokens=100, stream=True))
+    raw_types = {"message_start", "message_delta", "message_stop",
+                 "content_block_start", "content_block_delta",
+                 "content_block_stop"}
+    adapter = TypeAdapter(RawMessageStreamEvent)
+    raw = [event for event in events if event["type"] in raw_types]
+    for event in raw:
+        adapter.validate_python(event)
+    assert {e["type"] for e in events} - raw_types <= {"text", "input_json"}
+    starts = [n for n, e in enumerate(raw) if e["type"] == "message_start"]
+    stops = [n for n, e in enumerate(raw) if e["type"] == "message_stop"]
+    assert len(starts) == len(stops) == len(turns)
+    assert all(start < stop for start, stop in zip(starts, stops))
+    assert all(stop < start for stop, start in zip(stops, starts[1:]))
+
+
+@needs_anthropic
 def test_messages_accepts_query_string(client, fake_anthropic):
     calls = fake_anthropic([
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn"),
@@ -1343,9 +3653,11 @@ def test_messages_raises_when_runner_params_unreadable(client, fake_anthropic,
     ])
     monkeypatch.setattr(BetaToolRunner, "set_messages_params",
                         lambda self, params: None)
-    with pytest.raises(PageIndexAPIError, match="anthropic version"):
+    with pytest.raises(PageIndexAPIError, match="anthropic version") as err:
         client._messages([{"role": "user", "content": "hi"}],
                         model="claude-test", max_tokens=100)
+    usage = err.value.usage  # the finished turn was still billed
+    assert usage is not None and usage["input_tokens"] == 10
 
 
 def test_messages_missing_framework(client, monkeypatch):
@@ -1457,24 +3769,52 @@ def test_responses_envelope_fields_and_cache_group(client, store_path,
     assert result["tool_choice"] == "auto"
 
 
+@needs_agents
+def test_litellm_import_failure_surfaces_its_cause(monkeypatch):
+    pytest.importorskip("agents.extensions.models.litellm_model")
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    with pytest.raises(PageIndexAPIError, match="failed to import") as info:
+        local_chat._openai_model("chat", "anthropic/claude-x")
+    assert "not installed" not in str(info.value)
+    assert isinstance(info.value.__cause__, ImportError)
+
+
 def test_sol_class_refusal_names_its_exits():
-    """The chatcmpl+tools-while-reasoning 400 is a lane problem, not a
-    retry problem — the wrapped error must name every exit that is real
-    for the caller's lane. Chat has three; a Responses-lane caller gets only
-    the litellm upgrade (it IS the other lane, and its reasoning knob is
-    ``reasoning``, not ``reasoning_effort``)."""
+    """The tools-with-reasoning 400 names its exits on the chat lane only."""
     refusal = Exception(
         "Error code: 400 - Function tools with reasoning_effort are not "
         "supported for gpt-5.6-sol in /v1/chat/completions.")
     chat = str(local_chat._model_backend_error(refusal, "chat"))
-    assert "chat(protocol='responses')" in chat and "litellm" in chat
+    assert "chat(protocol='responses')" in chat
     assert "pass reasoning_effort" in chat
+    assert "upgrade" not in chat
     resp = str(local_chat._model_backend_error(refusal, "responses"))
-    assert "upgrade litellm" in resp
-    assert "protocol='responses'" not in resp
-    assert "pass reasoning_effort" not in resp
+    assert resp == f"The model backend failed: {refusal}"
     plain = local_chat._model_backend_error(Exception("rate limited"), "chat")
     assert "protocol='responses'" not in str(plain)
+
+
+def test_an_mcp_too_old_for_litellm_names_the_fix(monkeypatch):
+    """LiteLLM 1.106+ imports its MCP handler on calls with tools; from an
+    older mcp that import fails, inside the connection error LiteLLM
+    raises. The error names both versions and the fix, not the import."""
+    from importlib import metadata
+    monkeypatch.setattr(metadata, "version",
+                        {"mcp": "1.26.0", "litellm": "1.106.6"}.get)
+    try:
+        try:
+            raise ImportError("cannot import name 'CacheableResult' from "
+                              "'mcp.types'", name="mcp.types")
+        except ImportError:
+            raise Exception("litellm.APIConnectionError: cannot import name")
+    except Exception as exc:
+        refused = exc
+    assert str(local_chat._model_backend_error(refused, "chat")) == (
+        "LiteLLM 1.106.6 needs a newer version of `mcp` than the installed "
+        "1.26.0. Run `pip install -U mcp`, or use a different version of "
+        "LiteLLM that works with mcp 1.26.0.")
+    other = ImportError("no module", name="mcpx")
+    assert "failed" in str(local_chat._model_backend_error(other, "chat"))
 
 
 def test_conversation_cache_key_stable_per_conversation():
@@ -1525,29 +3865,30 @@ def test_agent_carries_prompt_cache_key_in_extra_body(monkeypatch):
             doc_ids=None, cache_key="pageindex-k2")
         assert agent.model_settings.extra_body == {
             "prompt_cache_key": "pageindex-k2"}, name
-        assert agent.model_settings.extra_args is None
+        assert agent.model_settings.extra_args == {"max_retries": 0}
 
 
 @needs_agents
 def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
-    """Per-door native reasoning, forwarded verbatim. The chat door's
-    effort rides extra_args — LiteLLM's own top-level kwarg on every
-    supported openai-agents version, and the channel admits values outside
-    the OpenAI enum ("none") — coexisting with the Claude cache marker.
-    The responses door's object rides ModelSettings.reasoning, which the
-    Responses model forwards verbatim. Unset sends nothing."""
+    """Each door forwards its native reasoning; unset sends nothing."""
     pytest.importorskip("litellm")
+    from openai.types.shared import Reasoning
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None, reasoning_effort="low")
-    assert agent.model_settings.extra_args == {"reasoning_effort": "low"}
-    assert agent.model_settings.reasoning is None
+    assert agent.model_settings.reasoning == Reasoning(effort="low")
+    assert agent.model_settings.extra_args == {"max_retries": 0}
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="none")
-    assert agent.model_settings.extra_args["reasoning_effort"] == "none"
+    assert agent.model_settings.reasoning == Reasoning(effort="none")
+    agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
+                                     "sys", None, None,
+                                     reasoning_effort="disable")
+    assert agent.model_settings.reasoning is None
+    assert agent.model_settings.extra_args["reasoning_effort"] == "disable"
     assert "cache_control_injection_points" in agent.model_settings.extra_args
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None,
@@ -1560,20 +3901,57 @@ def test_reasoning_passthrough_reaches_each_engine(monkeypatch):
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None)
     assert agent.model_settings.reasoning is None
-    assert agent.model_settings.extra_args is None
+    assert agent.model_settings.extra_args == {"max_retries": 0}
     # "" is unset on this lane too, like the protocol lanes
     agent = local_chat._openai_agent(None, "chat", "gpt-test", "sys",
                                      None, None, reasoning_effort="")
-    assert agent.model_settings.extra_args is None
+    assert agent.model_settings.extra_args == {"max_retries": 0}
+
+
+@needs_agents
+def test_chat_none_turns_claude_thinking_off(monkeypatch):
+    """The LiteLLM chat lane sends a Claude model's own off switch for
+    reasoning_effort "none", indexing's table, beside the effort, and
+    refuses it on a model that can't turn thinking off; a caller's own
+    thinking wins, and extra_body's reasoning counts as the effort."""
+    pytest.importorskip("litellm")
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+
+    def sent(model, effort="none", **kw):
+        settings = local_chat._openai_agent(None, "chat", model, "sys", None, None,
+                                            reasoning_effort=effort, **kw).model_settings
+        args = settings.extra_args
+        return {"effort": settings.reasoning and settings.reasoning.effort,
+                **{k: args[k] for k in ("reasoning_effort", "thinking") if k in args}}
+    off = {"effort": "none", "thinking": {"type": "disabled"}}
+    assert sent("anthropic/claude-haiku-5-5") == off
+    assert sent("azure_ai/claude-haiku-5-5") == off
+    assert sent("bedrock/global.anthropic.claude-sonnet-5-5") == {
+        "effort": "none", "thinking": {"type": "between_tools"}}
+    assert sent("openrouter/anthropic/claude-haiku-5.5") == {"effort": "none"}
+    assert sent("anthropic/claude-opus-5-5", extra_body={"thinking": {"type": "adaptive"}}) == {
+        "effort": "none", "thinking": {"type": "adaptive"}}
+    assert sent("anthropic/claude-haiku-5-5", None,
+                extra_body={"reasoning": {"effort": "none"}}) == off
+    for model in ("anthropic/claude-opus-5-5", "vertex_ai/claude-fable-5-1"):
+        with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+            sent(model)
+    with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+        sent("anthropic/claude-opus-5-5", "low", extra_body={"reasoning": {"effort": "none"}})
+
+
+def test_claude_code_chat_refuses_none():
+    """A chosen "none" raises before the CLI starts."""
+    with pytest.raises(PageIndexAPIError, match="takes no reasoning_effort='none'"):
+        local_chat._claude_code_run(None, [{"role": "user", "content": "q"}],
+                                    "claude-code/sonnet", reasoning_effort="none")
 
 
 @needs_agents
 def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
-    """LiteLLM-routed answer lane: openai-agents passes ModelSettings'
-    own fields to litellm by name beside **extra_args, so a caller's copy
-    in extra_args collided with them. Those ride their field, the
-    caller's value winning; the rest stay LiteLLM kwargs. OpenAI
-    destinations keep the request-body path."""
+    """extra_body settings LitellmModel reads ride their field, caller wins."""
     pytest.importorskip("litellm")
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
@@ -1598,11 +3976,73 @@ def test_extra_body_model_settings_fields_ride_their_field(monkeypatch):
 
 
 @needs_agents
+def test_litellm_model_settings_list_matches_litellm_model(monkeypatch):
+    """_LITELLM_MODEL_SETTINGS names exactly what LitellmModel forwards."""
+    pytest.importorskip("litellm")
+    import litellm
+    from agents import ModelSettings, ModelTracing, function_tool
+    from agents.extensions.models.litellm_model import LitellmModel
+    from openai.types.shared import Reasoning
+    samples = {
+        "temperature": 0.3, "top_p": 0.5, "frequency_penalty": 0.1,
+        "presence_penalty": 0.2, "tool_choice": "required",
+        "parallel_tool_calls": False, "truncation": "auto", "max_tokens": 7,
+        "reasoning": Reasoning(effort="low"), "verbosity": "low",
+        "metadata": {"k": "v"}, "store": True,
+        "prompt_cache_retention": "24h", "include_usage": True,
+        "response_include": ["reasoning.encrypted_content"],
+        "top_logprobs": 2, "extra_query": {"q": "1"}, "extra_body": {"x": 1},
+        "extra_headers": {"X-Probe": "1"}, "extra_args": {"y": 2},
+        "retry": {"max_retries": 1},
+        "context_management": [{"type": "compaction",
+                                "compact_threshold": 1000}],
+        "prompt_cache_options": {"mode": "explicit", "ttl": "30m"},
+        "preserve_raw_usage": True}
+    assert {field.name for field in dataclasses.fields(ModelSettings)} == set(
+        samples), "a ModelSettings field changed: update samples"
+    seen = []
+
+    class Sent(Exception):
+        pass
+
+    async def acompletion(**kwargs):
+        seen.append(kwargs)
+        raise Sent
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+
+    @function_tool
+    def lookup(page: int) -> str:
+        return str(page)
+
+    model = LitellmModel("anthropic/claude-test", api_key="k")
+
+    def sent_with(settings):
+        async def run():
+            async for _ in model.stream_response(
+                    None, "q", settings, [lookup], None, [],
+                    ModelTracing.DISABLED):
+                pass
+
+        seen.clear()
+        with pytest.raises(Sent):
+            asyncio.run(run())
+        return seen[0]
+
+    unset = sent_with(ModelSettings())
+    forwarded = {name for name, value in samples.items()
+                 if sent_with(ModelSettings(**{name: value})) != unset}
+    assert forwarded - {"extra_body", "extra_args"} == (
+        local_chat._LITELLM_MODEL_SETTINGS)
+
+
+@needs_agents
 def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
     """Caller extras merge last — over the cache key on OpenAI
     destinations — and ride LiteLLM's own kwargs elsewhere, where
     extra_body would plant literal fields providers reject."""
     pytest.importorskip("litellm")
+    from openai.types.shared import Reasoning
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -1612,14 +4052,14 @@ def test_extra_body_passthrough_reaches_each_engine(monkeypatch):
                                                  "prompt_cache_key": "mine"})
     assert agent.model_settings.extra_body == {
         "prompt_cache_key": "mine", "logit_bias": {"1": 5}}
-    assert agent.model_settings.extra_args is None
+    assert agent.model_settings.extra_args == {"max_retries": 0}
     agent = local_chat._openai_agent(None, "chat", "anthropic/claude-x",
                                      "sys", None, None,
                                      reasoning_effort="low",
                                      extra_body={"top_k": 20})
     assert agent.model_settings.extra_body is None
     assert agent.model_settings.extra_args["top_k"] == 20
-    assert agent.model_settings.extra_args["reasoning_effort"] == "low"
+    assert agent.model_settings.reasoning == Reasoning(effort="low")
     assert "cache_control_injection_points" in agent.model_settings.extra_args
     agent = local_chat._openai_agent(None, "responses", "gpt-test", "sys",
                                      None, None,
@@ -1756,7 +4196,8 @@ def test_malformed_tool_arguments_answer_the_model(client, store_path,
     assert result["choices"][0]["message"]["content"] == "The answer"
     outputs = [item["output"] for item in fake.inputs[1]
                if item.get("type") == "function_call_output"]
-    assert "Invalid JSON" in json.dumps(outputs[-1])
+    # the wording is the framework's; 0.24 hides the parse detail
+    assert outputs and outputs[-1]
 
 
 @needs_agents
@@ -1796,8 +4237,7 @@ def test_openai_model_resolves_provider_prefixes():
     model = local_chat._openai_model("responses", "openai/gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
-    # litellm/ is routing grammar, not a provider: it strips before the
-    # provider-prefix guard, so an OpenAI model stays reachable.
+    # litellm/ is routing grammar, not a provider: it strips here too.
     model = local_chat._openai_model("responses", "litellm/gpt-5.2")
     assert isinstance(model, OpenAIResponsesModel)
     assert str(model.model) == "gpt-5.2"
@@ -1814,17 +4254,38 @@ def test_chat_refuses_unknown_litellm_provider():
 
 
 @needs_agents
-def test_responses_refuses_litellm_routed_models(store_path):
-    """LiteLLM speaks chat.completions, not /responses — the responses
-    protocol must refuse the silent downgrade, at agent-build time and
-    before any backend call."""
-    for name in ("anthropic/claude-x", "litellm/anthropic/claude-x"):
-        with pytest.raises(PageIndexAPIError, match="Responses API"):
-            local_chat._openai_model("responses", name)
-    client = PageIndexLocalClient(storage_path=store_path,
-                                  retrieve_model="anthropic/claude-x")
-    with pytest.raises(PageIndexAPIError, match="chat_completions"):
-        client._responses("q")
+def test_responses_sends_model_names_as_written():
+    """The responses lane is the OpenAI SDK, never LiteLLM: litellm/ and
+    openai/ strip, any other name reaches the backend verbatim and the
+    destination judges it — a gateway (OpenRouter) serves slashed ids."""
+    from agents.models.openai_responses import OpenAIResponsesModel
+
+    for name, wire in (("deepseek/deepseek-chat", "deepseek/deepseek-chat"),
+                       ("anthropic/claude-x", "anthropic/claude-x"),
+                       ("litellm/anthropic/claude-x", "anthropic/claude-x"),
+                       ("openai/deepseek/deepseek-chat",
+                        "deepseek/deepseek-chat")):
+        model = local_chat._openai_model("responses", name)
+        assert isinstance(model, OpenAIResponsesModel), name
+        assert str(model.model) == wire, name
+
+
+@needs_agents
+def test_responses_lane_never_takes_litellm_settings(monkeypatch):
+    """Whatever the name looks like, the responses lane's request is an
+    OpenAI one: the cache key and caller extras ride extra_body, and
+    LiteLLM's Claude cache marker stays out — responses.create() raises
+    TypeError on that unknown kwarg."""
+    monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
+    monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
+                        lambda *a, **k: [])
+    for name in ("anthropic/claude-x", "bedrock/us.anthropic.claude-x"):
+        agent = local_chat._openai_agent(
+            None, "responses", name, "sys", None, None,
+            cache_key="pageindex-k", extra_body={"x_custom": 1})
+        assert agent.model_settings.extra_args is None, name
+        assert agent.model_settings.extra_body == {
+            "prompt_cache_key": "pageindex-k", "x_custom": 1}, name
 
 
 @needs_agents
@@ -1880,19 +4341,23 @@ def test_record_response_status_captures_last_status():
         def model_dump(self, mode=None):
             return dict(self._data)
 
+    reply = types.SimpleNamespace(
+        status="incomplete",
+        incomplete_details=_Dumpable({"reason": "max_output_tokens"}),
+        error=None)
+
     async def create(*args, **kwargs):
-        return types.SimpleNamespace(
-            status="incomplete",
-            incomplete_details=_Dumpable({"reason": "max_output_tokens"}),
-            error=None)
+        return reply
 
     agent = types.SimpleNamespace(model=types.SimpleNamespace(
         _client=types.SimpleNamespace(
             responses=types.SimpleNamespace(create=create))))
     recorded = {}
     local_chat._record_response_status(agent, recorded)
-    asyncio.run(agent.model._client.responses.create())
-    assert recorded == {"status": "incomplete",
+    from agents.exceptions import ModelBehaviorError
+    with pytest.raises(ModelBehaviorError):  # a cut response ends the run
+        asyncio.run(agent.model._client.responses.create())
+    assert recorded == {"response": reply, "status": "incomplete",
                         "incomplete_details": {"reason": "max_output_tokens"},
                         "error": None}
 
@@ -1906,10 +4371,7 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     fake = fake_model([[_msg_item("cut off mid-answer")]])
 
     async def create(*args, **kwargs):
-        return types.SimpleNamespace(
-            status="incomplete",
-            incomplete_details={"reason": "max_output_tokens"},
-            error=None)
+        return _cut_response()
 
     fake._client = types.SimpleNamespace(
         responses=types.SimpleNamespace(create=create))
@@ -1917,6 +4379,46 @@ def test_responses_envelope_reports_backend_truncation(client, store_path,
     assert result["status"] == "incomplete"
     assert result["incomplete_details"] == {"reason": "max_output_tokens"}
     assert result["error"] is None
+
+
+@needs_agents
+def test_responses_cut_short_still_returns_the_envelope(store_path):
+    """openai-agents 0.22+ raises on a response cut short, before its hooks
+    or items see it; the run still ends in the envelope, as the stream
+    does, with the partial text and both billed calls. FakeModel skips the
+    transport fetch that raises, so the real model runs on a mock one."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+    details = {"input_tokens_details": {"cached_tokens": 0},
+               "output_tokens_details": {"reasoning_tokens": 0}}
+    replies = [
+        {"id": "resp_1", "status": "completed",
+         "output": [_call_item("get_document",
+                               {"doc_name": "report.pdf"}).model_dump()],
+         "usage": {**details, "input_tokens": 10, "output_tokens": 5,
+                   "total_tokens": 15}},
+        {"id": "resp_2", "status": "incomplete",
+         "incomplete_details": {"reason": "max_output_tokens"},
+         "output": [_msg_item("The range was").model_dump()],
+         "usage": {**details, "input_tokens": 40, "output_tokens": 99,
+                   "total_tokens": 139}}]
+    common = {"object": "response", "created_at": 0, "model": "gpt-test",
+              "parallel_tool_calls": True, "tool_choice": "auto", "tools": []}
+    http = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={**common,
+                                                  **replies.pop(0)})))
+    client = PageIndexLocalClient(storage_path=store_path,
+                                  chat_model="openai/gpt-test")
+    envelope = client.chat("q", protocol="responses", backend={
+        "api_key": "sk-test", "base_url": "http://mock.invalid/v1",
+        "http_client": http})
+    asyncio.run(http.aclose())
+    assert envelope["status"] == "incomplete"
+    assert [item["type"] for item in envelope["messages"]] == [
+        "function_call", "function_call_output", "message"]
+    assert envelope["output"][-1]["content"][0]["text"] == "The range was"
+    usage = envelope["usage"]
+    assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
+    assert len(usage["request_usage_entries"]) == 2
 
 
 @needs_agents
@@ -2397,6 +4899,66 @@ def test_messages_tool_use_cut_by_max_tokens_not_duplicated(client,
         assert [block["type"] for block in result["content"]] == ["tool_use"]
 
 
+_PAUSED = ([{"type": "text", "text": "Paused part"}], "pause_turn")
+_DONE = ([{"type": "text", "text": "Done"}], "end_turn")
+
+
+@needs_anthropic
+@pytest.mark.parametrize("turns,kept,texts", [
+    pytest.param([_DONE], 1, ["Done"], id="2.2-final"),
+    pytest.param([([{"type": "text", "text": "Partial"},
+                    _anthropic_tool_use()], "max_tokens")], 1, ["Partial"],
+                 id="2.2-cut-tool-use"),
+    pytest.param([_PAUSED, _DONE], 2, ["Paused part", "Done"], id="2.2-paused"),
+    pytest.param([_PAUSED, _DONE], 1, ["Paused part", "Done"],
+                 id="2.1-paused"),
+])
+def test_messages_transcript_carries_each_turn_once(client, store_path,
+                                                    monkeypatch, turns, kept,
+                                                    texts):
+    """Each turn appears once in the transcript; the loop runs unthreaded."""
+    from anthropic.types.beta import BetaMessage
+    seed_doc(store_path, "pi-a", "report.pdf")
+    replies = [BetaMessage.model_validate(_anthropic_message(*turn))
+               for turn in turns]
+    seen = {}
+
+    class _Runner:
+        def __init__(self, messages):
+            self.history = [*messages, *({"role": "assistant",
+                                          "content": reply.content}
+                                         for reply in replies[:kept])]
+
+        def __iter__(self):
+            return iter(replies)
+
+        def generate_tool_call_response(self):
+            return None
+
+        def set_messages_params(self, callback):
+            callback({"messages": self.history})
+
+    class _Fake:
+        class beta:
+            class messages:
+                @staticmethod
+                def tool_runner(*, messages, thread=None, **kwargs):
+                    seen["thread"] = thread
+                    return _Runner(messages)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(local_chat, "_anthropic_client",
+                        lambda backend=None, route="anthropic": _Fake())
+    result = client._messages("q", model="claude-test", max_tokens=100)
+    assert seen["thread"] is False
+    assert [[(block["type"], block.get("text")) for block in message["content"]]
+            for message in result["messages"]] == [[("text", text)]
+                                                    for text in texts]
+    assert {message["role"] for message in result["messages"]} == {"assistant"}
+
+
 @needs_anthropic
 def test_messages_refusal_with_tool_use_stays_appendable(client, store_path,
                                                          fake_anthropic):
@@ -2509,8 +5071,8 @@ def test_messages_top_level_cache_control(client, store_path, fake_anthropic):
 @pytest.mark.parametrize("stream", [False, True])
 def test_messages_bedrock_moves_an_explicit_breakpoint(client, store_path,
                                                        fake_anthropic, stream):
-    """Bedrock's InvokeModel integration rejects the top-level field (Opus
-    4.6 and earlier): each turn's newest tool result carries the one moving
+    """Bedrock's InvokeModel integration rejects the top-level field (Sonnet
+    4.5 and Opus 4.5): each turn's newest tool result carries the one moving
     breakpoint instead, and none leaks into the returned history."""
     seed_doc(store_path, "pi-a", "report.pdf")
     replies = [_anthropic_message([_anthropic_tool_use(tool_id)], "tool_use")
@@ -2568,6 +5130,17 @@ def test_messages_backend_merges_and_reaches_the_client(client, fake_anthropic,
     assert seen["backend"] == {"base_url": "http://cb", "api_key": "z"}
 
 
+def test_a_forked_child_keeps_none_of_its_parents_anthropic_clients(
+        monkeypatch):
+    """On its parent's pooled connections a forked worker reads replies
+    meant for another process: it builds its own clients."""
+    from conftest import exit_code_in_forked_child
+    monkeypatch.setitem(local_chat._ANTHROPIC_CLIENTS, ("anthropic", ()),
+                        object())
+    assert exit_code_in_forked_child(
+        lambda: not local_chat._ANTHROPIC_CLIENTS) == 0
+
+
 @needs_anthropic
 def test_messages_bad_backend_wraps_like_the_other_doors():
     with pytest.raises(PageIndexAPIError,
@@ -2577,9 +5150,7 @@ def test_messages_bad_backend_wraps_like_the_other_doors():
 
 @needs_agents
 def test_extra_headers_ride_model_settings(monkeypatch):
-    """Both openai-agents doors merge ModelSettings.extra_headers into
-    their requests (wire-probed: LiteLLM's chatcmpl adapters forward
-    custom headers; its anthropic adapter owns anthropic-beta only)."""
+    """Both openai-agents doors send ModelSettings.extra_headers."""
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: None)
     monkeypatch.setattr("pageindex.integrations.openai_agents.build_openai_tools",
                         lambda *a, **k: [])
@@ -2763,32 +5334,75 @@ def test_record_chat_finish_records_and_delegates():
         types.SimpleNamespace(model=types.SimpleNamespace()), {})
 
 
+class _CutModel(FakeModel):
+    """Scripted turns whose native finish_reason is `finish`, as the real
+    model's fetch shows it to the finish recorder."""
+
+    def __init__(self, turns, finish="length"):
+        super().__init__(turns)
+        self.finish = finish
+
+    async def _fetch_response(self, *args, **kwargs):
+        return types.SimpleNamespace(choices=[
+            types.SimpleNamespace(finish_reason=self.finish)])
+
+    async def get_response(self, *args, **kwargs):
+        await self._fetch_response()
+        return await super().get_response(*args, **kwargs)
+
+    async def stream_response(self, *args, **kwargs):
+        await self._fetch_response()
+        async for event in super().stream_response(*args, **kwargs):
+            yield event
+
+
 @needs_agents
 def test_chat_completions_reports_native_finish_reason(client, store_path,
                                                        monkeypatch):
     seed_doc(store_path, "pi-a", "report.pdf")
-
-    class TruncatingModel(FakeModel):
-        async def _fetch_response(self, *args, **kwargs):
-            return types.SimpleNamespace(choices=[
-                types.SimpleNamespace(finish_reason="length")])
-
-        async def get_response(self, *args, **kwargs):
-            await self._fetch_response()
-            return await super().get_response(*args, **kwargs)
-
-        async def stream_response(self, *args, **kwargs):
-            await self._fetch_response()
-            async for event in super().stream_response(*args, **kwargs):
-                yield event
-
-    fake = TruncatingModel([[_msg_item("cut ")], [_msg_item("cut ")]])
+    fake = _CutModel([[_msg_item("cut ")], [_msg_item("cut ")]])
     monkeypatch.setattr(local_chat, "_openai_model", lambda *a: fake)
     result = client.chat_completions("q")
     assert result["choices"][0]["finish_reason"] == "length"
     chunks = list(client.chat_completions("q", stream=True,
                                           stream_metadata=True))
     assert chunks[-2]["choices"][0]["finish_reason"] == "length"
+
+
+@needs_agents
+@pytest.mark.parametrize("finish", ["length", "content_filter"])
+def test_chat_raises_on_an_unfinished_answer(client, store_path, monkeypatch,
+                                             finish):
+    """A bare answer string cannot say it is unfinished, so chat() and
+    chat_completions' text stream raise: a stream after the text it
+    delivered, a non-streamed call with that text on the error; both with
+    the run's usage."""
+    seed_doc(store_path, "pi-a", "report.pdf")
+
+    def cut_model(*args):
+        model = _CutModel([[_msg_item("The range was")]], finish)
+        model.pieces = ("The range ", "was")  # the streamed deltas
+        return model
+
+    monkeypatch.setattr(local_chat, "_openai_model", cut_model)
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        client.chat("q")
+    assert info.value.partial_answer == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
+    text = []
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        for piece in client.chat("q", stream=True, show_process=False):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
+    with pytest.raises(PageIndexAPIError, match=finish):
+        list(client.chat("q", stream=True).events)
+    text = []
+    with pytest.raises(PageIndexAPIError, match=finish) as info:
+        for piece in client.chat_completions("q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "The range was"
+    assert info.value.usage["completion_tokens"] == 5
 
 
 @needs_agents
@@ -2822,6 +5436,17 @@ def test_litellm_model_still_has_the_fetch_response_seam():
     from agents.extensions.models.litellm_model import LitellmModel
 
     assert hasattr(LitellmModel, "_fetch_response")
+
+
+@needs_agents
+def test_model_response_still_lacks_finish_reason():
+    # Fails once openai-agents' ModelResponse carries finish_reason: then
+    # _record_chat_finish goes.
+    import dataclasses
+    from agents.items import ModelResponse
+
+    assert "finish_reason" not in {
+        field.name for field in dataclasses.fields(ModelResponse)}
 
 
 @needs_agents
@@ -2906,16 +5531,28 @@ def test_quiet_litellm_honors_the_chosen_default(monkeypatch, caplog):
         assert gated.level == chosen
 
 
+def test_claudes_stop_at_its_context_window_reads_as_cut_off():
+    """LiteLLM reads Claude's model_context_window_exceeded, a stop reason
+    it doesn't map, as "stop": a cut-off answer would pass as whole. Mapped
+    to "length", the chat lane raises it and standard mode sees the cut.
+    Fails, too, when LiteLLM moves the map the mapping is written into."""
+    pytest.importorskip("litellm")
+    from litellm.litellm_core_utils.core_helpers import map_finish_reason
+    from pageindex.utils import _quiet_litellm
+    _quiet_litellm()
+    assert map_finish_reason("model_context_window_exceeded") == "length"
+
+
 def test_openai_protocol_predicate_follows_litellm_routing():
     pytest.importorskip("litellm")
     for name in ("gpt-5", "openai/gpt-4o", "litellm/gpt-4o",
                  "azure/gpt-4o", "openrouter/openai/gpt-4o",
                  "deepseek/deepseek-chat", "groq/llama-3.3-70b-versatile",
-                 "xai/grok-3"):
+                 "xai/grok-3", "azure_ai/mistral-large"):
         assert local_chat._openai_protocol(name), name
     for name in ("anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro",
                  "bedrock/us.anthropic.claude-sonnet-5",
-                 "vertex_ai/claude-sonnet-4-5"):
+                 "vertex_ai/claude-sonnet-4-5", "azure_ai/claude-sonnet-5-5"):
         assert not local_chat._openai_protocol(name), name
 
 
@@ -2969,13 +5606,15 @@ def test_messages_without_credentials_raises_the_sdks_own_error(client,
             client._messages("q", model="claude-test", backend=backend)
 
 
-def test_cache_extra_args_follow_wire_normalization():
+def test_cache_extra_args_follow_wire_normalization(monkeypatch):
     """Chat lane only: litellm/<bare-name> rides the OpenAI protocol on
     this wire (bare names get openai/), so it must carry no Anthropic
     cache marks; explicit anthropic routes keep them. The agents lane
     routes the same spelling to Anthropic and marks it — see
     test_openai_agent_config_marks_bare_claude_behind_litellm_prefix."""
-    pytest.importorskip("litellm")
+    pytest.importorskip("litellm")  # first import may load a .env; delenv after
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
     assert local_chat._cache_extra_args("litellm/claude-sonnet-4-5") is None
     assert local_chat._cache_extra_args("anthropic/claude-x") is not None
     assert local_chat._cache_extra_args("litellm/anthropic/claude-x") is not None
@@ -3100,7 +5739,7 @@ def test_bridge_chat_runs_engine_over_cloud_tools(bridge_client, fake_model):
     assert bridge.calls == [("get_document", {"doc_name": "r.pdf"})]
     assert fake.instructions[0].startswith(CHAT_HEADER)
     assert "CLOUD LIVE INSTRUCTIONS" in fake.instructions[0]
-    assert "READING WORKFLOW" not in fake.instructions[0]
+    assert "PERSISTENCE" not in fake.instructions[0]
     # The tool result made it back into turn 2.
     assert "cloud-doc" in json.dumps(fake.inputs[1])
 
@@ -3407,7 +6046,7 @@ def test_bridge_messages_lane_runs_cloud_tools(bridge_client, fake_anthropic):
     assert wire["tools"][0]["name"] == "get_document"
     system_text = json.dumps(wire["system"])
     assert "CLOUD LIVE INSTRUCTIONS" in system_text
-    assert "READING WORKFLOW" not in system_text
+    assert "PERSISTENCE" not in system_text
 
 
 @needs_agents
@@ -3498,32 +6137,20 @@ def test_anthropic_client_unconfigured_route_keeps_the_error_contract(
 
 
 @needs_anthropic
-def test_missing_route_client_class_names_the_upgrade(monkeypatch):
-    # A build predating a route's client class gets the tool-runner
-    # probe's contract, not a bare AttributeError.
+@pytest.mark.parametrize("model", [
+    "claude-sonnet-4-6", "bedrock/anthropic.claude-sonnet-4-6-v1:0"])
+def test_messages_refuses_anthropic_below_its_floor(client, monkeypatch,
+                                                     model):
     import anthropic
-    monkeypatch.setattr(local_chat, "_ANTHROPIC_CLIENTS", {})
-    monkeypatch.delattr(anthropic, "AnthropicFoundry", raising=False)
+
+    def transport(*args):
+        raise AssertionError("the gate let the call through")
+
+    monkeypatch.setattr(local_chat, "_anthropic_client", transport)
+    monkeypatch.setattr(anthropic, "__version__", "0.107.1")
     with pytest.raises(PageIndexAPIError,
-                       match="AnthropicFoundry.*pip install -U anthropic"):
-        local_chat._anthropic_client(None, "azure_ai")
-
-
-@needs_anthropic
-def test_messages_names_the_missing_tool_runner(client, monkeypatch):
-    # anthropic 0.108–0.121 constructs Bedrock/Vertex clients whose beta
-    # surface has no tool runner: name the gap, not an AttributeError.
-    class _Runnerless:
-        class beta:
-            class messages: ...
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(local_chat, "_anthropic_client",
-                        lambda backend=None, route="anthropic": _Runnerless())
-    with pytest.raises(PageIndexAPIError, match="tool runner"):
-        client._messages("q", model="bedrock/anthropic.claude-sonnet-4-6-v1:0")
+                       match=r"anthropic 0\.122\.0 or newer, found 0\.107\.1"):
+        client._messages("q", model=model)
 
 
 def _failing_runner_client(monkeypatch, exc):
@@ -3731,6 +6358,28 @@ def test_chat_protocol_messages_is_the_door(client, monkeypatch):
     assert seen[-1][1]["extra_body"] is None
 
 
+def test_chat_protocol_messages_none_turns_claude_thinking_off(client, monkeypatch):
+    """Anthropic's effort takes no "none": a Claude model gets its own
+    thinking switch instead, one that can't turn thinking off raises, and a
+    caller's own thinking or another model keeps the effort field."""
+    seen = []
+    monkeypatch.setattr(local_chat, "run_messages",
+                        lambda c, messages, **kw: seen.append(kw) or "door")
+    for model, body in (("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
+                        ("anthropic/claude-sonnet-5-5",
+                         {"thinking": {"type": "between_tools"}}),
+                        ("claude-x", {"output_config": {"effort": "none"}})):
+        client.chat("q", protocol="messages", model=model, reasoning_effort="none")
+        assert seen[-1]["extra_body"] == body, model
+    client.chat("q", protocol="messages", model="claude-haiku-5-5",
+                reasoning_effort="none", extra_body={"thinking": {"type": "adaptive"}})
+    assert seen[-1]["extra_body"] == {"thinking": {"type": "adaptive"},
+                                      "output_config": {"effort": "none"}}
+    with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
+        client.chat("q", protocol="messages", model="claude-opus-5-5",
+                    reasoning_effort="none")
+
+
 def test_extra_body_refuses_skeleton_keys():
     """The managed prompt, conversation and tools are the SDK's on every
     lane; extra_body merges last, so a caller's copy would silently
@@ -3746,16 +6395,25 @@ def test_extra_body_refuses_skeleton_keys():
 
 def test_extra_body_refuses_non_dicts_and_argument_keys():
     """The same gate: a non-dict would be splatted into the payload as
-    fabricated fields; stream / doc_id select the SDK's parser and scope,
-    so they ride their own arguments on every lane."""
+    fabricated fields; a field with its own argument rides that argument
+    on every lane."""
     for bad in (["ab"], "messages", 5, [("a", 1)]):
         with pytest.raises(PageIndexAPIError,
                            match="extra_body must be a dict"):
             local_chat._refuse_skeleton(bad)
-    for key in ("stream", "doc_id"):
-        with pytest.raises(PageIndexAPIError,
-                           match=rf"extra_body cannot carry {key}: use {key}="):
+    backend = r"backend= \(API chat models only\)"
+    for key, argument in (("stream", "stream="), ("doc_id", "doc_id="),
+                          ("folder_id", "folder_id="), ("model", "model="),
+                          ("reasoning_effort",
+                           r"reasoning_effort= \(own chat models only\)"),
+                          ("api_key", backend), ("base_url", backend),
+                          ("api_base", backend)):
+        with pytest.raises(PageIndexAPIError, match=(
+                rf"extra_body cannot carry {key}: use {argument} instead")):
             local_chat._refuse_skeleton({key: True})
+    with pytest.raises(PageIndexAPIError, match=(
+            rf"cannot carry api_key, base_url: use {backend} instead")):
+        local_chat._refuse_skeleton({"api_key": "k", "base_url": "u"})
     local_chat._refuse_skeleton(None)
     local_chat._refuse_skeleton({})
     local_chat._refuse_skeleton({"service_tier": "auto"})
@@ -3997,6 +6655,52 @@ def test_bridge_chat_fails_fast_on_a_rate_limited_tool(bridge_client,
     assert len(fake.instructions) == 1
 
 
+@needs_agents
+def test_a_cut_response_runs_no_tools(bridge_client, fake_model):
+    """openai-agents before 0.22 would run a cut turn's tool calls on their
+    half-written arguments; the run ends at the cut instead, as the stream
+    does."""
+    client, bridge = bridge_client
+    ran = []
+    bridge.call_tool = lambda name, arguments: ran.append(name)
+    fake = fake_model([[_call_item("get_document", {"doc_name": "r.pdf"})],
+                       [_msg_item("never reached")]])
+
+    async def create(*args, **kwargs):
+        return _cut_response()
+
+    fake._client = types.SimpleNamespace(
+        responses=types.SimpleNamespace(create=create))
+    result = client._responses("q")
+    assert ran == []
+    assert result["status"] == "incomplete"
+    assert [item["type"] for item in result["messages"]] == ["reasoning", "message"]
+
+
+@needs_agents
+@pytest.mark.parametrize("run, key", [
+    (lambda c: c.chat_completions("q"), "prompt_tokens"),
+    (lambda c: list(c.chat_completions("q", stream=True)), "prompt_tokens"),
+    (lambda c: c.chat("q"), "prompt_tokens"),
+    (lambda c: list(c.chat("q", stream=True)), "prompt_tokens"),
+    (lambda c: c._responses("q"), "input_tokens"),
+    (lambda c: list(c._responses("q", stream=True)), "input_tokens"),
+])
+def test_tool_failure_keeps_the_usage_of_its_turn(bridge_client, fake_model,
+                                                  run, key):
+    """openai-agents records a streamed turn only after its tools ran, so
+    the turn whose tool failed was missing from streamed usage."""
+    client, bridge = bridge_client
+    bridge.call_tool = _rate_limited
+    fake_model([[_call_item("get_document", {"doc_name": "r.pdf"})],
+                [_msg_item("never reached")]])
+    with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
+        run(client)
+    usage = info.value.usage
+    assert usage is not None and usage[key] == 10
+    assert len(usage["request_usage_entries"]) == 1
+
+
 @needs_anthropic
 def test_messages_fail_fast_is_quiet(bridge_client, fake_anthropic, caplog):
     """The runner's own tool-error logging never reports the failure the
@@ -4051,6 +6755,8 @@ def test_messages_fail_fast_on_a_rate_limited_tool(
         with pytest.raises(PageIndexAPIError, match="HTTP 429") as info:
             run()
         assert info.value.status_code == 429
+        usage = info.value.usage
+        assert usage is not None and usage["input_tokens"] == 10  # billed
         assert tool_calls == [("get_document", {"doc_name": "r.pdf"})]
     else:
         run()

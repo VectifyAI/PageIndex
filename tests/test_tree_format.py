@@ -79,6 +79,39 @@ def test_expand_gives_a_split_node_its_intro(monkeypatch):
     assert all(n["summary"] == "ok" for n in utils._subtree(tree))
 
 
+def test_expand_and_summary_calls_carry_their_queue_priority(monkeypatch):
+    body = "body " * 250
+    pages = [body] * 12
+    pages[5] = "Sub One\n" + body
+    pages[8] = "Sub Two\n" + body
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 12, "node_id": "0000", "nodes": [
+        {"title": "A", "start_index": 1, "end_index": 3, "node_id": "0001"},
+        {"title": "X", "start_index": 4, "end_index": 12, "node_id": "0002"}]}]
+    seen = []
+
+    async def propose(model, prompt):
+        seen.append(("expand", utils._llm_priority.get()))
+        return {"subsections": [{"title": "Sub One", "page": 6}, {"title": "Sub Two", "page": 9}]}
+
+    async def summarize(model, prompt):
+        seen.append(("summary", utils._llm_priority.get()))
+        return '{"summary": "ok"}'
+    monkeypatch.setattr(tree_optimize, "ask_model", propose)
+    monkeypatch.setattr(utils, "llm_acompletion", summarize)
+
+    async def run():
+        scheduler = utils.SummaryScheduler(tree, [(page, 0) for page in pages], model="m")
+        await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
+                                     on_final=scheduler.mark_final)
+        await scheduler.finish()
+    asyncio.run(run())
+
+    # where the claude-code/ route's cap queues them: expand first, then the deepest summaries
+    assert {prio for kind, prio in seen if kind == "expand"} == {tree_optimize.EXPAND_PRIORITY}
+    assert sorted(prio for kind, prio in seen if kind == "summary") == [1, 2, 2, 3, 3, 3]
+
+
 def test_a_running_header_or_a_word_prefix_does_not_open_the_page():
     page = ["4.1. Discriminant Functions 181", "opening words", "4.1. Discriminant Functions"]
     assert not tree_optimize.heading_at_page_start([page], 1, "4.1. Discriminant Functions")
@@ -105,8 +138,9 @@ def test_expand_prices_a_level_with_the_intro_it_gets(monkeypatch):
 
     async def run():
         scheduler = utils.SummaryScheduler(tree, [(page, 0) for page in pages], model="m")
+        # no summaries to price, so the page rule alone decides
         await tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True,
-                                     on_final=scheduler.mark_final)
+                                     on_final=scheduler.mark_final, summary_words=0)
         await scheduler.finish()
     asyncio.run(run())
 
@@ -159,6 +193,25 @@ def test_expand_asks_once_when_the_model_finds_no_subsections(monkeypatch):
     asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
 
     assert len(asked) == 1 and "nodes" not in tree[0]
+
+
+def test_expand_asks_again_after_a_broken_reply(monkeypatch):
+    pages = [(f"Part {p}\n" if p in (6, 11, 16) else "") + "body " * 250 for p in range(1, 21)]
+    lines = [[line for line in page.splitlines() if line.strip()] for page in pages]
+    tree = [{"title": "R", "start_index": 1, "end_index": 20, "node_id": "0000"}]
+    replies = ["The section has three parts.",
+               '{"subsections": [{"title": "Part 6", "page": 6}, {"title": "Part 11", "page": 11},'
+               ' {"title": "Part 16", "page": 16}]}']
+
+    async def complete(model, prompt):
+        return replies.pop(0)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", complete)
+
+    asyncio.run(tree_optimize.optimize(tree, pages, lines, model="m", do_expand=True))
+
+    assert not replies
+    assert shape(tree[0]["nodes"]) == [("R (intro)", 1, 5), ("Part 6", 6, 10),
+                                       ("Part 11", 11, 15), ("Part 16", 16, 20)]
 
 
 @pytest.mark.parametrize("headings, summary_words, splits", [
@@ -503,6 +556,26 @@ def test_standard_index_stores_intros_covering_ranges_and_section_summaries(tmp_
         "Opening wordspage 2", "".join(f"page {n}" for n in range(3, 21))]
     assert [q.split("Section Title: ")[1].split("\n")[0] for q in prompts] == ["C2", "P"]
     assert '"summary": "whole C2"' in prompts[-1]
+
+
+def test_standard_index_keeps_its_summary_width(tmp_path, monkeypatch):
+    """Flash's summaries went to 128 at a time; standard mode's stay at 64."""
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["one"]))
+    widths = []
+
+    async def tree_parser(page_list, opt, doc=None, logger=None):
+        return [{"title": "A", "start_index": 1, "end_index": 1}]
+
+    async def summarize_tree(structure, pdf_pages, **kw):
+        widths.append(kw.get("concurrency"))
+    monkeypatch.setattr(classic, "tree_parser", tree_parser)
+    monkeypatch.setattr(classic, "summarize_tree", summarize_tree)
+    opt = utils.ConfigLoader().load({"model": "m", "if_add_node_summary": "yes",
+                                     "if_add_doc_description": "no"})
+    classic.page_index_main(str(pdf), opt, logger=SimpleNamespace(info=print),
+                            page_list=[("one", 1)])
+    assert widths == [64]
 
 
 def test_standard_index_gives_toc_and_split_parents_intros(tmp_path, monkeypatch):

@@ -1,0 +1,854 @@
+[
+ {
+  "id": "md_1",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2025_10K"
+  ],
+  "question": "Which independent subcontractors did NVIDIA's 10-K for fiscal year 2022 say handled the assembly, test and packaging work for most of NVIDIA's products, and which companies does NVIDIA's 10-K for fiscal year 2025 name for that work on its final products?",
+  "answer": "FY2022 10-K: Amkor Technology, King Yuan Electronics, Omni Logistics, Siliconware Precision Industries and Wistron. FY2025 10-K: Hon Hai Precision Industry, Wistron and Fabrinet.",
+  "key_points": [
+   "The FY2022 10-K names Amkor Technology, King Yuan Electronics, Omni Logistics, Siliconware Precision Industries and Wistron for assembly, testing and packaging.",
+   "The FY2025 10-K names Hon Hai Precision Industry, Wistron and Fabrinet for assembly, testing and packaging of final products."
+  ]
+ },
+ {
+  "id": "md_2",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, what range of expiration dates did the company's currently issued patents span?",
+  "answer": "Its currently issued patents had expiration dates from February 2022 to June 2045.",
+  "key_points": [
+   "NVIDIA's currently issued patents expire between February 2022 and June 2045."
+  ]
+ },
+ {
+  "id": "md_4",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, how far ahead had NVIDIA begun placing supply orders compared with its earlier practice, how much did it pay in prepayments for long-term supply agreements during the year, and how much remained unpaid under those agreements at fiscal year-end?",
+  "answer": "NVIDIA had moved from ordering with roughly six months' lead time to ordering at least twelve months in advance; prepayments for long-term supply agreements were $1.87 billion in fiscal 2022 (a main driver of working-capital changes); $1.58 billion remained unpaid under those agreements as of January 30, 2022.",
+  "key_points": [
+   "NVIDIA previously ordered with about six months' lead time but had begun placing orders at least twelve months in advance.",
+   "NVIDIA paid $1.87 billion in prepayments for long-term supply agreements in fiscal 2022 (these prepayments and higher trade receivables primarily drove working-capital changes).",
+   "$1.58 billion remained unpaid under those long-term supply agreements at fiscal year-end (January 30, 2022)."
+  ]
+ },
+ {
+  "id": "md_5",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How did NVIDIA describe the rollout of accounting functionality for its new enterprise resource planning (ERP) system in its 10-K for fiscal year 2022, compared with its 10-K for fiscal year 2026?",
+  "answer": "The fiscal 2022 10-K planned the implementation of the new ERP system's accounting functionality for fiscal 2023. The risk factors say NVIDIA expected to start implementing accounting and consolidation functionality in the first quarter of fiscal 2023. Item 9A says the consolidated financial reporting and general ledger module would be implemented in fiscal 2023, as part of a phased ERP upgrade begun in fiscal 2022. The fiscal 2026 10-K describes the rollout as still in progress: NVIDIA continues to design and implement updated accounting functionality (risk factors) and is continuing a phased ERP upgrade (Item 9A).",
+  "key_points": [
+   "Fiscal 2022 10-K: implementation of the new ERP system's accounting functionality was planned for fiscal 2023 (risk factors: accounting and consolidation functionality, commencing in the first quarter; Item 9A: the consolidated financial reporting and general ledger module, in a phased upgrade begun in fiscal 2022).",
+   "Fiscal 2026 10-K: the rollout was still in progress (risk factors: NVIDIA continues to design and implement updated accounting functionality; Item 9A: a continuing phased ERP upgrade)."
+  ]
+ },
+ {
+  "id": "md_9",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "As reported in NVIDIA's 10-K for fiscal year 2022, what was the net gross-margin impact in fiscal 2022 from inventory provisions combined with sales of previously written-down items, and what was the corresponding fiscal 2024 impact as reported in NVIDIA's 10-K for fiscal year 2024?",
+  "answer": "An unfavorable impact of 0.9% in fiscal 2022 (FY2022 10-K) and an unfavorable impact of 2.7% in fiscal 2024 (FY2024 10-K).",
+  "key_points": [
+   "The FY2022 10-K reports an unfavorable 0.9% gross margin impact for fiscal 2022.",
+   "The FY2024 10-K reports an unfavorable 2.7% gross margin impact for fiscal 2024."
+  ]
+ },
+ {
+  "id": "md_10",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, how much goodwill was allocated to the Graphics reporting unit when fiscal year 2022 closed?",
+  "answer": "$361 million (out of total goodwill of $4.35 billion; Compute & Networking held $3.99 billion).",
+  "key_points": [
+   "Goodwill allocated to the Graphics reporting unit was $361 million as of January 30, 2022."
+  ]
+ },
+ {
+  "id": "md_16",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, how much goodwill was recorded in the Mellanox purchase price allocation and to which segment was it assigned, and what was that reporting unit's total goodwill balance at the end of fiscal 2022?",
+  "answer": "Mellanox goodwill of $3,431 million, allocated to the Compute & Networking segment; Compute & Networking goodwill was $3.99 billion as of January 30, 2022 (of $4.35 billion total goodwill).",
+  "key_points": [
+   "The Mellanox purchase price allocation recorded $3,431 million of goodwill.",
+   "Goodwill from the Mellanox acquisition was allocated to the Compute & Networking segment.",
+   "Compute & Networking reporting unit goodwill was $3.99 billion as of January 30, 2022."
+  ]
+ },
+ {
+  "id": "md_18",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, what vesting schedules could restricted stock units granted to employees follow, subject to certain exceptions?",
+  "answer": "Either a four-year schedule with 25% vesting on a date near the first grant anniversary and 6.25% quarterly thereafter, or a three-year schedule with 40% near the first anniversary and 7.5% quarterly thereafter.",
+  "key_points": [
+   "Employee RSUs vest over four years (25% near first anniversary, then 6.25% quarterly) or three years (40%, then 7.5% quarterly)."
+  ]
+ },
+ {
+  "id": "md_20",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, how much of the long-term income tax payable was the remaining one-time transition tax, how much of NVIDIA's gross unrecognized tax benefits would affect its effective tax rate if recognized, and which significant tax jurisdictions, covering which fiscal years, were actively examining NVIDIA at fiscal year-end?",
+  "answer": "The long-term portion of the one-time transition tax payable was $251 million; $808 million of the gross unrecognized tax benefits (of $1.01 billion in total) would affect the effective tax rate if recognized; Germany, India, Israel and the United States were examining NVIDIA for fiscal years 2005 through 2019.",
+  "key_points": [
+   "$251 million of long-term income tax payable was the long-term portion of the one-time transition tax (as of January 30, 2022).",
+   "$808 million of gross unrecognized tax benefits would affect the effective tax rate if recognized (out of $1.01 billion in total).",
+   "Germany, India, Israel and the United States were examining NVIDIA, covering fiscal years 2005 through 2019."
+  ]
+ },
+ {
+  "id": "md_21",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2025_10K"
+  ],
+  "question": "For the In Re NVIDIA Corporation Securities Litigation class action, what next step and date did NVIDIA's 10-K for fiscal year 2022 report for the plaintiffs' Ninth Circuit appeal, and according to its 10-K for fiscal year 2025, on what date did the Ninth Circuit's judgment take effect and what then happened to the case?",
+  "answer": "Fiscal 2022 10-K: the plaintiffs' appeal of the dismissal was pending at the Ninth Circuit, with oral argument scheduled for May 10, 2022. Fiscal 2025 10-K: after the Supreme Court dismissed NVIDIA's writ as improvidently granted, the Ninth Circuit's judgment took effect on February 20, 2025 and the case was remanded to the district court for further proceedings.",
+  "key_points": [
+   "Fiscal 2022 10-K: the plaintiffs' Ninth Circuit appeal was pending, with oral argument scheduled for May 10, 2022.",
+   "Fiscal 2025 10-K: on February 20, 2025, the Ninth Circuit's judgment took effect and the case was remanded to the district court."
+  ]
+ },
+ {
+  "id": "md_25",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2023_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2023, which large cloud service providers did NVIDIA list as competitors whose in-house teams build chips and software for AI or accelerated computing?",
+  "answer": "Alibaba Group, Alphabet, Amazon and Baidu.",
+  "key_points": [
+   "The FY2023 10-K names Alibaba Group, Alphabet, Amazon and Baidu as these cloud competitors."
+  ]
+ },
+ {
+  "id": "md_28",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "Compare how NVIDIA's 10-K for fiscal year 2023 and its 10-K for fiscal year 2024 described year-end supply commitments: in the fiscal 2023 filing, what share of total supply came from purchase obligations plus prepaid supply agreements at the end of fiscal 2023, and in the fiscal 2024 filing, what factor did NVIDIA say had affected its year-end commitments for inventory and manufacturing capacity?",
+  "answer": "FY2023 10-K: at the end of fiscal 2023, purchase obligations and prepaid supply agreements made up more than half of NVIDIA's total supply. FY2024 10-K: purchase commitments and obligations for inventory and manufacturing capacity at the end of fiscal 2024 were impacted by shortening lead times for certain components.",
+  "key_points": [
+   "At the end of fiscal 2023, purchase obligations and prepaid supply agreements were more than half of total supply.",
+   "Year-end fiscal 2024 purchase commitments and obligations for inventory and capacity were impacted by shortening lead times for certain components."
+  ]
+ },
+ {
+  "id": "md_31",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2023_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2023, over what range of dates do NVIDIA's currently issued patents expire, and what does the filing say NVIDIA could face if its products are held to violate another party's intellectual property and it cannot secure a license?",
+  "answer": "Its currently issued patents expire between March 2023 and June 2045. Without a license, NVIDIA could be subject to substantial liabilities or have to suspend or discontinue manufacturing and selling one or more of its products.",
+  "key_points": [
+   "NVIDIA's currently issued patents expire between March 2023 and June 2045.",
+   "Without a license, NVIDIA could face substantial liabilities or have to suspend or discontinue manufacturing and selling one or more products."
+  ]
+ },
+ {
+  "id": "md_32",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How did NVIDIA's description of the fines available under the California Consumer Privacy Act change between its 10-K for fiscal year 2023 and its 10-K for fiscal year 2026?",
+  "answer": "The fiscal 2023 10-K said the CCPA allows statutory fines of up to $7,500 per violation; the fiscal 2026 10-K gives no dollar cap and says only that the CCPA provides for substantial fines for intentional violations.",
+  "key_points": [
+   "The fiscal 2023 10-K said the CCPA allows statutory fines of up to $7,500 per violation.",
+   "The fiscal 2026 10-K says the CCPA provides substantial fines for intentional violations, without stating a dollar amount."
+  ]
+ },
+ {
+  "id": "md_34",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "NVIDIA once recorded inventory charges of about $1.04 billion on inventory it held plus $1.13 billion on purchase obligations exceeding its demand expectations. Excess supply of which products were these charges largely tied to, and what net unfavorable effect on gross margin did NVIDIA report for that fiscal year from inventory provisions after offsetting sales of previously written-down items?",
+  "answer": "Largely excess supply of NVIDIA Ampere architecture Gaming and Data Center products, particularly relative to expected demand in China; the net unfavorable impact on gross margin was 7.5% (fiscal 2023).",
+  "key_points": [
+   "The charges largely related to excess supply of Ampere architecture Gaming and Data Center products, particularly against expected demand in China.",
+   "The net unfavorable gross margin impact from inventory provisions, net of sales of written-down items, was 7.5% (fiscal 2023)."
+  ]
+ },
+ {
+  "id": "md_39",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2023_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2023, how much net cash did NVIDIA pay for income taxes during fiscal year 2023, and which U.S. tax law requirement does the filing say significantly increased its current taxes that year?",
+  "answer": "Net cash paid for income taxes was $1,404 million. The TCJA requirement to capitalize and amortize research and development expenses, which took effect in fiscal 2023, significantly increased current taxes (with a corresponding deferred tax benefit and a greater FDII deduction).",
+  "key_points": [
+   "Net cash paid for income taxes in fiscal year 2023 was $1,404 million.",
+   "Mandatory capitalization and amortization of R&D expenses under the TCJA, starting in fiscal 2023, significantly increased current taxes."
+  ]
+ },
+ {
+  "id": "md_42",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K",
+   "NVIDIA_2025_10K"
+  ],
+  "question": "In the fiscal year in which NVIDIA wrote off its prepayment for the abandoned Arm acquisition as a termination cost, what total stock-based compensation expense did NVIDIA's income statement include across cost of revenue, R&D and SG&A, and how much aggregate unearned stock-based compensation expense remained at the end of that year?",
+  "answer": "Fiscal 2023: stock-based compensation expense in the income statement totaled $2,710 million (cost of revenue $138M, R&D $1,892M, SG&A $680M), and aggregate unearned stock-based compensation expense was $6.56 billion as of January 29, 2023.",
+  "key_points": [
+   "Stock-based compensation expense in the fiscal 2023 income statement totaled $2,710 million.",
+   "Aggregate unearned stock-based compensation expense was $6.56 billion as of January 29, 2023."
+  ]
+ },
+ {
+  "id": "md_45",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2023_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2023, how much of its other non-inventory purchase obligations at fiscal year-end related to multi-year agreements for cloud services?",
+  "answer": "$2.23 billion, out of $3.14 billion of other non-inventory purchase obligations as of January 29, 2023.",
+  "key_points": [
+   "$2.23 billion of other non-inventory purchase obligations related to multi-year cloud service agreements (of $3.14 billion in total, at January 29, 2023)."
+  ]
+ },
+ {
+  "id": "md_46",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "When NVIDIA retired all of the treasury shares it then held, how many shares were retired, and by how much did the retirement reduce retained earnings?",
+  "answer": "349 million treasury shares were retired, becoming authorized but unissued shares; the excess of repurchase price over par reduced retained earnings by $12.0 billion (and additional paid-in capital by $20 million).",
+  "key_points": [
+   "349 million treasury shares were retired.",
+   "The retirement reduced retained earnings by $12.0 billion."
+  ]
+ },
+ {
+  "id": "md_47",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2023_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2023, how much was added to the deferred tax valuation allowance during fiscal year 2023, what kinds of deferred tax assets does the allowance cover, and how large were NVIDIA's federal capital loss carryforwards at the end of that fiscal year?",
+  "answer": "Additions were $577 million, taking the allowance from $907 million to $1,484 million. It covers capital loss carryforwards, state, and certain other deferred tax assets. Federal capital loss carryforwards were $1.38 billion as of January 29, 2023, beginning to expire in fiscal 2024.",
+  "key_points": [
+   "Additions to the deferred tax valuation allowance in fiscal year 2023 were $577 million.",
+   "The valuation allowance relates to capital loss carryforwards, state, and certain other deferred tax assets.",
+   "Federal capital loss carryforwards were $1.38 billion as of January 29, 2023."
+  ]
+ },
+ {
+  "id": "md_55",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "How did NVIDIA's discussion of export-control effects on its Hong Kong operations change between its 10-K for fiscal year 2023 and its 10-K for fiscal year 2024? Cover what each filing says about relocating operations away from China and Hong Kong, and what the fiscal 2024 filing says about Hong Kong's role in distributing NVIDIA's products.",
+  "answer": "The fiscal 2023 10-K said NVIDIA was required to transition certain operations out of China (including Hong Kong), which could be costly and time consuming. The fiscal 2024 10-K said NVIDIA had transitioned some testing, validation, and supply and distribution operations out of China and Hong Kong, and warned that export controls could disrupt the supply and distribution chain for a substantial portion of its products, which are warehoused in and distributed from Hong Kong.",
+  "key_points": [
+   "Fiscal 2023 10-K: NVIDIA was required to transition certain operations out of China, including Hong Kong, which could be costly and time consuming.",
+   "Fiscal 2024 10-K: NVIDIA had transitioned some testing, validation, and supply and distribution operations out of China and Hong Kong.",
+   "Fiscal 2024 10-K: export controls could disrupt supply and distribution for a substantial portion of products warehoused in and distributed from Hong Kong."
+  ]
+ },
+ {
+  "id": "md_58",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2024_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2024, how large was the deferred tax valuation allowance at the end of fiscal 2024, which deferred tax assets did it cover, and how much in U.S. federal capital loss carryforwards did NVIDIA hold and when do they start to expire?",
+  "answer": "A $1.6 billion valuation allowance (versus $1.5 billion a year earlier), covering capital loss carryforwards and certain state and other deferred tax assets judged unlikely to be realized; federal capital loss carryforwards were $1.4 billion, beginning to expire in fiscal 2025.",
+  "key_points": [
+   "The valuation allowance was $1.6 billion at the end of fiscal 2024.",
+   "It related to capital loss carryforwards and certain state and other deferred tax assets not likely to be realized.",
+   "Federal capital loss carryforwards were $1.4 billion, beginning to expire in fiscal year 2025."
+  ]
+ },
+ {
+  "id": "md_60",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2024_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2024, what change in the fair value of NVIDIA's investment portfolio did its market-risk sensitivity analysis show for a parallel shift of plus or minus 0.5% in the yield curve?",
+  "answer": "$93 million, as of the end of fiscal 2024.",
+  "key_points": [
+   "A parallel plus-or-minus 0.5% yield-curve shift would change the investment portfolio's fair value by $93 million at fiscal 2024 year-end."
+  ]
+ },
+ {
+  "id": "md_62",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2024_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2024, by how much did share repurchases reduce total shareholders' equity in fiscal 2024 in the consolidated statement of shareholders' equity, and how many shares did that cover? What does NVIDIA say its repurchase program aims to do, and how much repurchase authorization remained at the end of fiscal 2024?",
+  "answer": "Repurchases of 21 million shares reduced total shareholders' equity by $9,746 million in fiscal 2024; the program aims to offset dilution from shares issued to employees; $22.5 billion of authorization remained as of January 28, 2024.",
+  "key_points": [
+   "Repurchases of 21 million shares reduced total shareholders' equity by $9,746 million in fiscal 2024.",
+   "The repurchase program aims to offset dilution from shares issued to employees.",
+   "Remaining repurchase authorization was $22.5 billion as of January 28, 2024."
+  ]
+ },
+ {
+  "id": "md_63",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "NVIDIA lengthened the estimated useful lives of most of its server, storage and network equipment, and of its assembly and test equipment, starting in fiscal year 2024. By how much did its 10-K for fiscal year 2023 estimate this change would raise fiscal 2024 operating income, by how much did its 10-K for fiscal year 2024 report that operating income actually rose from the change, and what overall useful-life range for property and equipment did the fiscal 2024 10-K state?",
+  "answer": "The fiscal 2023 10-K estimated a $133 million increase in fiscal 2024 operating income. The fiscal 2024 10-K reported a $135 million increase ($33 million from cost of revenue and $102 million from operating expenses; $114 million net income, $0.05 per share). The fiscal 2024 10-K gives property and equipment useful lives of three to seven years.",
+  "key_points": [
+   "Fiscal 2023 10-K estimated the change would increase fiscal 2024 operating income by $133 million.",
+   "Fiscal 2024 10-K reported the change increased fiscal 2024 operating income by $135 million.",
+   "Fiscal 2024 10-K states property and equipment useful lives of three to seven years."
+  ]
+ },
+ {
+  "id": "md_66",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2024_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2024, what was the total fair value, measured at vesting, of the RSUs and PSUs that vested during fiscal 2024, and how much cash did NVIDIA pay that year for taxes related to restricted stock units?",
+  "answer": "RSUs and PSUs vesting in fiscal 2024 had a total vest-date fair value of $8.2 billion; payments related to tax on restricted stock units were $2,783 million.",
+  "key_points": [
+   "Vest-date fair value of RSUs and PSUs vesting in fiscal 2024 totaled $8.2 billion.",
+   "Payments related to tax on restricted stock units were $2,783 million in fiscal 2024."
+  ]
+ },
+ {
+  "id": "md_67",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "Compare what NVIDIA reported about value changes on its equity stakes in other companies in its 10-K for fiscal year 2023 and its 10-K for fiscal year 2024: what unrealized loss on publicly traded equity securities did the fiscal 2023 filing record for fiscal 2023, and in the fiscal 2024 filing, what fourth-quarter event produced an unrealized gain on a private company investment, and how large was that gain?",
+  "answer": "FY2023 10-K: NVIDIA recorded $61 million of unrealized losses on publicly traded equity securities in other income (expense), net, in fiscal 2023. FY2024 10-K: in the fourth quarter of fiscal 2024, one of NVIDIA's private company investees completed a secondary equity raise, which produced a $178 million unrealized gain.",
+  "key_points": [
+   "The fiscal 2023 10-K recorded $61 million of unrealized losses on publicly traded equity securities in fiscal 2023.",
+   "In Q4 fiscal 2024, a private company investee's secondary equity raise produced a $178 million unrealized gain for NVIDIA."
+  ]
+ },
+ {
+  "id": "md_69",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2024_10K",
+   "NVIDIA_2025_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "In the putative class action alleging securities-law violations over NVIDIA's statements about channel inventory and how crypto mining affected GPU demand, how did the Ninth Circuit panel rule on the district court's dismissal, and on what date did NVIDIA file its petition for rehearing en banc?",
+  "answer": "A majority of the three-judge Ninth Circuit panel affirmed in part and reversed in part the dismissal, with the third judge dissenting on the ground that the district court did not err. NVIDIA petitioned for rehearing en banc on October 10, 2023 (denied on November 15, 2023).",
+  "key_points": [
+   "A two-judge majority of the Ninth Circuit panel affirmed in part and reversed in part the dismissal; the third judge dissented.",
+   "NVIDIA filed its petition for rehearing en banc on October 10, 2023."
+  ]
+ },
+ {
+  "id": "md_71",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "Compare NVIDIA's 10-K for fiscal year 2024 with its 10-K for fiscal year 2022 on customer concentration. In each filing, for the most recent fiscal year in which NVIDIA's direct sales to a single customer reached at least 10% of total revenue (ignoring any estimate of indirect purchases through partners), what share of total revenue did that customer represent, and to which segment were the sales attributed?",
+  "answer": "Fiscal 2024 10-K: sales to one customer were 13% of fiscal 2024 total revenue, attributable to the Compute & Networking segment (the separately estimated ~19% indirect customer is excluded). Fiscal 2022 10-K: no customer reached 10% in fiscal 2022 or 2021; in fiscal 2020 one customer represented 11% of total revenue, attributable primarily to the Graphics segment.",
+  "key_points": [
+   "Fiscal 2024 10-K: one customer represented 13% of fiscal 2024 total revenue, attributable to Compute & Networking.",
+   "Fiscal 2022 10-K: one customer represented 11% of fiscal 2020 total revenue, attributable primarily to Graphics."
+  ]
+ },
+ {
+  "id": "md_73",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2025, where is NVIDIA's supply chain mainly concentrated, what was the total of its outstanding commitments for inventory purchases plus long-term supply and capacity at fiscal year-end, and what drove the increase in those commitments from the prior year?",
+  "answer": "Its supply chain is mainly concentrated in the Asia-Pacific region. As of January 26, 2025, the commitments totaled $30.8 billion. The increase was led by commitments, capacity and components for new product introductions, including the Blackwell architecture.",
+  "key_points": [
+   "NVIDIA's supply chain is mainly concentrated in the Asia-Pacific region.",
+   "Outstanding inventory purchase and long-term supply and capacity obligations were $30.8 billion as of January 26, 2025.",
+   "The increase was led by commitments, capacity and components for new product introductions, including Blackwell."
+  ]
+ },
+ {
+  "id": "md_77",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2025, how large is NVIDIA's presence in Israel: roughly how many employees does it have in the region affected by the conflict in and around Israel, what do they mainly work on, and what were its long-lived assets located in Israel at fiscal year-end?",
+  "answer": "About 4,700 employees in the region, who mainly support research and development, operations, and sales and marketing for NVIDIA's networking products; long-lived assets (property and equipment) in Israel were $840 million as of January 26, 2025.",
+  "key_points": [
+   "NVIDIA had approximately 4,700 employees in the region around Israel.",
+   "Those employees primarily support NVIDIA's networking products (R&D, operations, sales and marketing).",
+   "Long-lived assets located in Israel were $840 million as of January 26, 2025."
+  ]
+ },
+ {
+  "id": "md_81",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2025, what was the hypothetical $100 investment in NVIDIA stock worth at the end of the five-year stock performance graph, how many shares did NVIDIA buy back in fiscal 2025 and at what total cost, and how much did it pay in cash dividends that year?",
+  "answer": "$100 invested on January 26, 2020 was worth $2,287.06 on January 26, 2025. In fiscal 2025 NVIDIA repurchased 310 million shares for $34.0 billion and paid $834 million in cash dividends.",
+  "key_points": [
+   "$100 invested in NVIDIA stock on January 26, 2020 was worth $2,287.06 by January 26, 2025.",
+   "NVIDIA repurchased 310 million shares for $34.0 billion in fiscal 2025.",
+   "NVIDIA paid $834 million of cash dividends in fiscal 2025."
+  ]
+ },
+ {
+  "id": "md_89",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2025, how much stock-based compensation expense was charged to research and development in fiscal 2025, and how is stock-based compensation treated when NVIDIA reports results for its Compute & Networking and Graphics segments?",
+  "answer": "$3,423 million of fiscal 2025 stock-based compensation was in research and development (out of $4,737 million total). It is not allocated to either segment; it is included in the \"All Other\" category.",
+  "key_points": [
+   "Fiscal 2025 stock-based compensation in research and development was $3,423 million.",
+   "Stock-based compensation is not allocated to Compute & Networking or Graphics; it sits in the All Other category."
+  ]
+ },
+ {
+  "id": "md_90",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2025_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How many RSUs, PSUs and market-based PSUs vested during the year according to NVIDIA's 10-K for fiscal year 2025, and how many vested during the year according to its 10-K for fiscal year 2026?",
+  "answer": "Fiscal 2025: 173 million vested (weighted average grant-date fair value $24.89). Fiscal 2026: 146 million vested ($39.14).",
+  "key_points": [
+   "173 million RSUs, PSUs and market-based PSUs vested in fiscal 2025.",
+   "146 million RSUs, PSUs and market-based PSUs vested in fiscal 2026."
+  ]
+ },
+ {
+  "id": "md_91",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2025, how concentrated were its accounts receivable at the end of fiscal 2025: how many direct customers did NVIDIA single out, and what percentage of the receivables balance did each account for?",
+  "answer": "Two direct customers, which accounted for 17% and 16% of NVIDIA's accounts receivable balance as of January 26, 2025.",
+  "key_points": [
+   "Two direct customers accounted for 17% and 16% of the accounts receivable balance as of January 26, 2025."
+  ]
+ },
+ {
+  "id": "md_93",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2025, by how much did the foreign-derived intangible income (FDII) deduction reduce fiscal 2025 income tax expense in the reconciliation from the 21% U.S. federal statutory rate, and what reasons does MD&A give for the effective tax rate rising from fiscal 2024?",
+  "answer": "FDII reduced fiscal 2025 income tax expense by $2,976 million, or 3.5 percentage points. MD&A says the effective tax rate (13.3% versus 12.0%) rose mainly because of higher pre-tax income and because fiscal 2024 had benefited from a discrete item tied to an audit resolution.",
+  "key_points": [
+   "FDII reduced fiscal 2025 income tax expense by $2,976 million, or 3.5 percentage points of the rate.",
+   "MD&A attributes the higher fiscal 2025 effective tax rate mainly to higher pre-tax income.",
+   "MD&A also cites a prior-year discrete benefit from an audit resolution."
+  ]
+ },
+ {
+  "id": "md_94",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2025_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How did the segment-information note's description of NVIDIA's Graphics segment change from the 10-K for fiscal year 2025 to the 10-K for fiscal year 2026? Say what the fiscal 2025 note said the segment's Omniverse Enterprise software was for, and which offerings the fiscal 2026 note lists for the segment.",
+  "answer": "FY2025 10-K: among other offerings, Graphics included Omniverse Enterprise software for building and operating industrial AI and digital twin applications. FY2026 10-K: Graphics lists only GeForce GPUs for gaming and PCs and Quadro/NVIDIA RTX GPUs for enterprise workstation graphics; Omniverse, GeForce NOW, vGPU and infotainment are no longer listed.",
+  "key_points": [
+   "FY2025 10-K: Graphics' Omniverse Enterprise software was for building and operating industrial AI and digital twin applications.",
+   "FY2026 10-K: Graphics includes only GeForce GPUs for gaming and PCs and Quadro/NVIDIA RTX GPUs for workstation graphics."
+  ]
+ },
+ {
+  "id": "md_95",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2025, between which fiscal years do the lease periods of NVIDIA's operating leases expire?",
+  "answer": "Between fiscal years 2026 and 2037.",
+  "key_points": [
+   "NVIDIA's operating lease periods expire between fiscal years 2026 and 2037."
+  ]
+ },
+ {
+  "id": "md_97",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2025_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How many developers worldwide were using CUDA and NVIDIA's other software tools according to NVIDIA's 10-K for fiscal year 2026, compared with its 10-K for fiscal year 2025, and how did the fiscal 2026 filing size the startup base reached through the Inception program?",
+  "answer": "Over 7.5 million developers in the FY2026 10-K versus over 5.9 million in the FY2025 10-K; the FY2026 10-K says NVIDIA works with tens of thousands of startups through Inception (the FY2025 10-K said thousands).",
+  "key_points": [
+   "The FY2026 10-K cites over 7.5 million developers using CUDA and NVIDIA's other software tools.",
+   "The FY2025 10-K cites over 5.9 million such developers.",
+   "The FY2026 10-K says NVIDIA partners with tens of thousands of startups through Inception."
+  ]
+ },
+ {
+  "id": "md_98",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2026, how many separate risks does the Risk Factors Summary list under the heading for risks related to NVIDIA's global operating business?",
+  "answer": "Eleven; the new one versus the prior year is that commercial arrangements expose NVIDIA to counterparty risks.",
+  "key_points": [
+   "The fiscal 2026 risk summary lists 11 risks under Risks Related to Our Global Operating Business."
+  ]
+ },
+ {
+  "id": "md_101",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How did the opening list of example causes of disruption in NVIDIA's business-disruption risk factor change between its 10-K for fiscal year 2023 and its 10-K for fiscal year 2026: which item named in the fiscal 2023 list is dropped, and which items does the fiscal 2026 list add?",
+  "answer": "The fiscal 2023 list named cloud service provider outages, which the fiscal 2026 list no longer names. The fiscal 2026 list adds critical infrastructure failures, supplier disruptions and abrupt regulatory changes, and frames the items as factors that have caused and/or could cause disruptions.",
+  "key_points": [
+   "Fiscal 2023 10-K: the list names cloud service provider outages, an item absent from the fiscal 2026 list.",
+   "Fiscal 2026 10-K: the list adds critical infrastructure failures and supplier disruptions.",
+   "Fiscal 2026 10-K: the list also adds abrupt regulatory changes."
+  ]
+ },
+ {
+  "id": "md_105",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2025_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How many years of cybersecurity experience, across government and private-sector roles, did NVIDIA cite for its Chief Security Officer in its 10-K for fiscal year 2026, versus its 10-K for fiscal year 2025?",
+  "answer": "Over 18 years in the FY2026 10-K versus over 17 years in the FY2025 10-K.",
+  "key_points": [
+   "The FY2026 10-K credits the Chief Security Officer with over 18 years of experience.",
+   "The FY2025 10-K credits the Chief Security Officer with over 17 years of experience."
+  ]
+ },
+ {
+  "id": "md_108",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2026, to what size did NVIDIA enlarge its commercial paper program during the year, and which of its senior note issues had less than one year of remaining term at fiscal year-end?",
+  "answer": "NVIDIA enlarged its commercial paper program to $25.0 billion (in January 2026, from $575 million). The 3.20% Notes Due 2026 were the only senior notes with less than one year of remaining term (about 0.6 years; $1.0 billion).",
+  "key_points": [
+   "NVIDIA enlarged its commercial paper program to $25.0 billion (in January 2026).",
+   "The 3.20% Notes Due 2026 had less than one year of remaining term (about 0.6 years; $1.0 billion principal)."
+  ]
+ },
+ {
+  "id": "md_111",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "When NVIDIA licensed Groq's language processing unit technology on a non-exclusive basis and brought on some Groq employees, how much consideration did it pay at closing, and how much more was payable within one year?",
+  "answer": "$13.0 billion was paid at closing (shown as a Groq, Inc. outflow in investing activities), and a further $4 billion, inclusive of imputed interest, was payable within one year and recorded in accrued and other current liabilities.",
+  "key_points": [
+   "NVIDIA paid $13.0 billion at closing for the Groq arrangement.",
+   "A further $4 billion, inclusive of imputed interest, was payable within one year."
+  ]
+ },
+ {
+  "id": "md_112",
+  "type": "Several facts from one named filing",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2026, how large was the valuation allowance against deferred tax assets at the end of fiscal 2026, and how much valuation allowance did NVIDIA release after concluding that some state deferred tax assets had become realizable on a more-likely-than-not basis?",
+  "answer": "$768 million as of January 25, 2026; NVIDIA released $711 million of valuation allowance on certain state deferred tax assets, based on recent jurisdictional taxable income and expected future earnings.",
+  "key_points": [
+   "The valuation allowance was $768 million as of January 25, 2026.",
+   "NVIDIA released $711 million of valuation allowance on certain state deferred tax assets."
+  ]
+ },
+ {
+  "id": "md_114",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2026, what amortization expense does NVIDIA estimate for fiscal year 2027 on the net carrying amount of its intangible assets?",
+  "answer": "$923 million.",
+  "key_points": [
+   "Estimated fiscal 2027 amortization expense for intangible assets is $923 million."
+  ]
+ },
+ {
+  "id": "md_117",
+  "type": "Compare two fiscal years",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How did the amount of cumulative undistributed subsidiary earnings that NVIDIA intended to indefinitely reinvest change between its 10-K for fiscal year 2023 and its 10-K for fiscal year 2026, and in which countries did the fiscal 2023 filing say those earnings were held?",
+  "answer": "Fiscal 2023 10-K: about $1.05 billion held by subsidiaries in Israel and $245 million held by subsidiaries in the United Kingdom, as of January 29, 2023 (about $1.3 billion combined). Fiscal 2026 10-K: about $1.4 billion held by certain subsidiaries, with no countries named, as of January 25, 2026.",
+  "key_points": [
+   "Fiscal 2023 10-K: about $1.05 billion held by subsidiaries in Israel was to be indefinitely reinvested.",
+   "Fiscal 2023 10-K: about $245 million held by subsidiaries in the United Kingdom was to be indefinitely reinvested.",
+   "Fiscal 2026 10-K: about $1.4 billion of undistributed earnings held by certain subsidiaries was to be indefinitely reinvested."
+  ]
+ },
+ {
+  "id": "md_118",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2026, how much of the gross unrecognized tax benefits at the end of fiscal 2026 would affect NVIDIA's effective tax rate if recognized?",
+  "answer": "$3.7 billion, as of January 25, 2026 (out of a gross balance of $4,420 million).",
+  "key_points": [
+   "$3.7 billion of the unrecognized tax benefits would affect the effective tax rate if recognized."
+  ]
+ },
+ {
+  "id": "md_125",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "NVIDIA chose to adopt ahead of its required date the FASB update requiring acquirers to apply ASC 606 when recognizing and measuring contract assets and contract liabilities taken on in a business combination. In which fiscal quarter did NVIDIA adopt that update?",
+  "answer": "NVIDIA early adopted the standard in the third quarter of fiscal year 2022.",
+  "key_points": [
+   "NVIDIA early adopted the standard in the third quarter of fiscal year 2022."
+  ]
+ },
+ {
+  "id": "md_126",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "What estimated fair value did NVIDIA report for its 2.20% senior notes at the last fiscal year-end before it paid them off, and on what date did it repay them?",
+  "answer": "At the last fiscal year-end they were outstanding (January 31, 2021), the 2.20% notes had a Level 2 fair value of $1,011 million; NVIDIA repaid the $1.00 billion of 2.20% notes on August 16, 2021.",
+  "key_points": [
+   "At the last fiscal year-end before repayment, the 2.20% notes had an estimated (Level 2) fair value of $1,011 million.",
+   "NVIDIA repaid the 2.20% notes ($1.00 billion) on August 16, 2021."
+  ]
+ },
+ {
+  "id": "md_127",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "NVIDIA once simplified its corporate structure by moving the economic rights to certain foreign-held intellectual property back to the United States through domesticating one of its foreign subsidiaries. On what date did this happen, and how large was the discrete tax benefit it produced?",
+  "answer": "It happened on June 28, 2021, and produced a discrete tax benefit of $244 million, mainly from re-valuing deferred tax assets net of deferred tax liabilities.",
+  "key_points": [
+   "The domestication took place on June 28, 2021.",
+   "It produced a discrete tax benefit of $244 million."
+  ]
+ },
+ {
+  "id": "md_129",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K",
+   "NVIDIA_2025_10K"
+  ],
+  "question": "NVIDIA found a defect in a component sourced from a third party and built into some of its Data Center products. In which fiscal year did NVIDIA record a net warranty liability mainly because of this defect, and in that year's second quarter, how much did it record in product warranty liabilities primarily for the defect?",
+  "answer": "Fiscal year 2023. In the second quarter of fiscal 2023, NVIDIA recorded $122 million in product warranty liabilities, primarily related to this defect.",
+  "key_points": [
+   "NVIDIA recorded a net warranty liability during fiscal year 2023, primarily in connection with this third-party component defect.",
+   "In the second quarter of fiscal 2023, NVIDIA recorded $122 million in product warranty liabilities, primarily related to this defect."
+  ]
+ },
+ {
+  "id": "md_134",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2023_10K"
+  ],
+  "question": "Under NVIDIA's Amended and Restated 2007 Equity Incentive Plan, the company's remaining stock options were all fully vested. By what month were the last of those options due to lapse if holders did not exercise them?",
+  "answer": "The last of the outstanding, fully vested stock options would expire by December 2023 if not exercised.",
+  "key_points": [
+   "The last outstanding stock options under the 2007 Plan would expire by December 2023 if not exercised."
+  ]
+ },
+ {
+  "id": "md_135",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K",
+   "NVIDIA_2025_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "In the consolidated shareholder derivative litigation pending in federal court in the Northern District of California over NVIDIA's alleged misstatements about channel inventory and cryptocurrency mining's effect on GPU demand, on what date did the court administratively close the case, and what event did it say would lead it to reopen the case?",
+  "answer": "The court administratively closed the case on February 22, 2022, stating it would reopen it once the appeal in the In re NVIDIA Corporation Securities Litigation class action is resolved.",
+  "key_points": [
+   "The court administratively closed the derivative case on February 22, 2022.",
+   "It would reopen the case once the appeal in the In re NVIDIA Corporation Securities Litigation action is resolved."
+  ]
+ },
+ {
+  "id": "md_142",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2022_10K",
+   "NVIDIA_2023_10K",
+   "NVIDIA_2024_10K"
+  ],
+  "question": "NVIDIA's purchase of Mellanox brought with it an in-process research and development asset that was at first carried without amortization. In which fiscal quarter did NVIDIA start amortizing that asset, and at what amount was it valued?",
+  "answer": "NVIDIA began amortizing the Mellanox IPR&D asset during the first quarter of fiscal year 2023; the asset was valued at $630 million.",
+  "key_points": [
+   "NVIDIA began amortizing the Mellanox IPR&D intangible asset during the first quarter of fiscal year 2023.",
+   "The Mellanox IPR&D intangible asset was valued at $630 million."
+  ]
+ },
+ {
+  "id": "md_143",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2024_10K",
+   "NVIDIA_2025_10K",
+   "NVIDIA_2026_10K"
+  ],
+  "question": "Besides the derivative suits filed in federal courts, a further putative derivative action over NVIDIA's alleged misstatements about channel inventory and cryptocurrency mining was brought in the Delaware Court of Chancery. What is that case's caption, and on what date was it filed?",
+  "answer": "It is Horanic v. Huang, et al. (Case No. 2023-1096-KSJM), filed on October 30, 2023.",
+  "key_points": [
+   "The Chancery action is captioned Horanic v. Huang, et al.",
+   "It was filed on October 30, 2023."
+  ]
+ },
+ {
+  "id": "md_153",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "How does NVIDIA characterize the payments its intellectual property license arrangement with Groq, Inc. required, and how much goodwill did NVIDIA record in connection with that arrangement?",
+  "answer": "NVIDIA says the arrangement required significant, nonrefundable payments. It recorded $14.4 billion of goodwill in connection with the arrangement, alongside a $2.5 billion developed technology intangible asset.",
+  "key_points": [
+   "The payments required under the Groq IP license arrangement were significant and nonrefundable.",
+   "NVIDIA recorded $14.4 billion of goodwill in connection with the Groq license arrangement."
+  ]
+ },
+ {
+  "id": "md_155",
+  "type": "No filing named",
+  "filings": [
+   "NVIDIA_2026_10K"
+  ],
+  "question": "In a private, unregistered issuance connected with acquiring a company, NVIDIA gave common stock to a single key employee of that business. How many shares were issued, and roughly what were they worth?",
+  "answer": "174,676 shares of common stock, valued at approximately $31 million based on the closing price on the issuance date (December 15, 2025).",
+  "key_points": [
+   "NVIDIA issued 174,676 shares of common stock to the key employee.",
+   "The shares were valued at approximately $31 million."
+  ]
+ },
+ {
+  "id": "md_160",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, by how much did the company's interest rate sensitivity analysis as of January 30, 2022 estimate that the fair value of its investment portfolio would decrease if the yield curve shifted upward in parallel by 0.5%?",
+  "answer": "About $33 million. (The same analysis, which applied a zero percent yield floor, estimated a $22 million increase for a 0.5% downward shift.)",
+  "key_points": [
+   "A 0.5% upward parallel shift in the yield curve would decrease the investment portfolio's fair value by $33 million as of January 30, 2022."
+  ]
+ },
+ {
+  "id": "md_161",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2022_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2022, how much amortization expense did NVIDIA estimate, as of January 30, 2022, that it would record in fiscal year 2025 on the net carrying amount of its intangible assets (excluding IPR&D)?",
+  "answer": "$405 million.",
+  "key_points": [
+   "As of January 30, 2022, estimated amortization expense for fiscal year 2025 was $405 million."
+  ]
+ },
+ {
+  "id": "md_162",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2023_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2023, how were NVIDIA's share repurchases under its publicly announced program spread across the three monthly periods of the fourth quarter of fiscal 2023?",
+  "answer": "Only in the first period, October 31 to November 27, 2022 (7 million shares at an average of $148.11); no shares were repurchased from November 28, 2022 through January 29, 2023.",
+  "key_points": [
+   "Repurchases occurred only in the October 31 to November 27, 2022 period; none in the two later periods of the quarter."
+  ]
+ },
+ {
+  "id": "md_165",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2024_10K"
+  ],
+  "question": "According to NVIDIA's 10-K for fiscal year 2024, as of January 28, 2024, by how much would pre-tax income have been hurt if a hypothetical adverse 10% move in foreign exchange rates were applied to the company's balance sheet hedging contracts?",
+  "answer": "$60 million.",
+  "key_points": [
+   "An adverse 10% exchange rate change on balance sheet hedging contracts would have reduced income before taxes by $60 million as of January 28, 2024."
+  ]
+ },
+ {
+  "id": "md_167",
+  "type": "One fact from a named year",
+  "filings": [
+   "NVIDIA_2025_10K"
+  ],
+  "question": "As reported in the supplemental cash flow disclosures of NVIDIA's 10-K for fiscal year 2025, how much net cash did NVIDIA pay for income taxes in fiscal year 2025?",
+  "answer": "$15,118 million (about $15.1 billion) of cash paid for income taxes, net, in fiscal year 2025.",
+  "key_points": [
+   "Cash paid for income taxes, net, in fiscal 2025 was $15,118 million."
+  ]
+ }
+]

@@ -261,11 +261,14 @@ def bookmarks_to_structure(entries: list[dict], n_pages: int) -> list[dict]:
 
 
 def _same_heading(node: dict, chapter: dict) -> bool:
-    if node["start_index"] != chapter["start_index"]:
-        return False
     node_norm = _normalize_title(node["title"])
     chapter_norm = _normalize_title(chapter["title"])
     if not node_norm or not chapter_norm:
+        return False
+    # A bookmark can target the page before its printed title
+    if node["start_index"] == chapter["start_index"] + 1:
+        return node_norm == chapter_norm
+    if node["start_index"] != chapter["start_index"]:
         return False
     return (node_norm == chapter_norm or node_norm.endswith(chapter_norm)
             or chapter_norm.endswith(node_norm)
@@ -360,11 +363,11 @@ def merge_bookmark_skeleton(
     detected hierarchy disagrees with the bookmark frame) is dissolved --
     its heading stays behind as a leaf and its children are placed
     individually. A node that duplicates its chapter heading (same start
-    page, normalized-equal or numbering-prefixed title) dissolves into it
-    without leaving a leaf. Nodes wholly before the first chapter stay at
-    the root. All end_index values are recomputed for the merged tree, so
-    detected ends derived from the heading-at-page-top signal may gain one
-    page of slack.
+    page, normalized-equal or numbering-prefixed title; or the next page,
+    normalized-equal title) dissolves into it without leaving a leaf.
+    Nodes wholly before the first chapter stay at the root. All end_index
+    values are recomputed for the merged tree, so detected ends derived
+    from the heading-at-page-top signal may gain one page of slack.
 
     With ``page_texts``, two extra passes run: detected titles are
     repaired from same-page bookmark strings, and deeper bookmark entries

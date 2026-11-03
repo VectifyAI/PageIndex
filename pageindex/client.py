@@ -9,7 +9,7 @@ import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
                     Optional, Union, cast, overload)
 
-from .chat_stream import ChatStream
+from .chat_stream import ChatStream, MessagesStream, ChatObject
 from .errors import PageIndexAPIError
 
 
@@ -30,7 +30,12 @@ def _preload_litellm() -> None:
         except Exception:
             pass
 
-    threading.Thread(target=_import, daemon=True).start()
+    thread = threading.Thread(target=_import, daemon=True)
+    thread.start()
+    if hasattr(os, "register_at_fork"):
+        # a child forked mid-import would wait forever on the import lock of
+        # a thread it lacks, so a fork waits for the import to finish
+        os.register_at_fork(before=thread.join)
 
 
 def _parse_pages(pages: str) -> list[int]:
@@ -380,7 +385,21 @@ class PageIndexClient:
             optional: the arguments themselves already carry the mode.
         index_model (str, optional): Local mode only — LLM used to index
             documents (structure and summaries). Defaults to the SDK
-            default (fast and cheap).
+            default (fast and cheap). ``claude-code/<model>`` (e.g.
+            ``claude-code/haiku``) indexes on your own Claude subscription
+            through Claude Code, flash mode only, with backend settings
+            not applying (``pip install 'pageindex[claude]'``; for your
+            own use — a product serving other people needs an API key).
+            There a reasoning effort must be a level Claude Code lists for
+            the model (one listing none drops it), checked before any
+            prompt goes out. The default ``"none"`` asks for low effort
+            and turns thinking off where the model allows it; a
+            ``"none"`` you pass raises. The summaries run as the agents
+            of one Claude Code workflow, up to 64 at a time by default
+            (``PAGEINDEX_CLAUDE_CODE_WORKFLOW`` sets how many; 0 runs
+            each call in a process of its own, as do prompts over 10,000
+            characters and plans without workflows, such as Pro by
+            default).
         chat_model (str, optional): Your own model for the chat surfaces
             (``chat``, ``chat_completions``; a value you set also
             carries onto ``chat(protocol="messages")`` and the two
@@ -391,10 +410,19 @@ class PageIndexClient:
             names route through LiteLLM and mean what LiteLLM says they
             mean; bare names are OpenAI-compatible shorthand, and
             ``openai/Qwen/...`` is the form for an OpenAI-compatible
-            server that itself serves slashed model ids (vLLM, TGI). The
-            Anthropic-native surfaces read the name by its routing
-            prefix instead — bare names are Anthropic's own — and treat
-            the untouched stock default as no choice. Defaults to the
+            server that itself serves slashed model ids (vLLM, TGI).
+            ``chat(protocol="responses")`` and the Anthropic-native
+            surfaces read the name by its routing prefix instead and
+            send the rest as written — bare names are OpenAI's and
+            Anthropic's own respectively — and the Anthropic-native ones
+            treat the untouched stock default as no choice.
+            ``claude-code/<model>`` runs the answer lane (and
+            ``protocol="chat_completions"``) on your own Claude
+            subscription through Claude Code, same terms as
+            ``index_model``'s; ``claude_agent_config()`` carries it as the
+            bare alias for your own Claude Code login, while the other
+            protocol lanes and ``anthropic_runner_config()``, which drive
+            an API, refuse it. Defaults to the
             SDK default (strong); reads ``None`` on a cloud client where
             the managed chat answers.
         model (str, optional): Local mode only — one model for both roles:
@@ -407,18 +435,23 @@ class PageIndexClient:
             ``index_model`` covers this.
         summary_max_words (int, optional): Local flash mode only — the word
             cap each model-written node summary is asked to stay within;
-            short leaf nodes keep their own text. Defaults to 150.
+            a leaf node shorter than that keeps its own text. Defaults to 150.
         summary_concurrency (int, optional): Local flash mode only — cap on
             simultaneous indexing model calls per lane: the summaries, and
             expand up to its own ceiling of 32. The lanes overlap, so up to
-            cap + min(32, cap) calls run at once. Defaults to 64.
+            cap + min(32, cap) calls run at once. Defaults to 128.
         summary_reasoning_effort (str, optional): Local flash mode only —
             the reasoning effort sent with each node-summary call, over any
             in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...; a
             model without the setting drops it). Defaults to ``"none"``
             unless LiteLLM lists the model as refusing it, and stops
             sending it once a prompt the server refused with it (HTTP
-            400) goes through without it.
+            400) goes through without it (never on ``claude-code/``,
+            whose effort is checked up front). ``"none"`` raises on a model
+            whose thinking can't be turned off (Claude Opus 5.5 and Fable
+            under ``anthropic/``, ``bedrock/``, ``vertex_ai/`` or
+            ``azure_ai/``) and on any ``claude-code/`` model; the default
+            runs them at ``"low"``.
             Expand keeps the model's own default. A
             ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash
@@ -779,7 +812,10 @@ class PageIndexClient:
             folder_id (str, optional): Cloud-only folder (workspace) ID.
             metadata (dict, optional): Your own JSON-serializable tags for the
                 document; returned in get_document/get_tree/get_ocr responses
-                and list_documents entries (both modes).
+                and list_documents entries (both modes). Cloud: a metadata
+                schema must apply to the folder (``create_metadata_schema()``);
+                without one, a non-empty dict raises PageIndexAPIError (HTTP
+                400).
             wait (bool): Return only once the document is ready for use.
                 Cloud: polls status until "completed" (raises on "failed" or
                 after 30 minutes). Local: indexing is synchronous already, so
@@ -790,6 +826,9 @@ class PageIndexClient:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
                 name: a taken name gains a numeric suffix (name_1..name_99)
                 and a UserWarning is emitted. Older cloud servers omit 'name'.
+                Local also returns 'usage', the indexing model's tokens summed
+                over every call, in the Chat Completions usage shape
+                LiteLLM returns.
         """
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
@@ -1092,7 +1131,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]: ...
+    ) -> ChatObject: ...
 
     @overload
     def chat(
@@ -1112,7 +1151,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Iterator[dict[str, Any]]: ...
+    ) -> Iterator[ChatObject]: ...
 
     @overload
     def chat(
@@ -1132,7 +1171,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Iterator[Any]: ...
+    ) -> MessagesStream: ...
 
     @overload
     def chat(
@@ -1173,7 +1212,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]: ...
+    ) -> Union[str, ChatStream, ChatObject, Iterator[Any]]: ...
 
     def chat(
         self,
@@ -1193,7 +1232,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict[str, Any]] = None,
-    ) -> Union[str, ChatStream, dict[str, Any], Iterator[Any]]:
+    ) -> Union[str, ChatStream, ChatObject, Iterator[Any]]:
         """
         Ask a question about your documents.
 
@@ -1209,17 +1248,32 @@ class PageIndexClient:
         lane's own engine with its envelope kept — the Chat Completions
         response (``choices``/``usage``), or its chunk dicts when
         streaming; it is the one protocol the managed cloud chat serves
-        too. ``protocol="responses"`` / ``"messages"``: own-model chat
+        too. With an API chat model it adds ``messages`` (on the closing
+        usage chunk when streaming): the call's new Chat Completions
+        messages — assistant tool calls, tool results, the answer — to
+        append as they are, ``history += r["messages"]``. Each assistant
+        message names its LiteLLM route as ``model`` (``openai/gpt-6-luna``
+        where the response says ``gpt-6-luna``); keep it when storing the
+        history: a message's reasoning goes back only to the model it
+        names.
+        ``protocol="responses"`` / ``"messages"``: own-model chat
         driven natively over the OpenAI Responses API or Anthropic's
         Messages API. Input and output are that protocol's own shapes —
         the history may carry its transcript (Responses items, or
         Messages content blocks with prior tool_use/tool_result
         round-trips), and the return is its response envelope, streaming
-        its native events. A round-tripped transcript continues the
-        agent's memory and the provider's cached prefix: follow-ups re-read
-        the run instead of redoing the tool work. The protocol is declared,
-        never inferred from the model name. Keep ``doc_id`` and
-        ``protocol`` constant across a conversation's calls.
+        its native events. A round-tripped ``messages`` transcript
+        continues the agent's memory and the provider's cached prefix:
+        follow-ups re-read the run instead of redoing the tool work. The
+        protocol is declared, never inferred from the model name. Keep
+        ``doc_id`` and ``protocol`` constant across a conversation's
+        calls.
+
+        A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
+        the constructor's ``chat_model``): ``backend``, ``extra_headers``
+        and ``extra_body`` are refused, a configured ``chat_backend``
+        doesn't apply, and ``reasoning_effort`` must be a level Claude
+        Code lists for the model.
 
         Args:
             messages: A question string, or the conversation history —
@@ -1230,18 +1284,28 @@ class PageIndexClient:
                 the other protocol lanes pass rows to the wire as they
                 are (use ``instructions`` for persona there). Responses
                 and Messages also accept their native transcript items
-                or content blocks; own-model Chat Completions takes text
-                history only.
-            doc_id: Document ID or list of IDs to scope the conversation.
+                or content blocks; with an API chat model, the answer lane
+                and Chat Completions also take Chat Completions tool
+                history (assistant ``tool_calls``, ``tool`` rows), as
+                ``messages`` returns it. A ``claude-code/`` model takes
+                text only.
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls. Local
                 documents: also enforced at the tool layer, not just
-                prompted. Cloud documents: the managed chat scopes
-                server-side; own-model chat targets at the prompt level.
+                prompted. Cloud documents: prompted, not enforced, on the
+                managed chat too (its tools reach every document the
+                api_key can); own-model chat opens with the document's
+                metadata as each call fetches it. If that changes
+                mid-conversation (status, metadata, folder), Claude
+                models that bind thinking to the conversation reject the
+                earlier thinking with a 400 on accounts that enforce it:
+                start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
-                documents. Cloud-only. The managed chat scopes it
-                server-side; own-model chat leads the conversation with
-                the folder's targeting text (``folder_context``), ahead
-                of the document block. ``"root"`` is the whole library.
+                documents. Cloud-only, and prompted like ``doc_id``: the
+                managed chat steers with its own prompt; own-model chat
+                leads the conversation with the folder's targeting text
+                (``folder_context``), ahead of the document block.
+                ``"root"`` is the whole library.
                 Keep it identical across a conversation's calls.
             stream: Answer lane: return a ``ChatStream`` — iterate it for
                 the answer as text chunks as they are produced
@@ -1253,14 +1317,24 @@ class PageIndexClient:
                 clipped). One run serves one view. Protocol lanes: the
                 protocol's own event stream.
             model: Own-model chat only — backend model name (defaults
-                to ``chat_model``). ``protocol="messages"`` takes a Claude
-                model — a ``chat_model`` you set carries over; the stock
-                default is never sent.
+                to ``chat_model``). ``protocol="responses"`` /
+                ``"messages"`` send it as written after its routing
+                prefix (``openai/``, ``litellm/``; ``anthropic/``,
+                ``bedrock/``, …), so
+                a gateway's own ids work with ``backend``.
+                ``protocol="messages"`` takes a Claude model (or a
+                gateway's) — a ``chat_model`` you set carries over; the
+                stock default is never sent.
             reasoning_effort: Own-model chat only — how hard the model
                 thinks (``"low"`` / ``"medium"`` / ``"high"``; what a
                 backend accepts is its own). Each lane sends its native
                 spelling: LiteLLM's ``reasoning_effort``, Responses
                 ``reasoning.effort``, Messages ``output_config.effort``.
+                ``"none"`` turns a Claude model's thinking off with its own
+                switch, on Messages and through LiteLLM to Anthropic,
+                Bedrock, Vertex or Foundry (Sonnet 5.5's still thinks
+                between tool calls), and raises on one that can't
+                (Opus 5.5, Fable) and on any ``claude-code/`` model.
                 Unset sends nothing — the model's default applies.
             show_process: Answer lane, streamed chat — weave the run into
                 the text stream for display: thinking flows as
@@ -1329,9 +1403,11 @@ class PageIndexClient:
                 Messages. Passed through verbatim.
             extra_headers: Own-model chat only — extra HTTP headers
                 merged into each backend request; caller headers win.
-                LiteLLM's anthropic adapter owns ``anthropic-beta`` on the
-                answer lane and ``protocol="chat_completions"`` —
-                Anthropic beta flags ride ``protocol="messages"``.
+                On the answer lane and ``protocol="chat_completions"``,
+                LiteLLM forwards an ``anthropic-beta`` flag only if it is
+                on LiteLLM's own list and drops the rest silently —
+                Anthropic beta flags it doesn't know ride
+                ``protocol="messages"``.
             extra_body: The wire's own request fields beyond this
                 method's parameters, in the lane's wire names (Responses
                 ``max_output_tokens``, Messages ``thinking`` / ``top_k``;
@@ -1346,8 +1422,10 @@ class PageIndexClient:
                 ``instructions`` / ``input`` / ``messages`` / ``tools``
                 are refused); extend the prompt with ``instructions=`` or a
                 leading system row in ``messages``. ``stream`` / ``doc_id``
-                are refused too: each has its own argument. Credentials
-                belong in ``backend``, never here.
+                / ``folder_id`` / ``model`` / ``reasoning_effort`` are
+                refused too: each has its own argument. Credentials and the
+                endpoint (``api_key`` / ``base_url`` / ``api_base``) belong
+                in ``backend``, never here.
 
         Returns:
             - answer lane, stream=False: the answer string
@@ -1359,13 +1437,42 @@ class PageIndexClient:
               ``{"type": "tool_call", "call_id", "name", "arguments"}``,
               ``{"type": "tool_result", "call_id", "name", "output"}``
             - protocol lane, stream=False: the protocol's response
-              envelope — Chat Completions: ``choices`` and ``usage``;
-              Responses: ``output`` plus an ``items``
+              envelope — Chat Completions: ``choices`` and ``usage``,
+              plus ``messages`` from an API chat model;
+              Responses: ``output`` plus a ``messages``
               transcript and cross-turn ``usage``; Messages: the final
               message with a ``messages`` turn sequence and aggregated
-              ``usage``
+              ``usage``. Each own-model ``usage`` also lists the run's
+              model calls: ``request_usage_entries`` on the OpenAI
+              protocols (a ``claude-code/`` model reports the run's total
+              only), the native ``iterations`` on Messages
             - protocol lane, stream=True: an iterator of the protocol's
-              own stream events
+              own stream events; on Messages a ``MessagesStream``, whose
+              ``get_final_message()`` reads the run to its end and returns
+              what the non-stream call returns (``get_final_text()``: its
+              text, raising when that message is unfinished)
+
+            Protocol envelopes, chunks and events are ``ChatObject``: dicts
+            that also read by attribute as the official SDK reads the same
+            JSON:
+            ``r.choices[0].message.content`` or
+            ``r["choices"][0]["message"]["content"]``. An official field
+            the dict lacks reads None by attribute; the attribute view is
+            read-only, so write through the keys.
+
+        An own-model run that fails raises PageIndexAPIError with
+        ``usage``: what its finished model calls spent, in the protocol's
+        usage shape (Chat Completions on the answer lane); ``None`` if a
+        ``claude-code/`` run fails on a tool call or ends before Claude
+        Code reports its usage.
+
+        An answer-lane reply the run reports unfinished (finish_reason
+        ``length`` or ``content_filter``; on the managed endpoint
+        ``max_tokens``, ``refusal`` or ``model_context_window_exceeded``)
+        raises PageIndexAPIError instead of
+        passing as complete: a stream after the text it delivered, a
+        non-streamed call with that text in ``partial_answer``. The protocol
+        lanes mark it instead, as their wire does.
         """
         if protocol not in (None, "chat_completions", "responses",
                             "messages"):
@@ -1415,6 +1522,12 @@ class PageIndexClient:
                 enable_citations = True
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
+            from .integrations.claude_agent_sdk import is_claude_code
+            if is_claude_code(model or self.chat_model):
+                raise PageIndexAPIError(
+                    "claude-code/ models run the Claude Code CLI on the "
+                    f"answer lane — drop protocol={protocol!r}, which "
+                    "drives an API model over its own wire.")
             if protocol == "responses":
                 body = extra_body
                 if reasoning_effort:
@@ -1432,12 +1545,23 @@ class PageIndexClient:
                     extra_headers=extra_headers, backend=backend)
             body = extra_body
             if reasoning_effort:
+                from .utils import claude_none_switch
+                given = extra_body or {}
+                # Anthropic's effort takes no "none": a Claude model's own
+                # thinking switch stands in, unless the caller sent one.
+                swap = (reasoning_effort == "none" and "thinking" not in given
+                        and claude_none_switch(model or self.chat_model))
+                if swap and "reasoning_effort" in swap:
+                    raise PageIndexAPIError(
+                        f"{model or self.chat_model} can't turn thinking off, "
+                        "so it can't honor reasoning_effort='none'; pass "
+                        "'low' or leave it unset.")
                 # Anthropic's own effort field, beside the caller's other
                 # output_config keys — theirs still win.
-                given = extra_body or {}
-                body = {**given, "output_config": {
-                    "effort": reasoning_effort,
-                    **given.get("output_config", {})}}
+                body = {**given, **swap} if swap else {
+                    **given, "output_config": {
+                        "effort": reasoning_effort,
+                        **given.get("output_config", {})}}
             return self._messages(
                 messages, model=model, stream=stream, doc_id=doc_id,
                 folder_id=folder_id,
@@ -1495,15 +1619,24 @@ class PageIndexClient:
                                        extra_body=extra_body)
         envelope = cast(dict[str, Any], result)
         try:
-            return envelope["choices"][0]["message"]["content"] or ""
+            choice = envelope["choices"][0]
+            answer = choice["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise PageIndexAPIError(
                 "The chat response carries no answer: "
                 f"{str(envelope)[:200]}") from exc
+        from .local_chat import _CUT_SHORT, _cut_short_error
+        if choice.get("finish_reason") in _CUT_SHORT:
+            error = _cut_short_error(choice["finish_reason"])
+            error.partial_answer = answer
+            if self._local_chat:
+                error.usage = envelope.get("usage")
+            raise error
+        return answer
 
     def chat_completions(
         self,
-        messages: Union[str, list[dict[str, str]]],
+        messages: Union[str, list[dict[str, Any]]],
         stream: bool = False,
         doc_id: Optional[Union[str, list[str]]] = None,
         temperature: Optional[float] = None,
@@ -1519,7 +1652,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[str], Iterator[dict[str, Any]]]:
+    ) -> Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
         """
         Kept for existing code — new code calls ``chat()``. Everything
         here is ``chat(protocol="chat_completions")``: the same engine
@@ -1542,13 +1675,29 @@ class PageIndexClient:
         provider-prefixed names — ``anthropic/…``, ``bedrock/…`` — reach
         that provider, and LiteLLM-routed Claude models get the managed
         prompt prefix cache-marked automatically. The non-stream
-        response carries the final answer only; streaming yields the
+        response carries the final answer; streaming yields the
         agent's visible text as it is produced, including narration before
         tool calls. ``finish_reason`` carries the final turn's native
         finish reason — "stop", or the backend's "length" /
-        "content_filter" when the last turn was cut short. For
-        the tool-use process and prompt-cache round-trip use
-        ``chat(protocol="responses")`` or ``chat(protocol="messages")``.
+        "content_filter" when the last turn was cut short (a filtered
+        turn with no content at all raises PageIndexAPIError instead:
+        openai-agents turns it into a refusal). An API chat
+        model's run also returns ``messages`` (on the closing usage chunk
+        with ``stream_metadata``): the call's new messages — assistant
+        tool calls, tool results, the answer — to append as they are, so
+        the next call resends what the model saw and re-reads the
+        provider's cached prefix instead of redoing the tool work. Each
+        assistant message names its LiteLLM route as ``model``
+        (``openai/gpt-6-luna`` where the response says ``gpt-6-luna``);
+        keep it when storing the history: a message's reasoning goes back
+        only to the model it names.
+
+        A ``claude-code/`` chat model runs Claude Code, not LiteLLM (see
+        the constructor's ``chat_model``): ``temperature``, ``top_p``,
+        ``max_tokens``, ``extra_body``, ``extra_headers`` and ``backend``
+        are refused, a configured ``chat_backend`` doesn't apply, and
+        ``reasoning_effort`` must be a level Claude Code lists for the
+        model.
 
         Args:
             messages: Conversation messages with 'role' and 'content' keys,
@@ -1556,21 +1705,28 @@ class PageIndexClient:
                 System/developer messages, wherever they sit, join the
                 managed system prompt after the client's ``instructions``
                 (the managed endpoint receives them as its one leading
-                system message); the history is text only: tool-role
-                turns are rejected on both engines, and message
-                fields beyond role/content are dropped.
+                system message). Own-model chat takes the rest as text,
+                dropping other fields, plus, with an API chat model, Chat
+                Completions tool history as ``messages`` returns it
+                (assistant ``tool_calls`` and reasoning, ``tool`` rows);
+                a ``claude-code/`` model takes text only.
             stream: Enable streaming responses.
-            doc_id: Document ID or list of IDs to scope the conversation.
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
                 of the cached prompt prefix. Local documents: also
                 enforced at the tool layer, not just prompted. Cloud
-                documents: the managed chat scopes server-side;
-                own-model chat targets at the prompt level.
+                documents: prompted, not enforced, on the managed chat
+                too (its tools reach every document the api_key can). If the
+                document's metadata changes mid-conversation (status,
+                metadata, folder), Claude models that bind thinking to the
+                conversation reject the earlier thinking with a 400 on
+                accounts that enforce it: start a new conversation.
             folder_id: Folder ID to steer discovery toward that folder's
-                documents (cloud-only): the managed chat scopes it
-                server-side; own-model chat leads the conversation with
-                the folder's targeting text, ahead of the document block.
+                documents (cloud-only, prompted like ``doc_id``): the
+                managed chat steers with its own prompt; own-model chat
+                leads the conversation with the folder's targeting text,
+                ahead of the document block.
                 ``"root"`` is the whole library.
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
@@ -1593,8 +1749,12 @@ class PageIndexClient:
             reasoning_effort: Own-model chat only — passed through verbatim as
                 LiteLLM's ``reasoning_effort``; each provider maps it to
                 its own thinking control, and the values mean what the
-                backend says they mean. Unset sends nothing (the
-                backend's default applies).
+                backend says they mean. ``"none"`` is the exception: it
+                turns a Claude model's thinking off on Anthropic, Bedrock,
+                Vertex or Foundry (Sonnet 5.5's still thinks between tool
+                calls), and raises on one that can't (Opus 5.5, Fable) and
+                on any ``claude-code/`` model. Unset sends nothing
+                (the backend's default applies).
             extra_body: Extra request fields beyond this method's
                 parameters, merged last so they win. The managed endpoint
                 and OpenAI-compatible backends take them verbatim in the
@@ -1603,13 +1763,16 @@ class PageIndexClient:
                 The managed prompt, conversation and tools are not
                 fields here (``system`` / ``instructions`` / ``input`` /
                 ``messages`` / ``tools`` are refused), nor are ``stream``
-                / ``doc_id``: each has its own argument. Credentials belong
-                in ``backend``, never here.
+                / ``doc_id`` / ``folder_id`` / ``model`` /
+                ``reasoning_effort``: each has its own argument.
+                Credentials and the endpoint (``api_key`` / ``base_url`` /
+                ``api_base``) belong in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
                 each backend request; caller headers win. One exception:
-                LiteLLM's anthropic adapter owns the ``anthropic-beta``
-                header (your value is dropped there) — Anthropic beta
-                flags ride ``chat(protocol="messages")``.
+                LiteLLM forwards an ``anthropic-beta`` flag only if it is
+                on LiteLLM's own list and drops the rest silently —
+                Anthropic beta flags it doesn't know ride
+                ``chat(protocol="messages")``.
             backend: Own-model chat only — connection overrides for this call's
                 backend, merged over the client's ``chat_backend``
                 (per-call keys win). Keys are LiteLLM's own connection
@@ -1618,9 +1781,12 @@ class PageIndexClient:
 
         Returns:
             - stream=False: complete response dict ({'id', 'object', 'created',
-              'choices', 'usage'})
+              'choices', 'usage'}, plus 'messages' from an API chat model)
             - stream=True, stream_metadata=False: iterator of text chunks
             - stream=True, stream_metadata=True: iterator of chunk dicts
+              (an API chat model's closing usage chunk carries 'messages')
+            The dicts also read by attribute, as the openai SDK's
+            ChatCompletion / ChatCompletionChunk.
         """
         if isinstance(messages, str):
             if not messages.strip():
@@ -1696,7 +1862,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[dict[str, Any]]]:
+    ) -> Union[ChatObject, Iterator[ChatObject]]:
         """
         The engine behind ``chat(protocol="responses")``: document QA over
         the OpenAI Responses protocol.
@@ -1707,32 +1873,32 @@ class PageIndexClient:
         Responses shape — ``output`` carries the model-produced items
         and parses with the openai SDK types — and the whole process
         transcript (including the tool outputs the SDK executed) rides
-        in the extra ``items`` field.
-        Append the returned ``items`` to your next call's ``input`` verbatim
+        in the extra ``messages`` field.
+        Append the returned ``messages`` to your next call's ``input`` verbatim
         to keep provider prompt-cache prefix continuity and the agent's
         memory of what it already read.
 
         Requires a backend that supports the
         Responses API; backends that only speak chat.completions should use
-        ``chat(protocol="chat_completions")``. Provider-prefixed models
-        (``anthropic/…``) route through LiteLLM's chat.completions adapter
-        and are therefore refused here — use
-        ``chat(protocol="chat_completions")`` or ``chat(protocol="messages")``
-        for those.
+        ``chat(protocol="chat_completions")``. The model name is sent as
+        written (``litellm/`` and ``openai/`` prefixes strip) and the
+        backend judges it — a gateway's slashed ids such as
+        ``deepseek/deepseek-chat`` work as-is.
 
         Args:
             input: A user message string, or a list of Responses input items
-                (round-trip prior ``items`` here).
+                (round-trip prior ``messages`` here).
             model: Backend model name (defaults to ``chat_model``).
             stream: Yield Responses stream events as dicts — one logical
                 response per call: per-turn backend lifecycle events are
-                collapsed to one opening ``response.created`` and one
-                final terminal event, sequence numbers are reassigned
+                collapsed to one opening ``response.created`` followed
+                by ``response.in_progress``, and one final terminal
+                event, sequence numbers are reassigned
                 monotonically, and ``output_index`` is re-based onto the
                 single logical ``output``. The final event is the
                 terminal ``response.*`` for the run's status; its
-                ``response`` carries the tool outputs in ``items``.
-            doc_id: Document ID or list of IDs to scope the conversation.
+                ``response`` carries the tool outputs in ``messages``.
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call and is part
                 of the cached prompt prefix. Local documents: also
@@ -1795,7 +1961,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
-    ) -> Union[dict[str, Any], Iterator[Any]]:
+    ) -> Union[ChatObject, MessagesStream]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
         the Anthropic Messages protocol, Claude-native.
@@ -1816,8 +1982,8 @@ class PageIndexClient:
         from cache — skipped when your own blocks already use the three
         remaining breakpoints (the managed prompt holds the fourth). On
         ``bedrock/``, whose InvokeModel integration rejects the top-level
-        field for Opus 4.6 and earlier, an explicit breakpoint moves onto
-        each turn's tool results instead.
+        field for Sonnet 4.5 and Opus 4.5, an explicit breakpoint moves
+        onto each turn's tool results instead.
 
         Args:
             messages: Native Messages-format history (including prior
@@ -1835,10 +2001,15 @@ class PageIndexClient:
                 only a question, and rises to
                 budget_tokens + 8192 when ``thinking`` is enabled (the wire
                 requires max_tokens above the budget). Passed through.
-            stream: Yield the Anthropic SDK's event stream across turns
-                (its native event objects, including SDK-synthesized
-                convenience events), one message sequence per turn.
-            doc_id: Document ID or list of IDs to scope the conversation.
+            stream: Return a ``MessagesStream`` of the Anthropic SDK's
+                event stream across turns (its native events, including
+                SDK-synthesized convenience ones, as dicts that also read
+                as the SDK's objects), one message sequence per turn; its
+                ``get_final_message()`` returns what the non-stream call
+                returns, and ``get_final_text()`` that message's text
+                (raising on an unfinished one, the text in
+                ``partial_answer``).
+            doc_id: Document ID or list of IDs the conversation targets.
                 Keep it identical across a conversation's calls — the
                 targeting block it adds is re-set each call. Local
                 documents: also enforced at the tool layer; cloud
@@ -2011,7 +2182,9 @@ class PageIndexClient:
         from the PageIndex MCP server and executed from your process —
         works with any model backend. The tools are the framework's own
         MCP conversion, so results reach the model in its shapes: text
-        as text, images (e.g. ``get_document_image``) as images. Pass
+        as text, images (e.g. ``get_document_image``) as images, except
+        on its ``OpenAIChatCompletionsModel``, which keeps only a tool
+        result's text; a ``litellm/`` model keeps the images. Pass
         ``hosted=True`` to
         hand the connection to OpenAI instead: one hosted MCP tool, tool
         calls executed server-side (lowest latency; requires an
@@ -2105,9 +2278,7 @@ class PageIndexClient:
             if config["model"].startswith("litellm/"):
                 # The runner resolves this model through LiteLLM in the
                 # caller's process, outside our completion helpers.
-                from .utils import (_mute_litellm_bridge_usage_warning,
-                                    _repair_litellm_types)
-                _repair_litellm_types()
+                from .utils import _mute_litellm_bridge_usage_warning
                 _mute_litellm_bridge_usage_warning()
                 # Marks follow this lane's routing: the SDK strips litellm/
                 # and LiteLLM resolves the rest (bare claude-* → Anthropic);
@@ -2199,8 +2370,8 @@ class PageIndexClient:
         and a top-level ``cache_control`` so each loop turn re-reads the
         growing prompt from cache (pop the key if you place your own
         breakpoints — the API allows four; a ``bedrock/`` model omits it,
-        as Bedrock's InvokeModel integration rejects it for Opus 4.6 and
-        earlier). Unlike the chat lane,
+        as Bedrock's InvokeModel integration rejects it for Sonnet 4.5 and
+        Opus 4.5). Unlike the chat lane,
         ``system`` here is the bare instructions string, without the chat
         header or its block-level breakpoint. To target a folder or
         documents, prepend ``folder_context(folder_id)`` /
@@ -2237,6 +2408,13 @@ class PageIndexClient:
             # A cleared chat_model ('' or None) configures nothing —
             # same refusal as the stock default, never a {'model': ''}.
             raise _needs_model("anthropic_runner_config()")
+        from .integrations.claude_agent_sdk import is_claude_code
+        if is_claude_code(model):
+            raise PageIndexAPIError(
+                "claude-code/ models run on Claude Code; "
+                "anthropic_runner_config() drives the Anthropic API — pass "
+                "an API model, or use claude_agent_config() for your Claude "
+                "Code login.")
         model, route = _claude_wire(model, "anthropic_runner_config()")
         return {
             "model": model,
@@ -2253,24 +2431,28 @@ class PageIndexClient:
     def as_claude_mcp(self, include_management: bool = False, *,
                       server_name: str = "pageindex"):
         """
-        ``mcp_servers`` entry for the Claude Agent SDK.
+        ``mcp_servers`` entry for the Claude Agent SDK: an in-process SDK
+        MCP server, in both modes (requires ``claude-agent-sdk``;
+        ``pip install 'pageindex[claude]'``).
 
-        Cloud: returns the remote PageIndex MCP config.
-        ``include_management`` picks the endpoint, so the URL itself is
-        the gate — the default connects to the read-only endpoint
-        (``/mcp?tools=read``: the server registers only read-only tools),
-        ``True`` connects to the full tool set. Local: returns an
-        in-process SDK MCP server exposing the agent tools, gated the
-        same way at registration (requires ``claude-agent-sdk``;
-        ``pip install 'pageindex[claude]'``). ``server_name`` names the
-        in-process server — match it to the key you register the entry
-        under (cloud entries carry no name).
+        Cloud: a relay to the PageIndex MCP server — its tools,
+        instructions and resources, fetched live for each session — that
+        keeps the API key off the Claude Code CLI's command line (where a
+        remote server config would carry it, readable by any local
+        process). ``include_management`` picks the endpoint: the
+        default relays the read-only one (``/mcp?tools=read``: the server
+        registers only read-only tools), ``True`` the full tool set.
+        Local: the agent tools over the local store, gated the same way at
+        registration. ``server_name`` names the server — match it to the
+        key you register the entry under.
 
         Cloud hosts that surface MCP server instructions receive the tool
         guidance natively — not the client's ``instructions``, which only
         ``system_prompt`` carries; passing both duplicates the guidance
         (harmless). ``system_prompt`` stays the recommended channel: it is
-        guaranteed delivery, and the only channel local mode has.
+        guaranteed delivery, whole (Claude Code hands the model at most
+        4,096 characters of a server's instructions), and the only channel
+        local mode has.
 
         Usage (or ``claude_agent_config()`` for the whole bundle in one
         call)::
@@ -2323,17 +2505,27 @@ class PageIndexClient:
                 to ``"1"`` — only that one: other switches in your
                 environment stay yours, weighed by the CLI's own rules.
                 ``anthropic/`` and bare spellings name a model, not a
-                channel, and leave ``env`` out. Unset: a ``chat_model``
+                channel, and leave ``env`` out. ``claude-code/`` keeps
+                your Claude Code login: the bare alias, with ``env``
+                blanking ``ANTHROPIC_API_KEY``, ``ANTHROPIC_AUTH_TOKEN``
+                and ``ANTHROPIC_BASE_URL``. Unset: a ``chat_model``
                 you set is forwarded as written; the stock default, like
                 a managed-chat client, leaves the SDK's own default in
                 place.
         """
         from .agent_tools import _base_instructions
+        from .integrations.claude_agent_sdk import (
+            CLAUDE_CODE_PREFIX, SUBSCRIPTION_ENV, is_claude_code)
         # The stock default is not a choice: leave the SDK's own model.
         if not model and not self._chat_model_stock:
             model = self.chat_model
         route = None
-        if model:
+        subscription = is_claude_code(model)
+        if subscription:
+            # already your Claude Code login: the bare alias, with no API
+            # key or base URL from the environment rerouting it
+            model = model.removeprefix(CLAUDE_CODE_PREFIX)
+        if model or subscription:
             model, route = _claude_wire(model, "claude_agent_config()")
         return {
             "system_prompt": _base_instructions(self, include_management),
@@ -2348,7 +2540,8 @@ class PageIndexClient:
             # over the inherited environment). Only the chosen switch:
             # the rest of the caller's environment is the caller's, and
             # how the CLI weighs its own switches is the CLI's business.
-            **({"env": {_ROUTE_ENV[route]: "1"}}
+            **({"env": dict(SUBSCRIPTION_ENV)} if subscription
+               else {"env": {_ROUTE_ENV[route]: "1"}}
                if route in _ROUTE_ENV else {}),
         }
 
@@ -2595,6 +2788,81 @@ class PageIndexClient:
         ).list_folders(
             parent_folder_id=parent_folder_id,
         )
+
+    def create_metadata_schema(
+        self,
+        folder_id: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Declare the metadata fields of a top-level folder (workspace), or of
+        the account with ``folder_id="root"``. Subfolders share their
+        top-level folder's fields. Chat's metadata search filters, sorts and
+        counts documents by these fields. ``metadata`` on a document under
+        the folder may use only these fields, with their types (HTTP 400
+        otherwise); a document may leave any of them out. Declaring also
+        removes, from the documents these fields apply to, the metadata keys
+        they don't declare or declare with another type; matching keys stay.
+        Set once: a second call on the same folder raises PageIndexAPIError
+        (HTTP 409); to change the fields, call ``delete_metadata_schema()``,
+        then declare them again. Cloud-only: local mode raises
+        PageIndexAPIError.
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root".
+            fields (dict): Field name to spec, e.g.
+                ``{"year": {"type": "number", "description": "Fiscal year"}}``;
+                type is "string", "number" or "boolean".
+        """
+        return self._require_cloud(
+            "create_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).create_metadata_schema(
+            folder_id=folder_id, fields=fields,
+        )
+
+    def get_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+        """
+        Get the metadata fields that apply to a folder's documents: from its
+        top-level folder's schema, else the account's (``"root"``) schema.
+        ``schema`` is None when neither has one; ``inherited`` is True when
+        the fields come from a parent folder or the account.
+        Cloud-only: local mode raises PageIndexAPIError.
+
+        Args:
+            folder_id (str): Any folder ID, or "root" for the account-level
+                fields alone.
+
+        Returns:
+            dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}.
+        """
+        return self._require_cloud(
+            "get_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).get_metadata_schema(folder_id=folder_id)
+
+    def delete_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+        """
+        Delete the metadata fields declared on a top-level folder
+        (workspace), or on the account with ``folder_id="root"``, so they can
+        be declared again with ``create_metadata_schema()``. It deletes only
+        what this folder itself declares, and ``deleted`` is True even when
+        that was nothing. A top-level folder's documents then fall back to the
+        account's fields; to allow no metadata at all, declare
+        ``create_metadata_schema(folder_id, {})``, which removes the metadata
+        they carry. Documents keep their metadata until fields are declared
+        again. Cloud-only: local mode raises PageIndexAPIError.
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root".
+
+        Returns:
+            dict: {'folder_id', 'deleted': True}.
+        """
+        return self._require_cloud(
+            "delete_metadata_schema is cloud-only — local mode has no "
+            "metadata schemas. Create the client with an api_key to use them."
+        ).delete_metadata_schema(folder_id=folder_id)
 
     # ---------- PATH HELPERS ----------
 

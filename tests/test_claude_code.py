@@ -1,0 +1,1170 @@
+"""The claude-code/ route — indexing and chat as Claude Code CLI runs on the
+user's subscription — over a faked CLI session: no subprocess, no login."""
+import asyncio
+import contextlib
+import dataclasses
+import json
+import logging
+import os
+import sys
+import tempfile
+import time
+from types import SimpleNamespace
+
+import pytest
+
+import pageindex.integrations.claude_agent_sdk as cc
+from pageindex import PageIndexAPIError, PageIndexLocalClient
+from pageindex.local_chat import CHAT_HEADER
+from pageindex.local_store import DocStore
+from pageindex.utils import (LLMRetriesExhausted, _is_unrecoverable,
+                             llm_acompletion, llm_completion)
+
+try:
+    from claude_agent_sdk import (AssistantMessage, ResultMessage,
+                                  StreamEvent, TextBlock, ThinkingBlock,
+                                  ToolResultBlock, ToolUseBlock, UserMessage)
+    _HAS_CLAUDE = True
+except ImportError:
+    _HAS_CLAUDE = False
+
+needs_claude = pytest.mark.skipif(not _HAS_CLAUDE,
+                                  reason="claude-agent-sdk not installed")
+
+
+@pytest.fixture
+def chat_client(tmp_path):
+    store = str(tmp_path / "store")
+    meta = {"id": "pi-doc1", "name": "fruit.pdf", "description": "Fruit notes",
+            "status": "completed", "createdAt": "2026-10-17T10:00:00.000000",
+            "pageNum": 1, "folderId": None, "metadata": None, "mode": "flash"}
+    tree = [{"title": "Fruit", "node_id": "0000", "start_index": 1,
+             "end_index": 1, "summary": "apples"}]
+    DocStore(store).save_document("pi-doc1", meta, tree,
+                                  [{"page_index": 1, "markdown": "Apples"}])
+    return PageIndexLocalClient(storage_path=store,
+                                chat_model="claude-code/haiku")
+
+
+def fake_cli(monkeypatch, *messages, account=None, models=None, during=None):
+    """Replace the CLI session with one whose handshake reports
+    ``account`` as the login and ``models`` as the model list, that records
+    what it is sent and replays ``messages``; ``during`` runs as the turn
+    starts (a tool call, a delay). Returns the sessions: .prompt (None
+    until sent), .options, .closed."""
+    sessions = []
+
+    class Session:
+        def __init__(self, options):
+            self.options, self.prompt, self.closed = options, None, False
+            sessions.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            await asyncio.sleep(0)  # the real client awaits its transport's close
+            self.closed = True
+
+        async def get_server_info(self):
+            return {"account": {"apiProvider": "firstParty", **(account or {})},
+                    **({"models": models} if models else {})}
+
+        async def query(self, prompt):
+            self.prompt = (prompt if isinstance(prompt, str)
+                           else [m async for m in prompt])
+
+        async def receive_response(self):
+            if during:
+                await during()
+            for message in messages:
+                yield message
+    monkeypatch.setattr(cc, "_claude_client", Session)
+    return sessions
+
+
+def result(text="done", is_error=False, subtype="success", status=None,
+           usage=None):
+    return ResultMessage(subtype=subtype, duration_ms=1, duration_api_ms=1,
+                         is_error=is_error, num_turns=1, session_id="s",
+                         result=text, usage=usage, api_error_status=status)
+
+
+def delta(text):
+    return StreamEvent(uuid="u", session_id="s", event={
+        "type": "content_block_delta", "index": 0,
+        "delta": {"type": "text_delta", "text": text}})
+
+
+# ── refusals: no CLI run needed ──
+
+def test_standard_mode_refuses_claude_code(tmp_path, sample_pdf):
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match="flash mode only"):
+        client.submit_document(sample_pdf, mode="standard")
+    # the classic entry itself, as run_pageindex.py --mode standard
+    # reaches it: refused before any run is spent
+    from pageindex.page_index_classic import page_index_main
+    with pytest.raises(ValueError, match="flash mode only"):
+        page_index_main(sample_pdf, SimpleNamespace(
+            model="gpt-4.1", summary_model="claude-code/haiku"))
+
+
+SDK_FIX = r"claude-agent-sdk 0\.2\.166 or newer — pip install -U 'pageindex\[claude\]'"
+
+
+def fake_sdk_version(monkeypatch, installed):
+    import importlib.metadata
+
+    def version(name):
+        if installed is None:
+            raise importlib.metadata.PackageNotFoundError(name)
+        return installed
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    monkeypatch.setattr(cc, "_claude_client",
+                        lambda options: pytest.fail("the CLI would start"))
+
+
+@pytest.mark.parametrize("workflow", [False, True])
+@pytest.mark.parametrize("installed", ["0.1.53", "0.2.165", None])
+def test_indexing_names_an_old_or_missing_agent_sdk(
+        monkeypatch, tmp_path, sample_pdf, installed, workflow):
+    """Before 0.2.158 the route failed deep inside, on a TypeError about
+    verbatim_prompts; below 0.2.166 it is unverified."""
+    fake_sdk_version(monkeypatch, installed)
+    if workflow:  # the default: its session starts as indexing does
+        monkeypatch.delenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW")
+    if installed is None:  # no module either
+        monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match=SDK_FIX):
+        client.submit_document(sample_pdf)
+
+
+@pytest.mark.parametrize("workflow", [False, True])
+def test_indexing_names_a_broken_agent_sdk(monkeypatch, tmp_path, sample_pdf, workflow):
+    """Its metadata passes the floor but the import fails."""
+    fake_sdk_version(monkeypatch, "0.2.168")
+    if workflow:
+        monkeypatch.delenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW")
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match=r"pip install 'pageindex\[claude\]'"):
+        client.submit_document(sample_pdf)
+
+
+@needs_claude
+def test_chat_names_an_old_agent_sdk_and_takes_the_extras_floor(
+        monkeypatch, chat_client):
+    fake_sdk_version(monkeypatch, "0.2.165")
+    with pytest.raises(PageIndexAPIError, match=SDK_FIX):
+        chat_client.chat("Q")
+    fake_sdk_version(monkeypatch, "0.2.166")
+    assert cc.claude_code_options("claude-code/haiku").model == "haiku"
+
+
+def test_chat_refuses_what_the_cli_cannot_take(chat_client):
+    with pytest.raises(PageIndexAPIError, match="takes no temperature"):
+        chat_client.chat_completions("Q", temperature=0)
+    with pytest.raises(PageIndexAPIError, match="takes no backend"):
+        chat_client.chat("Q", backend={"api_key": "k"})
+    for protocol in ("responses", "messages"):
+        with pytest.raises(PageIndexAPIError, match="answer lane"):
+            chat_client.chat("Q", protocol=protocol)
+    # an image or tool history: said outright, not sent off to the
+    # protocol lanes, which refuse claude-code/ too
+    image = [{"type": "text", "text": "What is this?"},
+             {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
+    for messages, hint in (
+            ([{"role": "user", "content": image}], "use an API model with"),
+            ([{"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c", "type": "function",
+                 "function": {"name": "f", "arguments": "{}"}}]},
+              {"role": "user", "content": "Q"}], "an API chat model."),
+            ([{"role": "tool", "tool_call_id": "c", "content": "x"},
+              {"role": "user", "content": "Q"}], "use an API chat model.")):
+        with pytest.raises(PageIndexAPIError,
+                           match="claude-code/haiku takes text messages only") as err:
+            chat_client.chat(messages)
+        assert hint in str(err.value)
+    with pytest.raises(PageIndexAPIError, match="drives the Anthropic API"):
+        chat_client.anthropic_runner_config()
+
+
+@needs_claude
+def test_claude_agent_config_keeps_your_claude_code_login(chat_client):
+    config = chat_client.claude_agent_config()
+    assert config["model"] == "haiku"
+    assert config["env"] == {"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": "",
+                             "ANTHROPIC_BASE_URL": ""}
+
+
+# ── indexing ──
+
+@needs_claude
+def test_index_call_runs_isolated_on_the_subscription(monkeypatch):
+    sessions = fake_cli(monkeypatch, result('{"summary": "S"}'))
+    assert asyncio.run(llm_acompletion("claude-code/haiku", "P",
+                                       reasoning_effort="none")) == '{"summary": "S"}'
+    assert llm_completion("claude-code/haiku", "Q") == '{"summary": "S"}'
+    first, second = sessions
+    assert (first.prompt, second.prompt) == ("P", "Q")
+    opts = first.options
+    assert opts.model == "haiku" and opts.tools == [] and opts.setting_sources == []
+    assert opts.strict_mcp_config and opts.max_turns == 1 and not opts.mcp_servers
+    assert opts.thinking == {"type": "disabled"} and second.options.thinking is None
+    # Claude Code keeps thinking on for some models; it thinks least at low
+    assert opts.effort == "low" and second.options.effort is None
+    # an @/path in document text must not make the CLI read that file
+    assert opts.verbatim_prompts
+    # a .env written for API models must not bill or reroute the run
+    assert all(opts.env[var] == "" for var in (
+        "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"))
+    assert opts.env["DISABLE_PROMPT_CACHING"] == "1"
+    assert opts.env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] == "30000"
+    assert opts.env["CLAUDE_CODE_EFFORT_LEVEL"] == ""
+    assert "no-session-persistence" in opts.extra_args
+    assert opts.max_buffer_size > 2**20  # a page image's tool result is one line
+    assert opts.cwd == os.path.realpath(opts.cwd)  # a symlinked cwd is listed twice
+    assert first.closed and second.closed
+
+
+@needs_claude
+def test_the_shared_cwd_follows_no_link_planted_at_its_name(monkeypatch, tmp_path):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    (tmp_path / "pageindex-claude-code").symlink_to(tmp_path / "planted")
+    with contextlib.suppress(FileExistsError):
+        cc.claude_code_options("claude-code/haiku")
+    assert not (tmp_path / "planted").exists()
+
+
+@needs_claude
+@pytest.mark.parametrize("status,fatal", [(429, True), (500, True), (400, False)])
+def test_index_failures_are_final_except_a_400(monkeypatch, status, fatal):
+    sessions = fake_cli(monkeypatch, result("boom", is_error=True, status=status))
+    with pytest.raises(LLMRetriesExhausted) as err:
+        asyncio.run(llm_acompletion("claude-code/haiku", "P"))
+    assert err.value.status_code == status
+    assert _is_unrecoverable(err.value) is fatal
+    assert sessions[0].closed  # shut down inline, not left to the loop
+
+
+@needs_claude
+def test_missing_login_says_how_to_log_in(monkeypatch):
+    fake_cli(monkeypatch,
+             AssistantMessage(content=[TextBlock("Not logged in")], model="haiku",
+                              error="authentication_failed"),
+             result("Not logged in · Please run /login", is_error=True))
+    with pytest.raises(LLMRetriesExhausted,
+                       match="Log in with your Claude subscription") as err:
+        asyncio.run(llm_acompletion("claude-code/haiku", "P"))
+    assert err.value.status_code == 401
+
+
+@needs_claude
+@pytest.mark.parametrize("account,why", [
+    ({"apiKeySource": "ANTHROPIC_API_KEY"}, "API key"),
+    ({"apiProvider": "bedrock"}, "routed to bedrock")])
+def test_a_login_off_the_subscription_is_refused_before_any_prompt(
+        monkeypatch, account, why):
+    sessions = fake_cli(monkeypatch, result("billed"), account=account)
+    with pytest.raises(LLMRetriesExhausted, match=why) as err:
+        asyncio.run(llm_acompletion("claude-code/haiku", "P"))
+    assert err.value.status_code == 403 and _is_unrecoverable(err.value)
+    assert sessions[0].prompt is None and sessions[0].closed  # nothing billed
+
+
+@needs_claude
+def test_an_effort_claude_code_does_not_list_is_refused_before_any_prompt(monkeypatch):
+    models = [{"value": "haiku", "resolvedModel": "claude-haiku-5-5",
+               "supportedEffortLevels": ["low", "high"]},
+              {"value": "opus", "supportedEffortLevels": ["low", "max"]},
+              {"value": "tiny", "supportsEffort": False}]
+    sessions = fake_cli(monkeypatch, result("ok"), models=models)
+    # a typo, another vendor's level, a level the model lacks (also by its
+    # full id), a typo on a model the CLI doesn't list: the CLI would warn
+    # and run at its default effort
+    for model, effort, levels in (
+            ("haiku", "hgih", "low, high"), ("haiku", "minimal", "low, high"),
+            ("haiku", "max", "low, high"), ("claude-haiku-5-5", "max", "low, high"),
+            ("claude-sonnet-4-5", "hgih", "low, high, max")):
+        with pytest.raises(LLMRetriesExhausted,
+                           match=f"{model} takes reasoning_effort none, {levels}, not") as err:
+            asyncio.run(llm_acompletion(f"claude-code/{model}", "P", reasoning_effort=effort))
+        assert _is_unrecoverable(err.value)  # fatal, not one prompt's miss
+    assert all(s.prompt is None and s.closed for s in sessions)  # nothing billed
+    # no effort is never checked and "none" runs at low; an unlisted model
+    # takes any listed model's levels; a model without effort levels drops it
+    for model, effort in (("haiku", None), ("haiku", "none"),
+                          ("claude-haiku-5-5", "high"), ("claude-sonnet-4-5", "max"),
+                          ("tiny", "high")):
+        assert asyncio.run(llm_acompletion(f"claude-code/{model}", "P",
+                                           reasoning_effort=effort)) == "ok"
+    assert sessions[-1].options.effort == "high"
+
+
+@needs_claude
+def test_flash_checks_a_claude_code_summary_effort_before_expand_bills(
+        monkeypatch, sample_pdf):
+    from pageindex.flash.api import page_index_flash
+    sessions = fake_cli(monkeypatch, result("ok"), models=[
+        {"value": "haiku", "supportedEffortLevels": ["low", "high"]}])
+    with pytest.raises(PageIndexAPIError, match="haiku takes reasoning_effort none, low, high, not"):
+        page_index_flash(sample_pdf, summary_model="claude-code/haiku",
+                         summary_reasoning_effort="minimal")
+    (check,) = sessions  # the check alone: no expand or summary run
+    assert check.prompt is None and check.closed
+    asyncio.run(cc.claude_code_check("claude-code/haiku", "low"))
+    assert sessions[-1].prompt is None and sessions[-1].closed
+
+
+@needs_claude
+def test_index_calls_are_capped(monkeypatch):
+    live = peak = 0
+
+    async def turn():
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        await asyncio.sleep(0.01)
+        live -= 1
+    fake_cli(monkeypatch, result("ok"), during=turn)
+
+    async def many():
+        return await asyncio.gather(*(llm_acompletion("claude-code/haiku", "P")
+                                      for _ in range(20)))
+    assert asyncio.run(many()) == ["ok"] * 20
+    assert peak == cc.CLAUDE_CODE_CONCURRENCY
+    assert cc._GATES == {}  # the cap goes with its last call, not kept per loop
+
+
+@needs_claude
+def test_queued_index_calls_go_highest_priority_first(monkeypatch):
+    from pageindex.utils import llm_priority
+    monkeypatch.setattr(cc, "CLAUDE_CODE_CONCURRENCY", 1)
+    sessions = fake_cli(monkeypatch, result("ok"), during=lambda: asyncio.sleep(0.01))
+
+    async def call(prompt, prio):
+        with llm_priority(prio):
+            return await llm_acompletion("claude-code/haiku", prompt)
+
+    async def run():
+        first = asyncio.create_task(call("first", 0))
+        await asyncio.sleep(0)  # it takes the one slot; the rest queue behind it
+        await asyncio.gather(first, call("low", 1), call("high", 3), call("mid", 2))
+    asyncio.run(run())
+    assert [s.prompt for s in sessions] == ["first", "high", "mid", "low"]
+
+
+def fake_workflow(monkeypatch, lose=(), balk=(), drop=(), plan=(), session_id="s"):
+    """Replace the CLI with sessions that answer "process: <prompt>" as a
+    process run and, as a workflow's session, run its lanes: each lane asks
+    the SubagentStart hook for a call and answers "agent: <prompt>" through
+    SubagentStop, except a prompt in ``lose``, whose agent ends without
+    SubagentStop (an API error), one in ``balk``, whose agent answers it
+    saw no call, ending its lane, and one in ``drop``, whose agent stops
+    with no reply (the CLI gave up on its stream). ``plan`` says how the
+    workflow sessions behave, one entry each in turn and "runs" past its
+    end: "unstarted" (the launch turn ends without a workflow), "late" (the
+    workflow starts a moment after the launch), "resultless" (as "late", but
+    the launch turn's result never comes), "unhooked" (SubagentStart
+    reaches no agent, so each ends with no call), ("dies", n) or ("limited", n)
+    (its agents answer n calls, then the workflow fails, or the usage limit
+    is hit, as the next agent takes its call). A prompt after the launch
+    gets a result whose model_usage stands for the session's; a session
+    whose workflow died gives a process a moment to start before it does.
+    Returns .taken, the prompts the lanes took, .stopped, the workflows
+    stopped through stop_task, .workflows, each workflow session's plan,
+    .options, each one's options, .prompts, the prompts its sessions were
+    sent, and .order, "process" for each process started and "usage" for
+    each usage result."""
+    import threading
+    from claude_agent_sdk import (RateLimitEvent, RateLimitInfo,
+                                  TaskNotificationMessage, TaskStartedMessage)
+    seen = SimpleNamespace(taken=[], stopped=[], workflows=[], options=[], prompts=[],
+                           order=[])
+    plans, process_started = list(plan), threading.Event()
+
+    class Session:
+        def __init__(self, options):
+            self.options = options
+            if options.hooks:
+                self.plan = plans.pop(0) if plans else "runs"
+                seen.workflows.append(self.plan)
+                seen.options.append(options)
+            else:
+                seen.order.append("process")
+                process_started.set()
+
+        async def __aenter__(self):
+            self.queries, self.stopped, self.asked_usage = 0, asyncio.Event(), asyncio.Event()
+            return self
+
+        async def __aexit__(self, *exc):
+            await asyncio.sleep(0)
+
+        async def get_server_info(self):
+            return {"account": {"apiProvider": "firstParty"}}
+
+        async def query(self, prompt):
+            self.prompt = prompt
+            self.queries += 1
+            if self.options.hooks:
+                seen.prompts.append(prompt)
+            if self.queries > 1:  # past the launch: the usage prompt
+                self.asked_usage.set()
+
+        async def receive_response(self):
+            yield result(f"process: {self.prompt}")
+
+        async def stop_task(self, task_id):
+            seen.stopped.append(task_id)
+            self.stopped.set()
+
+        async def receive_messages(self):
+            usage = ResultMessage(
+                subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                num_turns=2, session_id=session_id, result="done",
+                model_usage={"claude-haiku-5-5": {
+                    "inputTokens": 10, "outputTokens": 5, "cacheReadInputTokens": 100,
+                    "cacheCreationInputTokens": 20}})
+            if self.plan == "unstarted":
+                yield result("Workflows are off.")
+                await self.asked_usage.wait()
+                yield usage
+                return
+            kind, after = self.plan if isinstance(self.plan, tuple) else (self.plan, None)
+            hooks = self.options.hooks
+            start = hooks["SubagentStart"][0].hooks[0]
+            stop = hooks["SubagentStop"][0].hooks[0]
+            answered, broke = [0], asyncio.Event()
+
+            async def lane(k):
+                if kind == "unhooked":
+                    await stop({"agent_type": f"pageindex-lane-{k}",
+                                "last_assistant_message": cc._NO_TASK}, None, None)
+                    return
+                while True:
+                    asked = await start({"agent_type": f"pageindex-lane-{k}"}, None, None)
+                    prompt = asked["hookSpecificOutput"]["additionalContext"]
+                    seen.taken.append(prompt)
+                    if answered[0] == after:
+                        broke.set()
+                        return
+                    await asyncio.sleep(0.05)
+                    if prompt in balk:
+                        await stop({"agent_type": f"pageindex-lane-{k}",
+                                    "last_assistant_message": cc._NO_TASK}, None, None)
+                        return
+                    if prompt not in lose:
+                        reply = {} if prompt in drop else {
+                            "last_assistant_message": f"agent: {prompt}"}
+                        await stop({"agent_type": f"pageindex-lane-{k}", **reply}, None, None)
+                    answered[0] += 1
+            width = int(self.options.env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"])
+            lanes = [asyncio.create_task(lane(k)) for k in range(width)]
+            if kind in ("late", "resultless"):
+                await asyncio.sleep(0.2)
+            yield TaskStartedMessage(subtype="task_started", data={}, task_id="w",
+                                     description="lanes", uuid="u", session_id=session_id)
+            if kind != "resultless":  # the launch turn's own, once the Workflow tool returns
+                yield dataclasses.replace(result(), session_id=session_id)
+            halts = [asyncio.create_task(self.stopped.wait()), asyncio.create_task(broke.wait())]
+            await asyncio.wait(halts, return_when=asyncio.FIRST_COMPLETED)
+            if kind == "limited" and broke.is_set():
+                yield RateLimitEvent(rate_limit_info=RateLimitInfo(status="rejected"),
+                                     uuid="u", session_id=session_id)
+                await self.stopped.wait()
+            for task in lanes + halts:
+                task.cancel()
+            died = kind == "dies" and broke.is_set()
+            yield TaskNotificationMessage(
+                subtype="task_notification", data={}, task_id="w",
+                status="failed" if died else "stopped",
+                output_file="", summary="", uuid="u", session_id=session_id)
+            await self.asked_usage.wait()
+            if died:
+                await asyncio.to_thread(process_started.wait, 5)
+            seen.order.append("usage")
+            yield usage
+    monkeypatch.setattr(cc, "_claude_client", Session)
+    return seen
+
+
+@needs_claude
+def test_workflow_lanes_answer_calls_by_priority_and_hand_lost_ones_to_a_process(
+        monkeypatch):
+    from pageindex.utils import llm_priority
+    seen = fake_workflow(monkeypatch, lose={"lost"})
+
+    async def call(prompt, prio):
+        with llm_priority(prio):
+            return await llm_acompletion("claude-code/haiku", prompt)
+
+    async def run():
+        first = asyncio.create_task(call("first", 0))
+        for _ in range(1000):  # the lane takes it; the rest queue behind it
+            if "first" in seen.taken:
+                break
+            await asyncio.sleep(0.005)
+        return await asyncio.gather(first, call("low", 1), call("high", 3), call("lost", 2),
+                                    call("mid", 2))
+    from pageindex import utils
+    usage = {}
+    token = utils._llm_usage.set(usage)
+    try:
+        # the session starts before any call, on a thread of its own
+        with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+            replies = asyncio.run(run())
+    finally:
+        utils._llm_usage.reset(token)
+    assert replies == ["agent: first", "agent: low", "agent: high", "process: lost",
+                       "agent: mid"]
+    assert seen.taken == ["first", "high", "lost", "mid", "low"]
+    assert seen.stopped == ["w"] and cc._HOST.get() is None  # stopped before it closed
+    # the session's model_usage, its agents' included, joins the indexing tally
+    assert (usage["prompt_tokens"], usage["completion_tokens"]) == (130, 5)
+    assert usage["prompt_tokens_details"] == {"cached_tokens": 100, "cache_write_tokens": 20}
+    # outside a scope, calls run in processes
+    assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "process: P"
+
+
+@needs_claude
+def test_a_prompt_too_long_for_a_hook_runs_in_a_process(monkeypatch):
+    seen = fake_workflow(monkeypatch)
+    # an emoji is two UTF-16 code units, as the CLI counts; a lone surrogate one
+    fits, too_long = "a" * cc.HOOK_CONTEXT_MAX, "😀" * (cc.HOOK_CONTEXT_MAX // 2 + 1)
+    lone = "Revenue rose \ud83d sharply"
+
+    async def run():
+        return await asyncio.gather(llm_acompletion("claude-code/haiku", fits),
+                                    llm_acompletion("claude-code/haiku", too_long),
+                                    llm_acompletion("claude-code/haiku", lone))
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    assert replies == [f"agent: {fits}", f"process: {too_long}", f"agent: {lone}"]
+    assert seen.taken == [fits, lone]
+
+
+@needs_claude
+def test_only_the_settings_a_scope_declares_run_in_a_workflow(monkeypatch):
+    seen = fake_workflow(monkeypatch)
+
+    async def run():
+        return await asyncio.gather(
+            llm_acompletion("claude-code/haiku", "summary", reasoning_effort="none"),
+            llm_acompletion("claude-code/haiku", "expand"))
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", "none")]):
+        replies = asyncio.run(run())
+    # expand keeps the model's default effort: a process, not a workflow of its own
+    assert replies == ["agent: summary", "process: expand"]
+    assert seen.workflows == ["runs"] and seen.options[0].effort == "low"
+    with cc.claude_code_workflows(lanes=1):  # declaring none, a scope starts none
+        assert cc._HOST.get() is None
+
+
+@needs_claude
+def test_a_workflow_that_worked_and_died_is_replaced_once(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=[("dies", 1), ("dies", 1)])
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abcde"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # the call an agent held as its workflow died goes to a process; the
+    # next one gets a new session, whose own death sends the rest to processes
+    assert replies == ["agent: a", "process: b", "agent: c", "process: d", "process: e"]
+    assert seen.workflows == [("dies", 1), ("dies", 1)]
+    # the call it held went to a process before the dead session's clean-up turn
+    assert seen.order[:2] == ["process", "usage"]
+
+
+@needs_claude
+def test_a_workflow_that_never_started_is_not_replaced(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=["unstarted"])
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "ab"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    assert replies == ["process: a", "process: b"]
+    assert seen.workflows == ["unstarted"]
+    assert len(seen.prompts) == 1  # no usage prompt: the launch turn's result has it
+
+
+@needs_claude
+def test_a_scope_that_closes_as_its_workflow_launches_leaves_none_running(monkeypatch):
+    """A scanned PDF, say: flash ends before its first summary call."""
+    monkeypatch.setattr(cc, "WORKFLOW_RESULT_S", 0.5)
+    # stopped once it started, or its agents would run with no call; so too
+    # when the launch turn's result never comes
+    for plan in ("late", "resultless"):
+        seen = fake_workflow(monkeypatch, plan=[plan])
+        with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+            for _ in range(500):
+                if seen.prompts:
+                    break
+                time.sleep(0.01)
+        assert seen.stopped == ["w"], plan
+    # one already started is stopped at once, with no result to wait for
+    monkeypatch.setattr(cc, "WORKFLOW_RESULT_S", 5)
+    seen = fake_workflow(monkeypatch, plan=["resultless"])
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        time.sleep(0.6)  # past its start
+        closing = time.monotonic()
+    assert seen.stopped == ["w"] and time.monotonic() - closing < 2
+    # closed before the launch went out, it sends none
+    seen = fake_workflow(monkeypatch)
+
+    async def slow_check(client, options):
+        await asyncio.sleep(0.5)
+    monkeypatch.setattr(cc, "_check_session", slow_check)
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        pass
+    assert seen.workflows == ["runs"] and seen.prompts == []
+
+
+@needs_claude
+def test_flash_refuses_bad_arguments_before_a_workflow_starts(monkeypatch, sample_pdf):
+    """Else on a long PDF the session's launch goes out while it is read."""
+    from pageindex.flash.api import page_index_flash
+    seen = fake_workflow(monkeypatch)
+    monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "1")
+    with pytest.raises(ValueError, match="takes no summary_reasoning_effort='none'"):
+        page_index_flash(sample_pdf, summary_model="claude-code/haiku",
+                         summary_reasoning_effort="none")
+    with pytest.raises(ValueError, match="summary_concurrency must be"):
+        page_index_flash(sample_pdf, summary_model="claude-code/haiku",
+                         summary_concurrency=0)
+    assert seen.workflows == [] and seen.order == []
+
+
+def test_claude_code_summaries_keep_their_default_effort_under_a_backend():
+    """The backend doesn't apply there; a None would put expand in the
+    summaries' workflow and the summaries off low."""
+    from pageindex.utils import _llm_backend, default_summary_reasoning_effort
+    token = _llm_backend.set({"thinking": {"type": "enabled", "budget_tokens": 1024}})
+    try:
+        assert default_summary_reasoning_effort("claude-code/haiku") == "none"
+    finally:
+        _llm_backend.reset(token)
+
+
+@needs_claude
+def test_a_call_whose_agent_stops_with_no_reply_runs_in_a_process(monkeypatch):
+    """The CLI gave up on the agent's stream (Claude Code 2.1.301): taken as
+    the reply, it would leave the node's raw text as its summary."""
+    fake_workflow(monkeypatch, drop={"b"})
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abc"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    assert replies == ["agent: a", "process: b", "agent: c"]
+
+
+@needs_claude
+def test_a_call_an_agent_says_it_never_saw_runs_in_a_process(monkeypatch):
+    seen = fake_workflow(monkeypatch, balk={"b"})
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abc"]
+    with cc.claude_code_workflows(lanes=2, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # never its answer: the call runs again in a process, and the other lane goes on
+    assert replies == ["agent: a", "process: b", "agent: c"]
+    assert seen.taken == ["a", "b", "c"]
+
+
+@needs_claude
+def test_an_agent_the_start_hook_missed_ends_the_workflow_at_once(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=["unhooked"])
+    monkeypatch.setattr(cc, "WORKFLOW_START_S", 10)
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "ab"]
+    started = time.monotonic()
+    with cc.claude_code_workflows(lanes=2, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # not left to spin until the start deadline, nor replaced
+    assert replies == ["process: a", "process: b"] and time.monotonic() - started < 5
+    assert seen.workflows == ["unhooked"] and seen.stopped == ["w"]
+
+
+@needs_claude
+def test_a_usage_limit_ends_the_workflow_and_its_calls_go_to_processes(monkeypatch):
+    seen = fake_workflow(monkeypatch, plan=[("limited", 1)])
+
+    async def run():
+        return [await llm_acompletion("claude-code/haiku", p) for p in "abc"]
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        replies = asyncio.run(run())
+    # its agents would wait for the window to reset; processes report the limit
+    assert replies == ["agent: a", "process: b", "process: c"]
+    assert seen.workflows == [("limited", 1)] and seen.stopped == ["w"]
+
+
+@needs_claude
+def test_a_workflow_session_deletes_what_it_left_on_disk(monkeypatch, tmp_path):
+    sid, other = "0b9e5f4a-1c2d-4e3f-8a9b-0c1d2e3f4a5b", "1b9e5f4a-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    project = tmp_path / "projects" / "-tmp-pageindex-claude-code"
+    (project / sid / "subagents" / "workflows").mkdir(parents=True)
+    (project / sid / "subagents" / "workflows" / "journal.jsonl").write_text("{}")
+    (project / other).mkdir()
+    own = tmp_path / "projects" / "-tmp-pageindex-claude-code-1a2b"
+    (own / sid).mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    fake_workflow(monkeypatch, session_id=sid)
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+    # its journal held every agent's reply; another session's files stay
+    assert not (project / sid).exists() and (project / other).exists()
+    assert not own.exists()  # its own cwd's project, left empty
+
+
+@needs_claude
+def test_each_workflow_runs_its_script_from_a_directory_of_its_own(monkeypatch):
+    """From a shared one, another user's script could run in its place, and
+    two scopes' writes collide."""
+    seen = fake_workflow(monkeypatch)
+    cwds = []
+    for _ in range(2):
+        with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+            assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+            cwds.append(seen.options[-1].cwd)
+            assert os.name == "nt" or os.stat(cwds[-1]).st_mode & 0o077 == 0
+        assert not os.path.exists(cwds[-1])
+    assert cwds[0] != cwds[1]
+
+
+@needs_claude
+def test_workflows_run_by_default_at_their_own_width(monkeypatch):
+    lanes = cc.CLAUDE_CODE_WORKFLOW_LANES
+    seen = fake_workflow(monkeypatch)
+    monkeypatch.delenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW")
+    # a wider summary lane leaves the measured width as it is
+    monkeypatch.setattr("pageindex.utils.SUMMARY_CONCURRENCY", 2 * lanes)
+    with cc.claude_code_workflows(prewarm=[("claude-code/haiku", None)]):
+        assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+        script = open(os.path.join(seen.options[0].cwd,
+                                   f"pageindex-lanes-{lanes}.js")).read()
+    env = seen.options[0].env
+    assert env["CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS"] == str(lanes)
+    # set in the caller's environment (a Claude Code session's, say), these
+    # would put every agent on another model than the one asked for
+    assert env["CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"] == env["CLAUDE_CODE_SUBAGENT_MODEL"] == ""
+    # an agent no hook handed a call answers so, and its lane stops; its task
+    # text names the hook context, which comes after it, not "the task above"
+    assert f"agent({json.dumps(cc._LANE_TASK)}," in script
+    assert f"?.includes('{cc._NO_TASK}')) return" in script
+    assert "SubagentStart hook additional context" in cc._LANE_TASK
+    monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "0")
+    with cc.claude_code_workflows(prewarm=[("claude-code/haiku", None)]):
+        assert cc._HOST.get() is None
+
+
+@pytest.fixture
+def asyncio_log():
+    """The asyncio logger without the probe filter an earlier test may have
+    left on it (a filter stays: it is process-wide)."""
+    log = logging.getLogger("asyncio")
+    log.removeFilter(cc._drop_probe_reaped)
+    return log
+
+
+def test_the_probe_filter_renders_no_other_record():
+    """It sees every asyncio record in the app: rendering one with bad
+    arguments would raise into the caller, where logging alone reports it."""
+    bad = logging.makeLogRecord({"name": "asyncio", "msg": "%s %s", "args": ("x",)})
+    assert cc._drop_probe_reaped(bad) is True
+
+
+def assert_drops_only_the_probe_warning(log, caplog):
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="asyncio"):
+        log.warning("Unknown child process pid %d, will report returncode 255", 42)
+        # Python 3.12's pidfd child watcher on Linux
+        log.warning("child process pid %d exit status already read: "
+                    " will report returncode 255", 44)
+        # as LiteLLM's redaction filter on this logger leaves it: rendered
+        log.warning("Unknown child process pid 43, will report returncode 255")
+        log.warning("Executing %s took %.3f seconds", "<Task>", 0.2)
+    # only that message: asyncio's other warnings still reach the user
+    assert [r.getMessage() for r in caplog.records] == [
+        "Executing <Task> took 0.200 seconds"]
+
+
+@needs_claude
+def test_a_run_drops_asyncio_noise_about_the_reaped_version_probe(
+        monkeypatch, caplog, asyncio_log):
+    fake_cli(monkeypatch, result("ok"))
+    assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "ok"
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
+
+
+@needs_claude
+def test_a_workflow_drops_it_before_any_process_runs(monkeypatch, caplog, asyncio_log):
+    fake_workflow(monkeypatch)
+    with cc.claude_code_workflows(lanes=1, prewarm=[("claude-code/haiku", None)]):
+        assert asyncio.run(llm_acompletion("claude-code/haiku", "P")) == "agent: P"
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
+
+
+@needs_claude
+def test_as_claude_mcp_drops_it_for_the_apps_own_sessions(
+        chat_client, caplog, asyncio_log):
+    """An app running its own Agent SDK sessions reaps the same probe;
+    claude_agent_config() builds its server through as_claude_mcp()."""
+    chat_client.as_claude_mcp()
+    assert_drops_only_the_probe_warning(asyncio_log, caplog)
+
+
+@needs_claude
+def test_flash_indexing_on_claude_code(monkeypatch, tmp_path, sample_pdf):
+    usage = {"input_tokens": 5, "cache_read_input_tokens": 100,
+             "cache_creation_input_tokens": 20, "output_tokens": 7,
+             "output_tokens_details": {"thinking_tokens": 4}}
+    sessions = fake_cli(monkeypatch, result("A two-page fruit memo.", usage=usage))
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    doc = client.submit_document(sample_pdf)
+    assert client.get_document(doc["doc_id"])["description"] == "A two-page fruit memo."
+    assert sessions and all(s.options.model == "haiku" for s in sessions)
+    # every run's usage reaches submit_document's tally, as LiteLLM calls' do
+    runs = len(sessions)
+    assert doc["usage"] == {
+        "prompt_tokens": 125 * runs, "completion_tokens": 7 * runs,
+        "total_tokens": 132 * runs,
+        "prompt_tokens_details": {"cached_tokens": 100 * runs,
+                                  "cache_write_tokens": 20 * runs},
+        "completion_tokens_details": {"reasoning_tokens": 4 * runs}}
+
+
+@needs_claude
+def test_a_refused_index_call_still_counts_its_usage(monkeypatch, tmp_path,
+                                                      sample_pdf):
+    sessions = fake_cli(monkeypatch, result(
+        "refused", is_error=True, status=400,
+        usage={"input_tokens": 5, "output_tokens": 7}))
+    client = PageIndexLocalClient(storage_path=str(tmp_path / "s"),
+                                  index_model="claude-code/haiku")
+    doc = client.submit_document(sample_pdf)
+    assert sessions
+    assert doc["usage"]["prompt_tokens"] == 5 * len(sessions)
+    assert doc["usage"]["completion_tokens"] == 7 * len(sessions)
+
+
+# ── chat ──
+
+@needs_claude
+def test_chat_sends_one_message_with_a_block_per_turn(monkeypatch, chat_client):
+    usage = {"input_tokens": 5, "cache_read_input_tokens": 100,
+             "cache_creation_input_tokens": 20, "output_tokens": 7,
+             "output_tokens_details": {"thinking_tokens": 4}}
+    sessions = fake_cli(monkeypatch,
+                        AssistantMessage(content=[TextBlock("A2")], model="haiku"),
+                        result("A2", usage=usage))
+    history = [{"role": "user", "content": "Q1"},
+               {"role": "assistant", "content": "A1"},
+               {"role": "user", "content": "Q2"}]
+    assert chat_client.chat(history, doc_id="pi-doc1") == "A2"
+    (session,) = sessions
+    (message,) = session.prompt
+    blocks = message["message"]["content"]
+    assert "fruit.pdf" in blocks[0]["text"]  # the doc targeting leads
+    assert [b["text"] for b in blocks[1:]] == [
+        '<turn role="user">\nQ1\n</turn>', '<turn role="assistant">\nA1\n</turn>',
+        '<turn role="user">\nQ2\n</turn>']
+    assert not any("cache_control" in b for b in blocks)
+    opts = session.options
+    assert opts.system_prompt.startswith(CHAT_HEADER)
+    assert "<turn> blocks" in opts.system_prompt
+    assert list(opts.mcp_servers) == ["pageindex"]
+    assert opts.allowed_tools == ["mcp__pageindex"] and opts.tools == []
+    assert opts.max_turns == 10 and not opts.include_partial_messages
+    assert "DISABLE_PROMPT_CACHING" not in opts.env  # later turns read the cache
+
+    envelope = chat_client.chat(history, doc_id="pi-doc1", protocol="chat_completions")
+    assert envelope["model"] == "haiku"
+    assert envelope["usage"] == {
+        "prompt_tokens": 125, "completion_tokens": 7, "total_tokens": 132,
+        "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 20},
+        "completion_tokens_details": {"reasoning_tokens": 4}}
+
+
+@needs_claude
+def test_an_effort_given_to_chat_beats_the_callers_claude_code_one(
+        monkeypatch, chat_client):
+    sessions = fake_cli(monkeypatch, result("A"))
+    chat_client.chat("Q", reasoning_effort="low")
+    chat_client.chat("Q")
+    given, default = (s.options.env for s in sessions)
+    assert given["CLAUDE_CODE_EFFORT_LEVEL"] == ""
+    assert "CLAUDE_CODE_EFFORT_LEVEL" not in default  # with none given, theirs applies
+
+
+@needs_claude
+@pytest.mark.parametrize("theirs", ["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS",
+                                    "CLAUDE_STREAM_IDLE_TIMEOUT_MS"])
+def test_chat_re_sends_a_silent_stream_after_30_s_unless_the_caller_set_a_timeout(
+        monkeypatch, chat_client, theirs):
+    sessions = fake_cli(monkeypatch, result("A"))
+    chat_client.chat("Q")
+    monkeypatch.setenv(theirs, "600000")
+    chat_client.chat("Q")
+    ours, kept = (s.options.env for s in sessions)
+    assert ours["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] == "30000"
+    assert "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS" not in kept
+
+
+@needs_claude
+def test_chat_stream_weaves_the_run(monkeypatch, chat_client):
+    sessions = fake_cli(
+        monkeypatch,
+        AssistantMessage(content=[ToolUseBlock(
+            id="t1", name="mcp__pageindex__get_document",
+            input={"doc_name": "fruit.pdf"})], model="haiku"),
+        UserMessage(content=[ToolResultBlock(
+            tool_use_id="t1", content=[{"type": "text", "text": "1 page"}])]),
+        delta("It has "), delta("1 page."), result("It has 1 page."))
+    events = list(chat_client.chat("How long?", doc_id="pi-doc1", stream=True).events)
+    assert [e["type"] for e in events] == ["tool_call", "tool_result", "answer", "answer"]
+    assert events[0]["name"] == events[1]["name"] == "get_document"
+    assert sessions[0].options.include_partial_messages
+    text = "".join(chat_client.chat("How long?", doc_id="pi-doc1", stream=True))
+    assert text == ('[tool_call] get_document {"doc_name": "fruit.pdf"}\n'
+                    "[tool_result] get_document: 1 page\n\nIt has 1 page.")
+
+
+@needs_claude
+@pytest.mark.parametrize("stop_reason, finish_reason", [
+    ("max_tokens", "length"), ("model_context_window_exceeded", "length"),
+    ("refusal", "content_filter")])
+def test_chat_raises_when_the_answer_is_cut_short(monkeypatch, chat_client,
+                                                  stop_reason, finish_reason):
+    """The answer lane never returns an unfinished answer: the stream raises
+    after its text, a plain call carries the text; the protocol lane marks
+    it with an OpenAI finish_reason for the stop instead."""
+    cut = result("It has 1", usage={"input_tokens": 3, "output_tokens": 2})
+    cut.stop_reason = stop_reason
+    said = AssistantMessage(content=[TextBlock("It has 1")], model="haiku")
+    fake_cli(monkeypatch, delta("It has 1"), cut)
+    text = []
+    with pytest.raises(PageIndexAPIError, match=finish_reason) as info:
+        for piece in chat_client.chat("Q", stream=True):
+            text.append(piece)
+    assert "".join(text) == "It has 1"
+    assert info.value.usage["completion_tokens"] == 2
+    fake_cli(monkeypatch, said, cut)
+    with pytest.raises(PageIndexAPIError, match=finish_reason) as info:
+        chat_client.chat("Q")
+    assert info.value.partial_answer == "It has 1"
+    assert info.value.usage["completion_tokens"] == 2
+    fake_cli(monkeypatch, said, cut)
+    envelope = chat_client.chat("Q", protocol="chat_completions")
+    assert envelope["choices"][0]["finish_reason"] == finish_reason
+    fake_cli(monkeypatch, said, cut)
+    with pytest.raises(PageIndexAPIError, match=finish_reason):
+        list(chat_client.chat_completions("Q", stream=True))
+
+
+@needs_claude
+def test_chat_returns_the_whole_answer_the_cli_resumed(monkeypatch, chat_client):
+    """The CLI resumes an answer cut at its output cap; its result holds
+    only the last part."""
+    fake_cli(monkeypatch,
+             AssistantMessage(content=[TextBlock("Let me look.")], model="haiku"),
+             AssistantMessage(content=[ToolUseBlock(
+                 id="t1", name="mcp__pageindex__get_document",
+                 input={"doc_name": "fruit.pdf"})], model="haiku"),
+             UserMessage(content=[ToolResultBlock(
+                 tool_use_id="t1", content=[{"type": "text", "text": "1 page"}])]),
+             AssistantMessage(content=[TextBlock("Part one, ")], model="haiku"),
+             UserMessage(content=[TextBlock("Output token limit hit. Resume directly.")]),
+             AssistantMessage(content=[TextBlock("and part two.")], model="haiku"),
+             result("and part two."))
+    assert chat_client.chat("Q") == "Part one, and part two."
+    envelope = chat_client.chat("Q", protocol="chat_completions")
+    assert envelope["choices"][0]["message"]["content"] == "Part one, and part two."
+
+
+@needs_claude
+def test_chat_completions_stream_chunks(monkeypatch, chat_client):
+    fake_cli(monkeypatch, delta("Hi "), delta("there."),
+             result("Hi there.", usage={"input_tokens": 3, "output_tokens": 2}))
+    chunks = list(chat_client.chat_completions("Q", stream=True,
+                                               stream_metadata=True))
+    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant", "content": ""}
+    assert [c["choices"][0]["delta"]["content"] for c in chunks[1:3]] == [
+        "Hi ", "there."]
+    assert chunks[3]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[4]["choices"] == [] and chunks[4]["usage"]["completion_tokens"] == 2
+    assert len(chunks) == 5
+    assert "".join(chat_client.chat_completions("Q", stream=True)) == "Hi there."
+    assert chunks[1].choices[0].delta.content == "Hi "
+    assert chunks[4].usage.completion_tokens == 2
+    fake_cli(monkeypatch,
+             AssistantMessage(content=[TextBlock(text="Hi there.")], model="haiku"),
+             result("Hi there.", usage={"input_tokens": 3, "output_tokens": 2}))
+    envelope = chat_client.chat_completions("Q")
+    assert envelope.choices[0].message.content == "Hi there."
+    assert envelope.usage.prompt_tokens == envelope["usage"]["prompt_tokens"]
+    # the openai SDK's own accumulator rebuilds the envelope from the chunks
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletion, ChatCompletionChunk
+    state = ChatCompletionStreamState()
+    for chunk in chunks:
+        state.handle_chunk(ChatCompletionChunk.model_validate(chunk))
+    rebuilt = state.get_final_completion()
+    official = ChatCompletion.model_validate(envelope)
+    assert rebuilt.choices[0].message.content == official.choices[0].message.content
+    assert rebuilt.choices[0].finish_reason == official.choices[0].finish_reason
+    assert rebuilt.usage == official.usage
+
+
+@needs_claude
+@pytest.mark.parametrize("streamed, shown", [
+    ([], "It has 1 page."),  # fallback, nothing streamed
+    (["It has "], "It has 1 page."),  # fallback after a cut stream
+    (["It was "], "It was \n\nIt has 1 page."),  # fallback regenerated differently
+    (["It has ", "1 page."], "It has 1 page."),  # streamed whole
+    # a retried stream
+    (["It has ", "START", "It has ", "1 page."], "It has 1 page."),
+    (["It has 1 ", "START", "It has "], "It has 1 page."),  # cut sooner, then fallback
+    (["It was ", "START", "It has ", "1 page."], "It was \n\nIt has 1 page."),
+])
+def test_a_stream_carries_text_the_cli_sent_whole(monkeypatch, chat_client,
+                                                  streamed, shown):
+    """The CLI's non-streaming fallback sends the text in its assistant
+    message alone, after whatever a failed stream got out: the stream still
+    carries the whole text, once."""
+    start = StreamEvent(uuid="u", session_id="s", event={"type": "message_start"})
+    fake_cli(monkeypatch,
+             *[start if text == "START" else delta(text) for text in streamed],
+             AssistantMessage(content=[ThinkingBlock("hmm", "sig")], model="haiku"),
+             AssistantMessage(content=[TextBlock("It has 1 page.")], model="haiku"),
+             result("It has 1 page."))
+    assert "".join(chat_client.chat("Q", stream=True, show_process=False)) == shown
+    assert "".join(chat_client.chat_completions("Q", stream=True)) == shown
+
+
+@needs_claude
+@pytest.mark.parametrize("surface", ["chat", "chat_completions"])
+def test_an_abandoned_stream_shuts_the_cli_down(monkeypatch, chat_client, surface):
+    sessions = fake_cli(monkeypatch, *[delta("x") for _ in range(100)],
+                        result("x" * 100))
+    stream = getattr(chat_client, surface)("Q", stream=True)
+    next(stream)
+    stream.close()
+    deadline = time.monotonic() + 5
+    while not sessions[0].closed and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert sessions[0].closed
+
+
+@needs_claude
+def test_a_bare_sdk_exception_reads_as_a_claude_code_failure(monkeypatch, chat_client):
+    async def timeout():  # the SDK raises a bare Exception for this one
+        raise Exception("Control request timeout: initialize")
+    sessions = fake_cli(monkeypatch, result("never"), during=timeout)
+    with pytest.raises(PageIndexAPIError, match="Claude Code failed: Control request timeout"):
+        chat_client.chat("Q")
+    assert sessions[0].closed
+
+
+@needs_claude
+def test_chat_stream_display_elides_image_payloads(monkeypatch, chat_client):
+    """A tool's image shows in the display minus its base64 payload (the
+    CLI hands it back as a Claude block); the event keeps it whole."""
+    image = {"type": "image", "source": {"type": "base64",
+                                         "media_type": "image/png",
+                                         "data": "A" * 8192}}
+    fake_cli(monkeypatch,
+             AssistantMessage(content=[ToolUseBlock(
+                 id="t1", name="mcp__pageindex__get_document_image",
+                 input={"image_path": "fig.png"})], model="haiku"),
+             UserMessage(content=[ToolResultBlock(tool_use_id="t1",
+                                                  content=[image])]),
+             result("A chart."))
+    text = "".join(chat_client.chat("Show the figure", stream=True))
+    assert ('[tool_result] get_document_image: {"type": "image", "source": '
+            '{"type": "base64", "media_type": "image/png", "data": "..."}}') in text
+    assert "AAAA" not in text
+    events = list(chat_client.chat("Show the figure", stream=True).events)
+    assert events[1]["output"] == [image]
+
+
+@needs_claude
+@pytest.mark.parametrize("end", ["answer", "max_turns"])
+def test_cloud_tool_limits_fail_the_chat(monkeypatch, end):
+    """A cloud tool's USAGE_LIMIT_REACHED (402) fails chat() as on the
+    bridge lanes, instead of reaching the model as text it answers around
+    — and stays the reported cause when the run then fails in the CLI."""
+    import json
+
+    import claude_agent_sdk
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex import PageIndexCloudClient
+
+    class Bridge:
+        def __init__(self, url, headers):
+            pass
+
+        def list_tools(self):
+            return [{"name": "get_document", "description": "d",
+                     "annotations": {"readOnlyHint": True},
+                     "inputSchema": {"type": "object", "properties": {}}}]
+
+        def instructions(self):
+            return "GUIDANCE"
+
+        def call_tool(self, name, arguments):
+            return [{"type": "text", "text": json.dumps({
+                "success": False, "error": "Usage limit reached",
+                "errorCode": "USAGE_LIMIT_REACHED"})}], True
+    monkeypatch.setattr(mcp_bridge, "McpBridge", Bridge)
+    tools = {}
+
+    def server(**kwargs):
+        tools.update({tool.name: tool for tool in kwargs["tools"]})
+        return {"type": "sdk", "name": kwargs["name"], "instance": None}
+    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", server)
+
+    async def the_model_calls_the_tool():
+        reply = await tools["get_document"].handler({})
+        assert reply["is_error"]
+    fake_cli(monkeypatch,
+             *((delta("I could not "), delta("read it."), result("I could not read it."))
+               if end == "answer"
+               else (result(None, is_error=True, subtype="error_max_turns"),)),
+             during=the_model_calls_the_tool)
+
+    cloud = PageIndexCloudClient(api_key="pi-test-key",
+                                 chat_model="claude-code/haiku")
+    with pytest.raises(PageIndexAPIError, match="Usage limit reached") as err:
+        cloud.chat("Q")
+    assert err.value.status_code == 402
+    # streamed too, the run stops at the failed tool: no answer around it
+    events = []
+    with pytest.raises(PageIndexAPIError, match="Usage limit reached"):
+        for event in cloud.chat("Q", stream=True).events:
+            events.append(event)
+    assert not [event for event in events if event["type"] == "answer"]
+    # in process, not the relay: the server's annotations (readOnlyHint
+    # keeps the read tools parallel) plus the inline cap past ~100k results
+    assert tools["get_document"].annotations.model_dump(
+        by_alias=True, exclude_none=True) == {"readOnlyHint": True,
+                                              "maxResultSizeChars": 200_000}
+
+
+@needs_claude
+def test_chat_max_turns(monkeypatch, chat_client):
+    fake_cli(monkeypatch, result(None, is_error=True, subtype="error_max_turns",
+                                 usage={"input_tokens": 5, "output_tokens": 7}))
+    with pytest.raises(PageIndexAPIError, match=r"max_turns \(3\)") as err:
+        chat_client.chat("Q", max_turns=3)
+    usage = err.value.usage
+    assert usage is not None and usage["completion_tokens"] == 7

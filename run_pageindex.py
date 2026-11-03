@@ -32,7 +32,7 @@ if __name__ == "__main__":
     parser.add_argument('--summary-model', type=str, default=None,
                       help='Model for node summaries (falls back to config.yaml summary_model, then --index-model, then --model)')
     parser.add_argument('--summary-max-words', type=int, default=None,
-                      help=f'Word cap for each model-written node summary; short leaf nodes keep their own text (flash mode; default {SUMMARY_MAX_WORDS})')
+                      help=f'Word cap for each model-written node summary; a leaf node shorter than that keeps its own text (flash mode; default {SUMMARY_MAX_WORDS})')
     parser.add_argument('--summary-concurrency', type=int, default=None,
                       help=f'Cap on simultaneous indexing model calls per lane (flash mode; default {SUMMARY_CONCURRENCY}, expand tops out at {EXPAND_CONCURRENCY})')
     parser.add_argument('--summary-reasoning-effort', type=str, default=None,

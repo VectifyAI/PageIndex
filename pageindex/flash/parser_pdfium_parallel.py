@@ -71,7 +71,7 @@ def _anonymous_main():
     everything by module name and never need __main__. Depth-counted so
     overlapping windows restore the true originals, not a mid-window snapshot.
 
-    ponytail: window covers the whole map; a concurrent pool spawned from
+    The window covers the whole map; a concurrent pool spawned from
     another thread whose tasks live in __main__ would break during it."""
     global _window_depth, _window_saved
     main = sys.modules.get("__main__")
@@ -105,14 +105,13 @@ def _init_worker(kind: str, payload) -> None:
     else:
         _worker_pdf = pdfium.PdfDocument(BytesIO(payload))
     _worker_pdf_doc = None
-    if _pypdf2 is not None:
-        try:
-            if kind == "path":
-                _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(payload))
-            else:
-                _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(BytesIO(payload)))
-        except Exception:
-            _worker_pdf_doc = None
+    try:
+        if kind == "path":
+            _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(payload))
+        else:
+            _worker_pdf_doc = _PdfDoc(_pypdf2.PdfReader(BytesIO(payload)))
+    except Exception:
+        _worker_pdf_doc = None
     _worker_font_maps = {}
 
 

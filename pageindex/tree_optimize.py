@@ -63,17 +63,18 @@ import sys
 import unicodedata
 from types import SimpleNamespace
 
-from .utils import (SUMMARY_MAX_WORDS, ConfigLoader, _is_unrecoverable, count_tokens,
-                    intro_title, is_intro, llm_acompletion, strip_internal_keys)
+from .utils import (SUMMARY_MAX_WORDS, TOKENS_PER_WORD, ConfigLoader, _is_unrecoverable,
+                    count_tokens, intro_title, is_intro, llm_acompletion,
+                    llm_priority, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
 EXPAND_CONCURRENCY = 32  # measured plateau: the ready frontier is 21-28 wide on few-hundred-page PDFs
+EXPAND_PRIORITY = float("inf")  # ahead of every summary: none starts under a node expand may still change
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
 EMPTY_RETRIES = 0
 ENTRY_TOKENS = 45        # a node's structure entry less its summary: title, id, pages
-TOKENS_PER_WORD = 1.3
 
 EXPAND_PROMPT = """You are splitting an over-long section of a PDF into its subsections.
 
@@ -149,7 +150,11 @@ def extract_json(content):
 
 
 async def ask_model(model, prompt):
-    return extract_json(await llm_acompletion(model, prompt))
+    reply = await llm_acompletion(model, prompt)
+    try:
+        return extract_json(reply)
+    except ValueError:  # a broken reply; llm_acompletion only retries failed calls
+        return extract_json(await llm_acompletion(model, prompt))
 
 
 def load_pages(pdf_path):
@@ -785,7 +790,8 @@ async def expand(structure, pages, lines, args, log, frozen):
             attempts += 1
             try:
                 async with semaphore:
-                    proposed = await propose_children(node, pages, args)
+                    with llm_priority(EXPAND_PRIORITY):
+                        proposed = await propose_children(node, pages, args)
             except Exception as exc:
                 if _is_unrecoverable(exc):
                     raise  # every remaining node would fail identically

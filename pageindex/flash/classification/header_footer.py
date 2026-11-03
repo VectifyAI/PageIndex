@@ -64,7 +64,9 @@ from .keyword_tables import (
     FIGURE_KEYWORDS_TRIE,
     TABLE_KEYWORDS_TRIE,
     CHART_KEYWORDS_TRIE,
+    TOC_TITLES_TRIE,
     _search_trie,
+    _normalize_text_key,
 )
 from .body_text import (
     record_recurring_text,
@@ -150,6 +152,36 @@ def walk_from_page_edge(ctx, blocks: list[Block], callback) -> None:
             block_index -= 1
 
 
+def block_after(ctx, page, block: Block) -> Optional[Block]:
+    """The next block with letters inward from ``block``: below a header, above a footer."""
+    blocks = page.output_slot if ctx.primary_slot == 1 else page.output_slot[::-1]
+    index = next(k for k, item in enumerate(blocks) if item is block)
+    return next((item for item in blocks[index + 1:] if letter_count(item.char_stats) > 0), None)
+
+
+def block_words(block: Block) -> str:
+    """``normalized_block_text`` with a space between tokens, to match text word by word."""
+    return " ".join(_normalize_text_key(token.str.lower()) for token in tokenize_block(block))
+
+
+def repeats_into_body(ctx, page, block: Block, other_page, other: Block) -> bool:
+    """Whether the blocks from these two inward stay the same on both pages up to a body
+    paragraph: a section printed twice, not a running header or footer."""
+    step = 1 if ctx.primary_slot == 1 else -1
+    blocks = [item for item in page.output_slot if item.char_count() > 0]
+    others = [item for item in other_page.output_slot if item.char_count() > 0]
+    index = next(k for k, item in enumerate(blocks) if item is block)
+    other_index = next(k for k, item in enumerate(others) if item is other)
+    while 0 <= index < len(blocks) and 0 <= other_index < len(others):
+        if normalized_block_text(blocks[index]) != normalized_block_text(others[other_index]):
+            return False
+        if is_body_paragraph(ctx.secondary_slot.secondary_slot, page, blocks[index]):
+            return True
+        index += step
+        other_index += step
+    return False
+
+
 def find_cross_page_match(ctx, page, block: Block, text_key: str, ref: Block) -> Optional[Block]:
     """Find a matching block on a nearby page by exact normalized text, then by longest word/number pieces."""
     entries = ctx.auxiliary_slot.get(text_key) or []
@@ -175,6 +207,10 @@ def find_cross_page_match(ctx, page, block: Block, text_key: str, ref: Block) ->
                 or (entry_page_index == 1 and heading_score(entry_block) >= size + 0.5)
             ))
         ):
+            if repeats_into_body(ctx, page, block, ctx.secondary_slot.primary_slot[entry_page_index - 1], entry_block):
+                if entry_page_index == page.page_index - 1:
+                    block.repeat_of = entry_block
+                continue
             return entry_block
 
     if is_header_positioned(ctx, block, ref):
@@ -279,6 +315,7 @@ def bounded_edit_distance(text: str, other_text: str, candidate_item: float) -> 
 def detect_header_footer(ctx: HeaderFooterContext) -> None:
     """Run the three-pass header/footer detector."""
     # ----- Pass 1: per-page candidate collection -----------------------
+    links: list[tuple] = []   # (page, block) where the walk stopped at a contents link
     for page in ctx.secondary_slot.primary_slot:
         seen_style_keys: set[str] = set()
         page_numbers: set[int] = set()
@@ -295,6 +332,7 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
             den = page.bounds.bbox_height()
             num = block.top_edge() if ctx.primary_slot == 1 else block.bottom_edge()
             relative = (num / den) if den else (math.copysign(math.inf, num) if num else math.nan)
+            stop_after = False
             if (ctx.primary_slot == 1 and relative < 0.8) or (ctx.primary_slot == 2 and relative > 0.2):
                 pass_value = False
             else:
@@ -306,9 +344,12 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
                     or info_weight(block.char_stats) * (1 + block.bold_frac()) >= 200
                     or trie_prefix_match(FIGURE_KEYWORDS_TRIE, tokens)
                     or trie_prefix_match(CHART_KEYWORDS_TRIE, tokens)
-                    or trie_prefix_match(TABLE_KEYWORDS_TRIE, tokens)
                 ):
                     pass_value = False
+                elif trie_prefix_match(TABLE_KEYWORDS_TRIE, tokens):
+                    # "Table of Contents" is a contents title, not a table caption:
+                    # it may be a running header, but the walk still stops there
+                    pass_value = stop_after = trie_full_match(TOC_TITLES_TRIE, tokens)
                 else:
                     pass_value = True
             if not pass_value:
@@ -344,7 +385,9 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
                         detected_page_number = span_page_number(span)
                         if detected_page_number is not None:
                             page_numbers.add(detected_page_number)
-            return False
+            if stop_after:
+                links.append((page, block))
+            return stop_after
 
         walk_from_page_edge(ctx, page.output_slot, walk_cb)
 
@@ -429,6 +472,23 @@ def detect_header_footer(ctx: HeaderFooterContext) -> None:
                 continue
             block.type = ctx.primary_slot
             record_recurring_text(ctx.secondary_slot, deaccented_text(block))
+
+    # A block printed next to the contents link on most pages where the link is a
+    # running header, that also names the document on its first page, belongs to
+    # that running header: the company name under the link, as on a filing's cover.
+    # A section title printed there on each of its pages is no name from the cover.
+    followers = [block_after(ctx, page, link) for page, link in links if link.type == ctx.primary_slot]
+    if followers:
+        cover = f" {' '.join(block_words(block) for block in ctx.secondary_slot.primary_slot[0].output_slot)} "
+        counts: dict[str, int] = {}
+        for block in followers:
+            if block is not None:
+                counts[normalized_block_text(block)] = counts.get(normalized_block_text(block), 0) + 1
+        for block in followers:
+            if block is not None and block.type == 0:
+                text = normalized_block_text(block)
+                if 2 * counts[text] > len(followers) and f" {block_words(block)} " in cover:
+                    mark_header_footer(ctx, block)
 
     # ----- Pass 3: cutoff line + top-3 text-hash sweep -----------------
     if len(samples) < len(ctx.secondary_slot.primary_slot) / 20:
