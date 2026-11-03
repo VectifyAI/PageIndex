@@ -1323,3 +1323,66 @@ def test_flash_cli_summary_flags_refuse_standard_mode(monkeypatch, tmp_path):
     for flag in ("--summary-concurrency", "--summary-max-words", "--summary-reasoning-effort"):
         with pytest.raises(ValueError, match=f"{flag} requires Flash mode"):
             _run_flash_cli(monkeypatch, tmp_path, ["--mode", "standard", flag, "8"], [])
+
+
+def _fields(value):
+    """Every ``__slots__`` field, recursively -- Span and Rect define no __eq__."""
+    slots = [s for c in type(value).__mro__ for s in getattr(c, "__slots__", ())]
+    if slots:
+        return {s: _fields(getattr(value, s)) for s in slots if hasattr(value, s)}
+    if isinstance(value, (list, tuple)):
+        return [_fields(v) for v in value]
+    return repr(value)
+
+
+def test_sequential_parse_defers_only_type3_sized_pages(tmp_path, monkeypatch):
+    """Pages are parsed one at a time and closed at once, except pages carrying
+    identity-matrix Type-3 glyphs: those are re-extracted after the whole
+    document's Type-3 sizes are known. The result must equal the two-pass
+    parse that holds every page open and sizes them all at the end."""
+    import PyPDF2
+    import pypdfium2 as pdfium
+
+    from pageindex.flash.parser_pdfium_charlevel import pipeline as mod
+
+    plain = PyPDF2.PdfReader(str(PDF))
+    lectures = PyPDF2.PdfReader(str(PDF.parent / "four-lectures.pdf"))  # Type-3 bitmap fonts
+    writer = PyPDF2.PdfWriter()
+    for page in (plain.pages[0], lectures.pages[0], plain.pages[1], lectures.pages[1]):
+        writer.add_page(page)
+    mixed = tmp_path / "mixed.pdf"
+    with open(mixed, "wb") as f:
+        writer.write(f)
+
+    pdf = pdfium.PdfDocument(str(mixed))
+    pdf_doc = mod._PdfDoc(PyPDF2.PdfReader(str(mixed)))
+    type3_ext: dict = {}
+    firsts = [mod._page_pass1(pdf, pdf_doc, i, type3_ext, {}) for i in range(len(pdf))]
+    sizes = mod._type3_size_by_font(type3_ext)
+    assert sizes  # the sizing is live, not a no-op
+    want = [mod._page_spans(mod._page_pass2(raw, vb, sizes)) for _p, raw, vb, _r in firsts]
+    want_meta = [(vb, rot) for _p, _raw, vb, rot in firsts]
+    for page, *_ in firsts:
+        page.close()
+    pdf.close()
+
+    calls = []
+    real_pass1 = mod._page_pass1
+    monkeypatch.setattr(mod, "_page_pass1",
+                        lambda pdf, pdf_doc, i, *a: calls.append(i) or real_pass1(pdf, pdf_doc, i, *a))
+    got, meta = mod.parse_charlevel_meta(str(mixed))
+    assert calls == [0, 1, 2, 3, 1, 3]  # only the Type-3 pages are extracted twice
+    assert meta == want_meta
+    assert _fields(got) == _fields(want)
+
+
+@pytest.mark.parametrize("stray", [")", "{", "}"])
+def test_tounicode_parser_gets_past_a_stray_delimiter(stray):
+    import subprocess
+    import sys
+
+    code = ("from pageindex.flash.parser_pdfium_charlevel.cmap_parse import _parse_tounicode_cmap\n"
+            f"print(_parse_tounicode_cmap(b'1 beginbfrange <01> <02> [<0041> {stray} <0042>] endbfrange'))")
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         cwd=Path(__file__).parent.parent, timeout=15)
+    assert res.stdout.strip() == b"{1: 'A', 2: 'B'}", res.stderr.decode()

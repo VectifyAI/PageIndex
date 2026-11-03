@@ -65,11 +65,12 @@ from types import SimpleNamespace
 
 from .utils import (SUMMARY_MAX_WORDS, TOKENS_PER_WORD, ConfigLoader, _is_unrecoverable,
                     count_tokens, intro_title, is_intro, llm_acompletion,
-                    strip_internal_keys)
+                    llm_priority, strip_internal_keys)
 
 TRIGGER_PAGES = 5        # only look ahead on nodes larger than this
 ROUTING_COST = 1         # R(v), in pages
 EXPAND_CONCURRENCY = 32  # measured plateau: the ready frontier is 21-28 wide on few-hundred-page PDFs
+EXPAND_PRIORITY = float("inf")  # ahead of every summary: none starts under a node expand may still change
 PAGE_CHARS = 6000        # per-page text handed to the model
 TITLE_MAX_CHARS = 200    # a union title longer than this falls back to a page label
 EMPTY_RETRIES = 0
@@ -789,7 +790,8 @@ async def expand(structure, pages, lines, args, log, frozen):
             attempts += 1
             try:
                 async with semaphore:
-                    proposed = await propose_children(node, pages, args)
+                    with llm_priority(EXPAND_PRIORITY):
+                        proposed = await propose_children(node, pages, args)
             except Exception as exc:
                 if _is_unrecoverable(exc):
                     raise  # every remaining node would fail identically

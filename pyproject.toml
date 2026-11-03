@@ -29,11 +29,14 @@ python = ">=3.10"
 requests = ">=2.28.0"
 # MCP retries use Retry(allowed_methods=...), added in urllib3 1.26.
 urllib3 = ">=1.26"
-openai = ">=1.70.0"
+openai = ">=2.45.0"
 # Older releases break resending streamed chat `messages`: a tool turn
 # loses its empty content (0.18.1), Claude thinking fails validation (<0.20).
 openai-agents = ">=0.20.0"
 mcp = ">=1.19.0,<3"
+# <1.106: from 1.106 a call with tools imports LiteLLM's proxy MCP handler,
+# which needs mcp>=2.2 (BerriAI/litellm#46045). The fix (#45961) is in the
+# 1.107 line: lift the cap at its first clean release (1.107.0 was malware).
 litellm = ">=1.105.1,<1.106"
 PyPDF2 = ">=3.0.0"
 pypdfium2 = ">=5"

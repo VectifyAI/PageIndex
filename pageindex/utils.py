@@ -1,7 +1,6 @@
 import contextvars
 import logging
 import os
-import sys
 import textwrap
 from datetime import datetime
 import time
@@ -10,12 +9,18 @@ import PyPDF2
 import copy
 import asyncio
 import heapq
-from contextlib import asynccontextmanager
+import sys
+import threading
+from contextlib import asynccontextmanager, contextmanager
 from io import BytesIO
 from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
 # litellm's import fetches its model map over the network unless told not to.
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+# A spawned worker inherits the value set below; the marker says it is ours.
+_MAP_SET_BY_USER = os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP") not in (
+    None, os.environ.get("_PAGEINDEX_LOCAL_MODEL_MAP"))
+if not _MAP_SET_BY_USER:
+    os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = os.environ["_PAGEINDEX_LOCAL_MODEL_MAP"] = "True"
 import logging
 import yaml
 from pathlib import Path
@@ -36,6 +41,20 @@ _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
 # summed into, which LocalAPI returns from submit_document.
 _llm_usage: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_usage", default=None)
+
+# Set by llm_priority: where a gate narrower than the indexing lanes queues
+# their model calls (the claude-code/ route's cap), the highest goes first.
+_llm_priority: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_priority", default=0)
+
+
+@contextmanager
+def llm_priority(prio):
+    token = _llm_priority.set(prio)
+    try:
+        yield
+    finally:
+        _llm_priority.reset(token)
 
 
 def _add_usage(response) -> None:
@@ -69,23 +88,6 @@ def _add_usage_counts(counts, usage=None) -> None:
             usage[key] = usage.get(key, 0) + (value or 0)
 
 
-def _repair_litellm_types() -> None:
-    """litellm 1.97.0's Message/Delta annotations carry nested forward refs
-    Python 3.10 cannot resolve (BerriAI/litellm#36384), so every completion
-    dies constructing its response. Rebuild them once with the defining
-    modules' names; no-op on 3.11+ and on fixed litellm releases."""
-    if sys.version_info >= (3, 11):
-        return
-    try:
-        import litellm.types.llms.openai as openai_types
-        import litellm.types.utils as litellm_types
-        namespace = {**vars(openai_types), **vars(litellm_types)}
-        litellm_types.Message.model_rebuild(_types_namespace=namespace)
-        litellm_types.Delta.model_rebuild(_types_namespace=namespace)
-    except Exception:
-        pass  # best-effort: a failed repair leaves litellm's own error
-
-
 def _mute_litellm_bridge_usage_warning() -> None:
     """litellm's chat→Responses bridge (e.g. OpenAI gpt-5.4+ with function
     tools) logs a chat-shaped usage dict inside a ResponseAPIUsage field
@@ -101,8 +103,17 @@ def _mute_litellm_bridge_usage_warning() -> None:
 
 def _quiet_litellm() -> None:
     """Mute litellm's stdout "Provider List:" banner and default its loggers
-    to LITELLM_LOG (ERROR unset); a level set elsewhere stays."""
+    to LITELLM_LOG (ERROR unset); a level set elsewhere stays. Also maps
+    Claude's stop at its context window to "length": LiteLLM reads a stop
+    reason it doesn't know as "stop", and only warns, so a cut-off answer
+    would pass as whole."""
     import litellm
+    try:
+        from litellm.litellm_core_utils.core_helpers import _FINISH_REASON_MAP
+    except ImportError:
+        pass  # LiteLLM moved it: the stop reads as "stop", as before
+    else:
+        _FINISH_REASON_MAP.setdefault("model_context_window_exceeded", "length")
     litellm.suppress_debug_info = True
     level = getattr(logging, os.environ.get("LITELLM_LOG", "ERROR").upper(),
                     logging.ERROR)
@@ -110,6 +121,97 @@ def _quiet_litellm() -> None:
         logger = logging.getLogger(name)
         if logger.level == logging.NOTSET:
             logger.setLevel(level)
+
+
+_PUBLISHED_MAP_URL = os.environ.get(
+    "LITELLM_MODEL_COST_MAP_URL",
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/"
+    "model_prices_and_context_window.json")
+_published = None
+_published_lock = threading.Lock()
+_filled = False
+
+
+def _published_map():
+    """LiteLLM's published model map as downloaded, a Future of its bytes:
+    one download per process, on a daemon thread, that runs on any thread
+    wait for together."""
+    global _published
+    with _published_lock:
+        if _published is not None:
+            return _published
+        from concurrent.futures import Future
+        future = _published = Future()
+        # running: a cancelled waiter can't cancel it for the others
+        future.set_running_or_notify_cancel()
+
+    def fetch():
+        try:
+            import httpx
+            response = httpx.get(_PUBLISHED_MAP_URL, timeout=5)
+            response.raise_for_status()
+            future.set_result(response.content)
+        except Exception as exc:
+            future.set_exception(exc)
+    threading.Thread(target=fetch, daemon=True).start()
+    return future
+
+
+def _forget_published():
+    # a forked child lacks the thread a pending download runs on
+    global _published
+    _published = None
+
+
+def _drop_litellm_clients():
+    # on its parent's pooled connections a forked child reads replies meant
+    # for another process; created lazily, so only one LiteLLM already made
+    litellm = sys.modules.get("litellm")
+    cache = litellm and vars(litellm).get("in_memory_llm_clients_cache")
+    if cache is not None:
+        cache.flush_cache()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_published)
+    os.register_at_fork(after_in_child=_drop_litellm_clients)
+
+
+async def learn_published_models() -> bool:
+    """LiteLLM takes the published map's entries its packaged map lacks;
+    True once any are in. Never when the caller set
+    LITELLM_LOCAL_MODEL_COST_MAP themselves."""
+    global _filled
+    if _MAP_SET_BY_USER:
+        return False
+    import litellm
+    try:
+        published = json.loads(await asyncio.wrap_future(_published_map()))
+        new = {key: entry for key, entry in published.items()
+               if key not in litellm.model_cost and isinstance(entry, dict)}
+    except Exception:
+        return False
+    if new:
+        litellm.register_model(new)
+        _filled = True
+    return _filled
+
+
+def learn_model_if_effort_dropped(model) -> None:
+    """learn_published_models when LiteLLM's packaged map lacks `model` and
+    LiteLLM so drops a reasoning_effort sent with it: drop_params drops it
+    unseen, leaving no refusal to learn on."""
+    import litellm
+    model = _litellm_model(model)
+    try:
+        litellm.get_model_info(model)
+        return  # in the packaged map: the published one adds nothing for it
+    except Exception:
+        pass
+    provider, name = model.split("/", 1)
+    if "reasoning_effort" not in (litellm.get_supported_openai_params(
+            model=name, custom_llm_provider=provider) or []):
+        run_off_loop(asyncio.run, learn_published_models())
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -175,8 +277,7 @@ def _litellm_model(model):
 
 
 # Misconfiguration: no retry can fix a rejected key or a model that does not
-# exist, and every later call fails the same way. An unknown status is a
-# transport failure and stays retryable.
+# exist, and every later call fails the same way.
 _UNRECOVERABLE_STATUS = frozenset({401, 403, 404})
 
 # A 400 (context_length_exceeded) is equally unfixable by retry — the prompt
@@ -193,7 +294,7 @@ class LLMRetriesExhausted(RuntimeError):
         self.status_code = status_code
 
 
-def _is_unrecoverable(exc: Exception) -> bool:
+def _is_unrecoverable(exc: BaseException) -> bool:
     if isinstance(exc, LLMRetriesExhausted):
         # 400 carries context_length_exceeded, the per-prompt failure the
         # caller absorbs (see above); any other exhausted ladder is fatal.
@@ -201,30 +302,75 @@ def _is_unrecoverable(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
+# What turns thinking off on the Claude models that think by default: each
+# one's own switch, as the Anthropic Models API lists it, or its lowest effort
+# where it has none. The first name in the model wins, so a longer name comes
+# before its prefix.
+_CLAUDE_NONE = (
+    ("claude-sonnet-5-5", {"thinking": {"type": "between_tools"}}),
+    ("claude-opus-5-5", {"reasoning_effort": "low"}),
+    ("claude-fable-5", {"reasoning_effort": "low"}),
+    ("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
+    ("claude-sonnet-5", {"thinking": {"type": "disabled"}}),
+    ("claude-opus-5", {"thinking": {"type": "disabled"}}),
+)
+
+
+def claude_none_switch(model):
+    """What replaces reasoning_effort "none" on a Claude model that thinks by
+    default (see _CLAUDE_NONE); None for any other model."""
+    return next((swap for name, swap in _CLAUDE_NONE if name in (model or "")), None)
+
+
+def _claude_none(model):
+    """claude_none_switch on a model LiteLLM routes to Anthropic, Bedrock,
+    Vertex or Foundry, which LiteLLM sends no thinking field for "none"
+    (BerriAI/litellm#47924, #44298); None elsewhere."""
+    model = _strip_prefix(model or "", "litellm/")
+    if model.split("/", 1)[0] not in ("anthropic", "bedrock", "vertex_ai", "azure_ai"):
+        return None
+    return claude_none_switch(model)
+
+
+def thinking_stays_on(model):
+    """True when reasoning_effort "none" can't turn the model's thinking off."""
+    return "reasoning_effort" in (_claude_none(model) or {})
+
+
+def _claude_none_kwargs(model, kwargs):
+    """LiteLLM kwargs for `model` with a "none" effort swapped as
+    _claude_none says; a caller's own thinking wins."""
+    swap = (kwargs.get("reasoning_effort") == "none" and "thinking" not in kwargs
+            and _claude_none(model))
+    if not swap:
+        return kwargs
+    return {**{k: v for k, v in kwargs.items() if k != "reasoning_effort"}, **swap}
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
     if is_claude_code(model):
         if chat_history or return_finish_reason:
             raise ValueError("claude-code/ models index in flash mode only; "
                              "standard mode needs an API model.")
         return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
     import litellm
-    max_retries = 10
+    attempts = INDEX_RETRIES + 1
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     model = _litellm_model(model)
-    _repair_litellm_types()
     _quiet_litellm()
-    for i in range(max_retries):
+    for i in range(attempts):
         try:
-            response = litellm.completion(**{
+            response = litellm.completion(**_claude_none_kwargs(model, {
                 "model": model,
                 "messages": messages,
                 "drop_params": True,
                 # the loop is the retry policy; the merge lets a backend override win
                 "max_retries": 0,
                 **(backend or {}),
-            })
+            }))
             _add_usage(response)
             content = response.choices[0].message.content
             if return_finish_reason:
@@ -235,49 +381,54 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            if i < max_retries - 1:
+            retry = should_retry(e) or isinstance(e, IndexError)  # a 200 with no choices
+            if retry and i < attempts - 1:
                 logging.warning("Retrying LLM completion")
-                time.sleep(1)
+                time.sleep(delay(i, getattr(e, "litellm_response_headers", None), INDEX_MAX_DELAY))
             else:
                 raise LLMRetriesExhausted(
-                    f"LLM completion failed after {max_retries} retries: {e}",
+                    f"LLM completion failed after {attempts} attempts: {e}" if retry
+                    else f"LLM completion failed: {e}",
                     status_code=getattr(e, "status_code", None),
                 ) from e
 
 
 async def llm_acompletion(model, prompt, **params):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
+    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
     if is_claude_code(model):
         return await claude_code_complete(model, prompt, **params)
     import litellm
-    max_retries = 10
+    attempts = INDEX_RETRIES + 1
     messages = [{"role": "user", "content": prompt}]
     backend = _llm_backend.get()
     model = _litellm_model(model)
-    _repair_litellm_types()
     _quiet_litellm()
-    for i in range(max_retries):
+    for i in range(attempts):
         try:
-            response = await litellm.acompletion(**{
+            response = await litellm.acompletion(**_claude_none_kwargs(model, {
                 "model": model,
                 "messages": messages,
                 "drop_params": True,
                 "max_retries": 0,
                 **(backend or {}),
                 **params,
-            })
+            }))
             _add_usage(response)
             return response.choices[0].message.content
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
             logging.error(f"Error: {e}")
-            if i < max_retries - 1:
+            retry = should_retry(e) or isinstance(e, IndexError)  # a 200 with no choices
+            if retry and i < attempts - 1:
                 logging.warning("Retrying LLM completion")
-                await asyncio.sleep(1)
+                await asyncio.sleep(delay(i, getattr(e, "litellm_response_headers", None),
+                                          INDEX_MAX_DELAY))
             else:
                 raise LLMRetriesExhausted(
-                    f"LLM completion failed after {max_retries} retries: {e}",
+                    f"LLM completion failed after {attempts} attempts: {e}" if retry
+                    else f"LLM completion failed: {e}",
                     status_code=getattr(e, "status_code", None),
                 ) from e
 
@@ -923,7 +1074,7 @@ async def generate_summaries_for_structure(structure, model=None):
     return structure
 
 
-SUMMARY_CONCURRENCY = 64        # simultaneous summary model calls
+SUMMARY_CONCURRENCY = 128       # simultaneous summary model calls
 SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
 TOKENS_PER_WORD = 4 / 3
@@ -933,9 +1084,15 @@ SUMMARY_REASONING_EFFORT = "none"
 def default_summary_reasoning_effort(model):
     """SUMMARY_REASONING_EFFORT unless the indexing backend sets a
     reasoning_effort or thinking or LiteLLM lists the model as refusing
-    it, else None.
+    it, else None. claude-code/ models, where neither applies, always get it.
     Where LiteLLM says nothing (openrouter/..., models it has not caught up
-    with) the summaries send it and drop it if the server refuses it."""
+    with) the summaries send it and drop it if the server refuses it; a
+    provider LiteLLM sends it to only for models its map knows (xai/,
+    fireworks_ai/, ...) has it dropped before sending instead, unless the
+    published map, learned first (learn_model_if_effort_dropped), knows it."""
+    from .integrations.claude_agent_sdk import is_claude_code
+    if is_claude_code(model):
+        return SUMMARY_REASONING_EFFORT
     if {"reasoning_effort", "thinking"} & (_llm_backend.get() or {}).keys():
         return None
     import litellm
@@ -1091,7 +1248,9 @@ class SummaryScheduler:
         self._pdf_pages = pdf_pages
         self._split_shared_pages = split_shared_pages
         self._params = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
-        self._drop_refused_effort = drop_refused_effort
+        from .integrations.claude_agent_sdk import is_claude_code
+        # claude-code/ checks its effort before any prompt: a 400 there isn't the effort's
+        self._drop_refused_effort = drop_refused_effort and not is_claude_code(model)
         self._model = model
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
@@ -1099,6 +1258,7 @@ class SummaryScheduler:
                                    if small_node_tokens is None else small_node_tokens)
         self._gate = _PriorityGate(concurrency or SUMMARY_CONCURRENCY)
         self._asked = self._answered = False
+        self._failure = None  # the first summary call's error, for the all-failed message
         self._marks = {}     # id(node) -> future resolved once the node is final
         self._tasks = {}     # id(node) -> its summary task
         self._finals = []    # (node, ids of its children when it was marked)
@@ -1140,7 +1300,8 @@ class SummaryScheduler:
     async def _ask(self, prompt, prio):
         self._asked = True
         async with self._gate.slot(prio):
-            reply = await self._complete(prompt)
+            with llm_priority(prio):
+                reply = await self._complete(prompt)
         if parse_summary(reply):
             self._answered = True
         return reply
@@ -1241,6 +1402,7 @@ class SummaryScheduler:
                                      else self._leaf_summary(node, depth))
         except Exception as e:
             node['summary'] = ""
+            self._failure = self._failure or e
             if _is_unrecoverable(e):
                 raise
         if not node['summary']:
@@ -1277,8 +1439,9 @@ class SummaryScheduler:
             raise RuntimeError(
                 "Summary generation failed for all nodes "
                 "(every summary call failed or returned empty; "
-                "check the model and its context limits)"
-            )
+                + (f"first failure: {self._failure}" if self._failure
+                   else "check the model and its context limits") + ")"
+            ) from self._failure
 
         strip_internal_keys(self.structure)
         return self.structure
@@ -1298,7 +1461,8 @@ async def summarize_tree(structure, pdf_pages, model=None, small_node_tokens=Non
     a page it shares with the next or previous leaf (see leaf_own_text); a set
     `reasoning_effort` goes with every summary call, over the indexing
     backend's, and with `drop_refused_effort` the calls stop sending it once
-    a prompt the server refused with it goes through without it. Model calls
+    a prompt the server refused with it goes through without it (never on
+    claude-code/, whose effort is checked up front). Model calls
     run deepest node first, both in starting order and in leaving the queue:
     depth counts the calls left on a node's path to the root, its own
     included."""

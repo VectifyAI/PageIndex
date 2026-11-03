@@ -238,13 +238,19 @@ def _type3_size_by_font(acc: dict) -> dict:
     return out
 
 
+def _type3_sized(char: dict) -> bool:
+    """True for a char ``_apply_type3_sizes`` may resize: an identity-matrix Type-3 glyph, whitespace included (the extent accumulation skips whitespace, the sizing does not)."""
+    obj = char["obj"]
+    return obj["fs_raw"] < 1.5 and obj["scale_y"] < 1.5
+
+
 def _apply_type3_sizes(raw_chars: list[dict], size_by_font: dict) -> None:
     """Override fs_eff with the document-wide Type-3 size and reset each char's span top to baseline + that size."""
     if not size_by_font:
         return
     for candidate_item in raw_chars:
         item_value = candidate_item["obj"]
-        if item_value["fs_raw"] >= 1.5 or item_value["scale_y"] >= 1.5:
+        if not _type3_sized(candidate_item):
             continue
         font_size_value = size_by_font.get(item_value["font_key"])
         if font_size_value:

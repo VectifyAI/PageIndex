@@ -15,6 +15,7 @@ retries; a 400 is an ordinary bad request and is never replayed.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from typing import Any, Optional
 
@@ -27,9 +28,10 @@ from .errors import PageIndexAPIError
 _PROTOCOL_VERSION = "2025-06-18"
 _TIMEOUT = (10, 240)  # tools may wait server-side (wait_for_completion: 3 min)
 # Below the tool layer, so the model never plays retry loop. read=0: a read
-# timeout is a full wait the server may have acted on, never replayed.
+# timeout is a full wait the server may have acted on, never replayed;
+# other=0: nor is a reply a TLS error cut off.
 # Retry-After is ignored: a long one is a quota, not a blip.
-_RETRY = Retry(total=3, read=0, backoff_factor=1,
+_RETRY = Retry(total=3, read=0, other=0, backoff_factor=1,
                status_forcelist=(429, *range(500, 600)),
                allowed_methods=None, raise_on_status=False,
                respect_retry_after_header=False)
@@ -51,13 +53,18 @@ def _parse_sse(text: str) -> list[dict]:
     return messages
 
 
+def _pooled_session() -> requests.Session:
+    session = requests.Session()  # agent tool calls come in bursts
+    for scheme in ("https://", "http://"):
+        session.mount(scheme, HTTPAdapter(max_retries=_RETRY))
+    return session
+
+
 class McpBridge:
     def __init__(self, url: str, headers: dict[str, str]):
         self._url = url
         self._auth_headers = dict(headers)
-        self._session = requests.Session()  # agent tool calls come in bursts
-        for scheme in ("https://", "http://"):
-            self._session.mount(scheme, HTTPAdapter(max_retries=_RETRY))
+        self._session, self._pid = _pooled_session(), os.getpid()
         self._session_id: Optional[str] = None
         self._protocol_version: Optional[str] = None
         self._instructions: Optional[str] = None
@@ -156,6 +163,13 @@ class McpBridge:
 
     def _ensure_initialized(self) -> None:
         with self._lock:
+            if self._pid != os.getpid():
+                # a forked process opens its own connections and MCP session:
+                # on its parent's, it read replies meant for another process,
+                # and a stateful server routes them by JSON-RPC id, which
+                # forked processes repeat
+                self._session, self._pid = _pooled_session(), os.getpid()
+                self._initialized = False
             if self._initialized:
                 return
             self._next_id += 1
