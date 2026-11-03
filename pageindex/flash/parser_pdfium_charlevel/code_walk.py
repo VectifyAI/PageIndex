@@ -69,18 +69,19 @@ def _resource_dict_xrefs(pdf_doc, owner_xref: int, sub: str) -> dict[bytes, int]
 
 
 def _page_show_codes(
-    pdf_doc, page_idx: int,
+    pdf_doc, page_idx: int, page_tokens: tuple | None = None,
 ) -> list[tuple[int | None, tuple[int, ...], float]] | None:
-    """Every show op the page paints, in paint order, as ``(font_xref | None, charcode units, horizontal scale)-- including text inside Form XObjects, spliced at their ``Do`` position with the XObject's own font redefinitions (span merger text-content extraction recurses the same way; PDFium's textpage flattens them inline). The recursion runs on a CLONE of the live text state, so a form inherits both the active font and the horizontal scale; a Tz inside the form REPLACES it and never leaks back out. None when the page can't be read."""
+    """Every show op the page paints, in paint order, as ``(font_xref | None, charcode units, horizontal scale)-- including text inside Form XObjects, spliced at their ``Do`` position with the XObject's own font redefinitions (span merger text-content extraction recurses the same way; PDFium's textpage flattens them inline). The recursion runs on a CLONE of the live text state, so a form inherits both the active font and the horizontal scale; a Tz inside the form REPLACES it and never leaks back out. None when the page can't be read. ``page_tokens`` is the page's own stream already run through ``_tokenize_show_operators`` (the caller tokenized it), so it is not parsed twice."""
     page_xref = pdf_doc.page_xref(page_idx)
 
     def walk(stream: bytes, fonts_res: dict[bytes, int],
              xobjs_res: dict[bytes, int], cur_font: int | None, cur_tz: float,
              visited: frozenset, depth: int,
-             out: list[tuple[int | None, tuple[int, ...], float]]) -> None:
+             out: list[tuple[int | None, tuple[int, ...], float]],
+             tokens: tuple | None = None) -> None:
         if depth > 8:
             return
-        flush_ids, fonts, show_text_units, horizontal_scales, xobject_paints = _tokenize_show_operators(stream, cur_tz)
+        flush_ids, fonts, show_text_units, horizontal_scales, xobject_paints = tokens or _tokenize_show_operators(stream, cur_tz)
         dict_index = 0
         for key_value in range(len(show_text_units) + 1):
             while dict_index < len(xobject_paints) and xobject_paints[dict_index][0] == key_value:
@@ -114,10 +115,11 @@ def _page_show_codes(
     try:
         out: list[tuple[int | None, tuple[int, ...], float]] = []
         walk(
-            pdf_doc[page_idx].read_contents(),
+            b"" if page_tokens else pdf_doc[page_idx].read_contents(),
             _resource_dict_xrefs(pdf_doc, page_xref, "Font"),
             _resource_dict_xrefs(pdf_doc, page_xref, "XObject"),
             None, 1.0, frozenset(), 0, out,   # the initial text state starts at scale 1
+            page_tokens,
         )
         return out
     except Exception:
