@@ -53,15 +53,17 @@ def _secure_doc_text(text: str) -> str:
 _PHYSICAL_INDEX_MARKER_RE = re.compile(r"^<physical_index_(\d+)>$")
 
 def _parse_physical_index(raw):
-    if raw is None:
-        return None
-    marker_match = _PHYSICAL_INDEX_MARKER_RE.match(str(raw).strip())
-    if marker_match:
-        return int(marker_match.group(1))
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
+    # Model responses may use a marker or an integer string. Do not turn
+    # True or a fractional number into a plausible physical page.
+    if type(raw) is int:
+        return raw
+    if isinstance(raw, str):
+        marker_match = _PHYSICAL_INDEX_MARKER_RE.fullmatch(raw.strip())
+        if marker_match:
+            return int(marker_match.group(1))
+        if re.fullmatch(r"[0-9]+", raw.strip()):
+            return int(raw)
+    return None
        
 def _validate_physical_indices(toc: list, total_pages: int, start_index: int = 1) -> list:
     """Nullify any physical_index the LLM produced that falls outside the real page range."""
@@ -72,6 +74,8 @@ def _validate_physical_indices(toc: list, total_pages: int, start_index: int = 1
             continue
         val = _parse_physical_index(raw)
         if val is None or not (start_index <= val <= max_idx):
+            entry['_original_physical_index'] = raw
+            entry['_physical_index_error'] = 'invalid or out-of-range model physical_index'
             entry["physical_index"] = None
         else:
             entry["physical_index"] = val
@@ -80,7 +84,8 @@ def _validate_physical_indices(toc: list, total_pages: int, start_index: int = 1
 ################### check title in page #########################################################
 async def check_title_appearance(item, page_list, start_index=1, model=None):    
     title=item['title']
-    if 'physical_index' not in item or item['physical_index'] is None:
+    if (type(item.get('physical_index')) is not int or
+            not start_index <= item['physical_index'] < start_index + len(page_list)):
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title':title, 'page_number': None}
     
     
@@ -926,208 +931,172 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
 
 
 
+class TOCRepairError(ValueError):
+    """A TOC that cannot safely become chapter ranges, with unresolved evidence."""
+
+    def __init__(self, toc, unresolved):
+        self.toc = copy.deepcopy(toc)
+        self.unresolved = copy.deepcopy(unresolved)
+        message = (f"TOC repair left {len(unresolved)} unresolved entries: "
+                   + "; ".join(f"{item['list_index']}: {item['reason']}"
+                               for item in unresolved))
+        super().__init__(message if unresolved else 'No TOC entries could be verified')
+
+
+def _physical_index_errors(toc, page_list_length, start_index=1):
+    """Return invalid entries without editing or reordering the TOC.
+
+    Both sides of every inversion are suspect: either one may be the bad
+    mapping. Only entries outside conflicts can bound a targeted search.
+    Equality and arbitrarily large in-range gaps are valid.
+    """
+    end_index = start_index + page_list_length - 1
+    reasons, valid = {}, []
+    for i, item in enumerate(toc):
+        value = item.get('physical_index')
+        if type(value) is not int:
+            reasons[i] = item.get('_physical_index_error',
+                                  'physical_index must be an integer (not a boolean)')
+        elif not start_index <= value <= end_index:
+            reasons[i] = f'physical_index outside document range [{start_index}, {end_index}]'
+        else:
+            valid.append((i, value))
+    highest = start_index
+    for i, value in valid:
+        if value < highest:
+            reasons[i] = 'physical_index order conflict'
+        highest = max(highest, value)
+    lowest = end_index
+    for i, value in reversed(valid):
+        if value > lowest:
+            reasons[i] = 'physical_index order conflict'
+        lowest = min(lowest, value)
+    return [dict(item, list_index=i, reason=reasons[i],
+                 physical_index=item.get('_original_physical_index', item.get('physical_index')))
+            for i, item in enumerate(toc) if i in reasons]
+
+
 async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, start_index=1, model=None, logger=None):
-    print(f'start fix_incorrect_toc with {len(incorrect_results)} incorrect results')
-    incorrect_indices = {result['list_index'] for result in incorrect_results}
-    
-    end_index = len(page_list) + start_index - 1
-    
-    incorrect_results_and_range_logs = []
-    # Helper function to process and check a single incorrect item
-    async def process_and_check_item(incorrect_item):
-        list_index = incorrect_item['list_index']
-        
-        # Check if list_index is valid
-        if list_index < 0 or list_index >= len(toc_with_page_number):
-            # Return an invalid result for out-of-bounds indices
-            return {
-                'list_index': list_index,
-                'title': incorrect_item['title'],
-                'physical_index': incorrect_item.get('physical_index'),
-                'is_valid': False
-            }
-        
-        # Find the previous correct item
-        prev_correct = None
-        for i in range(list_index-1, -1, -1):
-            if i not in incorrect_indices and i >= 0 and i < len(toc_with_page_number):
-                physical_index = toc_with_page_number[i].get('physical_index')
-                if physical_index is not None:
-                    prev_correct = physical_index
-                    break
-        # If no previous correct item found, use start_index
-        if prev_correct is None:
-            prev_correct = start_index - 1
-        
-        # Find the next correct item
-        next_correct = None
-        for i in range(list_index+1, len(toc_with_page_number)):
-            if i not in incorrect_indices and i >= 0 and i < len(toc_with_page_number):
-                physical_index = toc_with_page_number[i].get('physical_index')
-                if physical_index is not None:
-                    next_correct = physical_index
-                    break
-        # If no next correct item found, use end_index
-        if next_correct is None:
-            next_correct = end_index
-        
-        incorrect_results_and_range_logs.append({
-            'list_index': list_index,
-            'title': incorrect_item['title'],
-            'prev_correct': prev_correct,
-            'next_correct': next_correct
-        })
+    logger = logger or logging.getLogger(__name__)
+    incorrect_indices = {item['list_index'] for item in incorrect_results}
+    end_index = start_index + len(page_list) - 1
 
-        page_contents=[]
-        for page_index in range(prev_correct, next_correct+1):
-            # Add bounds checking to prevent IndexError
-            page_list_idx = page_index - start_index
-            if page_list_idx >= 0 and page_list_idx < len(page_list):
-                page_text = f"<physical_index_{page_index}>\n{page_list[page_list_idx][0]}\n<physical_index_{page_index}>\n\n"
-                page_contents.append(page_text)
-            else:
-                continue
-        content_range = ''.join(page_contents)
-        
-        physical_index_int = await single_toc_item_index_fixer(incorrect_item['title'], content_range, model)
-        
-        # Check if the result is correct
-        check_item = incorrect_item.copy()
-        check_item['physical_index'] = physical_index_int
-        check_result = await check_title_appearance(check_item, page_list, start_index, model)
+    async def locate(item):
+        index = item['list_index']
+        if type(index) is not int or not 0 <= index < len(toc_with_page_number):
+            return dict(item, is_valid=False, reason='list_index outside TOC')
+        lower, upper = start_index, end_index
+        for i in range(index - 1, -1, -1):
+            value = toc_with_page_number[i].get('physical_index')
+            if i not in incorrect_indices and type(value) is int and start_index <= value <= end_index:
+                lower = value
+                break
+        for i in range(index + 1, len(toc_with_page_number)):
+            value = toc_with_page_number[i].get('physical_index')
+            if i not in incorrect_indices and type(value) is int and start_index <= value <= end_index:
+                upper = value
+                break
+        if lower > upper:
+            return dict(item, is_valid=False, reason='confirmed neighbors have conflicting order')
+        logger.info({'list_index': index, 'search_start': lower, 'search_end': upper})
+        content = ''.join(
+            f"<physical_index_{page}>\n{page_list[page - start_index][0]}\n<physical_index_{page}>\n\n"
+            for page in range(lower, upper + 1))
+        candidate = await single_toc_item_index_fixer(item['title'], content, model)
+        if type(candidate) is not int or not lower <= candidate <= upper:
+            return dict(item, is_valid=False, candidate_physical_index=candidate,
+                        reason=f'repair index outside confirmed neighbor range [{lower}, {upper}]')
+        check = await check_title_appearance(dict(item, physical_index=candidate), page_list, start_index, model)
+        if check['answer'] != 'yes':
+            return dict(item, is_valid=False, candidate_physical_index=candidate,
+                        reason='title not confirmed at repair index')
+        return dict(item, is_valid=True, candidate_physical_index=candidate)
 
-        return {
-            'list_index': list_index,
-            'title': incorrect_item['title'],
-            'physical_index': physical_index_int,
-            'is_valid': check_result['answer'] == 'yes'
-        }
+    async def attempt(item):
+        try:
+            return await locate(item)
+        except Exception as exc:
+            if _is_unrecoverable(exc):
+                raise
+            # Keep the original entry, including its index, for the next
+            # bounded attempt. An exception is not a successful repair.
+            return dict(item, is_valid=False, reason=f'{type(exc).__name__}: {exc}')
 
-    # Process incorrect items concurrently
-    tasks = [
-        process_and_check_item(item)
-        for item in incorrect_results
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for item, result in zip(incorrect_results, results):
-        if isinstance(result, Exception):
-            if _is_unrecoverable(result):
-                raise result
-            print(f"Processing item {item} generated an exception: {result}")
-            continue
-    results = [result for result in results if not isinstance(result, Exception)]
+    tasks = [asyncio.create_task(attempt(item)) for item in incorrect_results]
+    try:
+        results = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
-    # Update the toc_with_page_number with the fixed indices and check for any invalid results
-    invalid_results = []
+    # Concurrent repairs can be individually plausible but conflict with
+    # each other. Validate the proposed batch before committing any index;
+    # an unresolved original index is not a confirmed anchor.
+    proposed = copy.deepcopy(toc_with_page_number)
+    for index in incorrect_indices:
+        if type(index) is int and 0 <= index < len(proposed):
+            proposed[index]['physical_index'] = None
     for result in results:
         if result['is_valid']:
-            # Add bounds checking to prevent IndexError
-            list_idx = result['list_index']
-            if 0 <= list_idx < len(toc_with_page_number):
-                toc_with_page_number[list_idx]['physical_index'] = result['physical_index']
-            else:
-                # Index is out of bounds, treat as invalid
-                invalid_results.append({
-                    'list_index': result['list_index'],
-                    'title': result['title'],
-                    'physical_index': result['physical_index'],
-                })
+            proposed[result['list_index']]['physical_index'] = result['candidate_physical_index']
+    conflicts = {item['list_index']: item['reason']
+                 for item in _physical_index_errors(proposed, len(page_list), start_index)}
+    unresolved = []
+    for result in results:
+        index = result['list_index']
+        if result['is_valid'] and index in conflicts:
+            result.update(is_valid=False, reason=conflicts[index])
+        if result['is_valid']:
+            toc_with_page_number[index]['physical_index'] = result['candidate_physical_index']
+            toc_with_page_number[index].pop('_original_physical_index', None)
+            toc_with_page_number[index].pop('_physical_index_error', None)
         else:
-            invalid_results.append({
-                'list_index': result['list_index'],
-                'title': result['title'],
-                'physical_index': result['physical_index'],
-            })
-
-    logger.info(f'incorrect_results_and_range_logs: {incorrect_results_and_range_logs}')
-    logger.info(f'invalid_results: {invalid_results}')
-
-    return toc_with_page_number, invalid_results
-
+            result.pop('is_valid')
+            unresolved.append(result)
+    logger.info({'unresolved_toc_entries': unresolved})
+    return toc_with_page_number, unresolved
 
 
 async def fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results, start_index=1, max_attempts=3, model=None, logger=None):
-    print('start fix_incorrect_toc')
-    fix_attempt = 0
-    current_toc = toc_with_page_number
-    current_incorrect = incorrect_results
-
-    while current_incorrect:
-        print(f"Fixing {len(current_incorrect)} incorrect results")
-        
-        current_toc, current_incorrect = await fix_incorrect_toc(current_toc, page_list, current_incorrect, start_index, model, logger)
-                
-        fix_attempt += 1
-        if fix_attempt >= max_attempts:
-            logger.info("Maximum fix attempts reached")
+    if type(max_attempts) is not int or max_attempts < 1:
+        raise ValueError('max_attempts must be a positive integer')
+    current_toc, unresolved = toc_with_page_number, incorrect_results
+    for attempt in range(1, max_attempts + 1):
+        if not unresolved:
             break
-    
-    return current_toc, current_incorrect
-
-
+        current_toc, unresolved = await fix_incorrect_toc(
+            current_toc, page_list, unresolved, start_index, model, logger)
+        unresolved = [dict(item, attempts=attempt) for item in unresolved]
+    return current_toc, unresolved
 
 
 ################### verify toc #########################################################
 async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
-    print('start verify_toc')
-    # Find the last non-None physical_index
-    last_physical_index = None
-    for item in reversed(list_result):
-        if item.get('physical_index') is not None:
-            last_physical_index = item['physical_index']
-            break
-    
-    # Early return if we don't have valid physical indices
-    if last_physical_index is None or last_physical_index < len(page_list)/2:
-        return 0, []
-    
-    # Determine which items to check
-    if N is None:
-        print('check all items')
-        sample_indices = range(0, len(list_result))
-    else:
-        N = min(N, len(list_result))
-        print(f'check {N} items')
-        sample_indices = random.sample(range(0, len(list_result)), N)
-
-    # Prepare items with their list indices
-    indexed_sample_list = []
-    for idx in sample_indices:
-        item = list_result[idx]
-        # Skip items with None physical_index (these were invalidated by validate_and_truncate_physical_indices)
-        if item.get('physical_index') is not None:
-            item_with_index = item.copy()
-            item_with_index['list_index'] = idx  # Add the original index in list_result
-            indexed_sample_list.append(item_with_index)
-
-    # Run checks concurrently
-    tasks = [
-        check_title_appearance(item, page_list, start_index, model)
-        for item in indexed_sample_list
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # Process results (skip exceptions from failed LLM calls)
+    invalid = _physical_index_errors(list_result, len(page_list), start_index)
+    invalid_indices = {item['list_index'] for item in invalid}
+    sample_indices = (list(range(len(list_result))) if N is None else
+                      random.sample(range(len(list_result)), min(N, len(list_result))))
+    # Deterministic validation always covers the whole TOC, even when
+    # appearance checks are sampled. Never index page_list with bad data.
+    indexed = [dict(list_result[i], list_index=i) for i in sample_indices if i not in invalid_indices]
+    results = await asyncio.gather(*(check_title_appearance(item, page_list, start_index, model)
+                                     for item in indexed), return_exceptions=True)
+    unresolved = {item['list_index']: item for item in invalid}
     correct_count = 0
-    incorrect_results = []
-    for result in results:
+    for item, result in zip(indexed, results):
         if isinstance(result, BaseException):
-            if _is_unrecoverable(result):
+            if not isinstance(result, Exception) or _is_unrecoverable(result):
                 raise result
-            continue
-        if result['answer'] == 'yes':
+            unresolved[item['list_index']] = dict(item, reason=f'{type(result).__name__}: {result}')
+        elif result['answer'] == 'yes':
             correct_count += 1
         else:
-            incorrect_results.append(result)
-
-    # Calculate accuracy
-    checked_count = sum(1 for r in results if not isinstance(r, BaseException))
-    accuracy = correct_count / checked_count if checked_count > 0 else 0
-    print(f"accuracy: {accuracy*100:.2f}%")
-    return accuracy, incorrect_results
-
-
-
+            unresolved[item['list_index']] = dict(item, reason='title not confirmed at physical_index')
+    checked_count = len(set(sample_indices) | invalid_indices)
+    accuracy = correct_count / checked_count if checked_count else 0
+    return accuracy, [unresolved[i] for i in range(len(list_result)) if i in unresolved]
 
 
 ################### main process #########################################################
@@ -1142,15 +1111,10 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     else:
         toc_with_page_number = process_no_toc(page_list, start_index=start_index, model=opt.model, logger=logger)
             
-    toc_with_page_number = [item for item in toc_with_page_number if item.get('physical_index') is not None] 
-    
-    toc_with_page_number = validate_and_truncate_physical_indices(
-        toc_with_page_number, 
-        len(page_list), 
-        start_index=start_index, 
-        logger=logger
-    )
-    
+    # Keep missing/invalid entries for repair instead of silently losing
+    # their titles before verification.
+    index_errors = _physical_index_errors(toc_with_page_number, len(page_list), start_index)
+
     accuracy, incorrect_results = await verify_toc(page_list, toc_with_page_number, start_index=start_index, model=opt.model)
         
     logger.info({
@@ -1160,8 +1124,10 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
     })
     if accuracy == 1.0 and len(incorrect_results) == 0:
         return toc_with_page_number
-    if accuracy > 0.6 and len(incorrect_results) > 0:
+    if incorrect_results and (index_errors or accuracy > 0.6):
         toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger)
+        if incorrect_results:
+            raise TOCRepairError(toc_with_page_number, incorrect_results)
         return toc_with_page_number
     else:
         if mode == 'process_toc_with_page_numbers':
@@ -1169,7 +1135,7 @@ async def meta_processor(page_list, mode=None, toc_content=None, toc_page_list=N
         elif mode == 'process_toc_no_page_numbers':
             return await meta_processor(page_list, mode='process_no_toc', start_index=start_index, opt=opt, logger=logger)
         else:
-            raise Exception('Processing failed')
+            raise TOCRepairError(toc_with_page_number, incorrect_results)
         
  
 async def process_large_node_recursively(node, page_list, opt=None, logger=None, split=None):
@@ -1314,33 +1280,16 @@ def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=
 
 
 def validate_and_truncate_physical_indices(toc_with_page_number, page_list_length, start_index=1, logger=None):
+    """Invalidate bad physical indices, preserving their original evidence.
+
+    The repair pipeline uses the same validation without nullifying values,
+    so its unresolved results still name each entry's original page.
     """
-    Validates and truncates physical indices that exceed the actual document length.
-    This prevents errors when TOC references pages that don't exist in the document (e.g. the file is broken or incomplete).
-    """
-    if not toc_with_page_number:
-        return toc_with_page_number
-    
-    max_allowed_page = page_list_length + start_index - 1
-    truncated_items = []
-    
-    for i, item in enumerate(toc_with_page_number):
-        if item.get('physical_index') is not None:
-            original_index = item['physical_index']
-            if original_index > max_allowed_page:
-                item['physical_index'] = None
-                truncated_items.append({
-                    'title': item.get('title', 'Unknown'),
-                    'original_index': original_index
-                })
-                if logger:
-                    logger.info(f"Removed physical_index for '{item.get('title', 'Unknown')}' (was {original_index}, too far beyond document)")
-    
-    if truncated_items and logger:
-        logger.info(f"Total removed items: {len(truncated_items)}")
-        
-    print(f"Document validation: {page_list_length} pages, max allowed index: {max_allowed_page}")
-    if truncated_items:
-        print(f"Truncated {len(truncated_items)} TOC items that exceeded document length")
-     
+    for error in _physical_index_errors(toc_with_page_number, page_list_length, start_index):
+        item = toc_with_page_number[error['list_index']]
+        item['_original_physical_index'] = error['physical_index']
+        item['_physical_index_error'] = error['reason']
+        item['physical_index'] = None
+        if logger:
+            logger.info(error)
     return toc_with_page_number
