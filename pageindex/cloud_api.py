@@ -55,7 +55,7 @@ class CloudAPI:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Upload a PDF document for processing. The system will automatically process both tree generation and OCR.
+        Upload a PDF document for processing; the tree is built in the background.
         Immediately returns a document identifier (`doc_id`) for subsequent operations.
 
         Args:
