@@ -1246,7 +1246,7 @@ def _text_only(chunks) -> Iterator[str]:
 def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
-                folder_id=None,
+                folder_id=None, _context=None,
                 ) -> "tuple[Any, list, str, Optional[_Replies]]":
     """The chat lane's shared prologue: validated history, doc targeting,
     and the configured agent. Returns (agent, input items, model name,
@@ -1254,10 +1254,13 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     messages = list(messages)
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    if _context is None:
+        block = targeting_block(client, doc_id, folder_id)
+        managed = _managed_instructions(client, system_texts)
+    else:
+        block, managed = _context
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
-    managed = _managed_instructions(client, system_texts)
     agent = _openai_agent(client, "chat", model_name, managed,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
@@ -1623,6 +1626,47 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     return ChatStream(text=lambda: _weave(events(), options), events=events)
 
 
+async def _run_chat_completion(client, agent, items, model_name, replies,
+                               max_turns=None):
+    """One non-streamed turn, shared by the stateless and memory entries.
+
+    Runner owns the tool loop; transcript conversion and cleanup are the
+    same on both surfaces.
+    """
+    import openai
+    from agents import Runner
+    from agents.exceptions import AgentsException, MaxTurnsExceeded
+    recorded: dict = {}
+    _record_chat_finish(agent, recorded)
+    run_kwargs = _run_kwargs(max_turns)
+    recorder = _usage_recorder()
+    try:
+        result = await _run_closing(agent,
+            Runner.run(agent, input=items, hooks=recorder,
+                       **run_kwargs))
+    except (MaxTurnsExceeded, AgentsException,
+            openai.OpenAIError) as exc:
+        raise _with_usage(
+            _translate_run_error(exc, max_turns, "chat", client),
+            _openai_usage(recorder.responses)) from exc
+    return _ChatCompletion({
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": _reported_model(model_name),
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant",
+                        "content": result.final_output or ""},
+            "finish_reason": recorded.get("finish_reason") or "stop",
+        }],
+        "usage": _openai_usage(result.raw_responses),
+        "messages": _chat_transcript(
+            agent, result.to_input_list()[len(items):], replies),
+    })
+
+
+
 def run_chat_completions(client, messages, stream: bool = False,
                          doc_id=None, temperature: Optional[float] = None,
                          stream_metadata: bool = False,
@@ -1664,6 +1708,9 @@ def run_chat_completions(client, messages, stream: bool = False,
         top_p=top_p, reasoning_effort=reasoning_effort,
         extra_body=extra_body, max_tokens=max_tokens, backend=backend,
         extra_headers=extra_headers, folder_id=folder_id)
+    if not stream:
+        return _run_sync(_run_chat_completion(
+            client, agent, items, model_name, replies, max_turns))
     reported_model = _reported_model(model_name)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
@@ -1671,32 +1718,6 @@ def run_chat_completions(client, messages, stream: bool = False,
     import openai
     from agents import Runner
     from agents.exceptions import AgentsException, MaxTurnsExceeded
-    if not stream:
-        recorder = _usage_recorder()
-        try:
-            result = _run_sync(_run_closing(agent,
-                Runner.run(agent, input=items, hooks=recorder,
-                           **run_kwargs)))
-        except (MaxTurnsExceeded, AgentsException,
-                openai.OpenAIError) as exc:
-            raise _with_usage(
-                _translate_run_error(exc, max_turns, "chat", client),
-                _openai_usage(recorder.responses)) from exc
-        return _ChatCompletion({
-            "id": f"chatcmpl-{uuid.uuid4().hex}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": reported_model,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant",
-                            "content": result.final_output or ""},
-                "finish_reason": recorded.get("finish_reason") or "stop",
-            }],
-            "usage": _openai_usage(result.raw_responses),
-            "messages": _chat_transcript(
-                agent, result.to_input_list()[len(items):], replies),
-        })
 
     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
