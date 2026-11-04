@@ -106,6 +106,12 @@ print(answer)
 
 ### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
 
+To inspect Flash indexing costs, use the opt-in phase measurements and
+[reproducible batch runner](examples/FLASH_MEASUREMENT.md). Reports keep
+wall time, overlapping phases, request/retry counts and worker peak memory
+separate from the generated tree. The default benchmark makes no model
+calls; synthetic fixture measurements are explicitly labeled.
+
 Configure other models, streaming, multi-document search, citations, and more.
 
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)

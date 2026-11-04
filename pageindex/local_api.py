@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from .indexing_metrics import measured_phase, phase, record_parameters
 from .errors import PageIndexAPIError
 from .local_store import DocStore
 from .naming import sanitize_filename, truncate_filename
@@ -111,6 +112,7 @@ class LocalAPI:
             )
         if mode is None:
             mode = "flash"
+        record_parameters(entry_point="local_submit_document", mode=mode)
         if mode == "standard" and (self._summary_max_words is not None
                                    or self._summary_concurrency is not None
                                    or self._summary_reasoning_effort is not None):
@@ -171,7 +173,7 @@ class LocalAPI:
         from .utils import remove_fields
         # Check-then-write under the store lock; the early pre-check above
         # is advisory only.
-        with self._store.lock():
+        with phase("storage"), self._store.lock():
             meta = {
                 "id": doc_id,
                 "name": self._unique_doc_name(doc_name),
@@ -220,6 +222,7 @@ class LocalAPI:
             stack.extend(node.get("nodes") or [])
 
     @staticmethod
+    @measured_phase("parse_pages")
     def _extract_page_texts(file_path: str) -> list[str]:
         import PyPDF2
         with open(file_path, "rb") as f:
@@ -266,10 +269,11 @@ class LocalAPI:
         if reason:
             raise PageIndexAPIError(f"Failed to submit document: {reason}")
         write_node_id(structure)
-        description = generate_doc_description(
-            create_clean_structure_for_description(structure, top_level_only=True),
-            model=self._summary_model,
-        )
+        with phase("document_description"):
+            description = generate_doc_description(
+                create_clean_structure_for_description(structure, top_level_only=True),
+                model=self._summary_model,
+            )
         return structure, description
 
     # ── tree / ocr ──
