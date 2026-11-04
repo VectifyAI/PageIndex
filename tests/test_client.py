@@ -3437,6 +3437,38 @@ def test_claude_none_sends_the_models_own_off_switch(monkeypatch):
         assert sent == [params]
 
 
+def test_a_refusal_is_one_litellm_puts_on_no_cause_or_on_a_param():
+    """A 400, or a 422, counts against a field the request carries where
+    LiteLLM names no cause or names a param; never where it names another
+    cause, a subclass of its own for it (too long, a content filter, a
+    proxy's guardrail)."""
+    litellm = pytest.importorskip("litellm")
+    from litellm import exceptions
+    from pageindex.utils import LLMRetriesExhausted, _refusal
+    args = {"message": "m", "model": "m", "llm_provider": "openai"}
+    assert _refusal(exceptions.BadRequestError(**args))
+    assert _refusal(exceptions.UnsupportedParamsError(**args))
+    assert _refusal(LLMRetriesExhausted("unprocessable", status_code=422))
+    for named in (exceptions.ContextWindowExceededError(**args),
+                  exceptions.ContentPolicyViolationError(**args),
+                  exceptions.RejectedRequestError(**args, request_data={})):
+        assert not _refusal(named), type(named)
+    assert not _refusal(LLMRetriesExhausted("down", status_code=500))
+    assert not _refusal(litellm.AuthenticationError(**args))
+
+
+def test_litellm_still_drops_a_databricks_switch_beside_none():
+    """Fails once LiteLLM keeps a thinking switch sent beside
+    reasoning_effort "none" on Databricks, as it does on Claude's other
+    routes: then the fill hook (local_chat._register_fill) needn't take the
+    "none" off any more."""
+    pytest.importorskip("litellm")
+    from litellm.utils import get_optional_params
+    assert "thinking" not in get_optional_params(
+        model="databricks-claude-sonnet-5", custom_llm_provider="databricks",
+        reasoning_effort="none", thinking={"type": "disabled"})
+
+
 @pytest.mark.parametrize("model", ["claude-haiku-5-5", "claude-sonnet-5", "claude-opus-5",
                                    "claude-sonnet-5-5"])
 def test_litellm_still_sends_claude_no_thinking_for_none(model):

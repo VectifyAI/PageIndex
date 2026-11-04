@@ -334,11 +334,13 @@ def _refuse_cache_off(model, sent):
 
 def _refusal(error):
     """A refusal (400, or 422 from servers that so reject unknown fields) a
-    field the request carries may cause; never a prompt too long for the
-    model, nor one a content filter stopped."""
-    from litellm.exceptions import ContentPolicyViolationError, ContextWindowExceededError
+    field the request carries may cause: one LiteLLM puts on no cause, or on
+    a param. Never one it names another cause for: a prompt too long for the
+    model, a content filter, a proxy's guardrail, an image it can't fetch."""
+    from litellm.exceptions import BadRequestError, UnsupportedParamsError
     return (getattr(error, "status_code", None) in (400, 422)
-            and not isinstance(error, (ContextWindowExceededError, ContentPolicyViolationError)))
+            and (type(error) is BadRequestError or not isinstance(error, BadRequestError)
+                 or isinstance(error, UnsupportedParamsError)))
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -454,9 +456,12 @@ _CLAUDE_NONE = (
 
 
 def _claude_row(model):
-    """The model's _CLAUDE_NONE switch, where the table has its row."""
+    """The model's _CLAUDE_NONE switch, where the table has its row: its id,
+    less a snapshot date (Anthropic's -YYYYMMDD), names the row's version
+    and no further one."""
+    alias = re.sub(r"-\d{8}(?!\d)", "", model or "")
     return next((swap for name, swap in _CLAUDE_NONE
-                 if re.search(rf"{re.escape(name)}(?![-._]?\d{{1,2}}(?!\d))", model or "")), None)
+                 if re.search(rf"{re.escape(name)}(?![-._]?\d)", alias)), None)
 
 
 def claude_none_switch(model):
