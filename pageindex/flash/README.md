@@ -46,6 +46,14 @@ Writes the tree to `results/<name>_structure.json`.
         }
     ],
     "toc_source": str,  # "detected" | "bookmarks" | "hybrid" | "pages" | "unreadable"
+    "diagnostics": {
+        "page_count": int,
+        "text_page_count": int,
+        "textless_pages": [int],  # 1-based pages with no non-whitespace extracted text
+        "section_opener_count": int,
+        "assembled_heading_count": int,
+        "layout_status": str,
+    },
 }
 ```
 
@@ -54,8 +62,52 @@ Writes the tree to `results/<name>_structure.json`.
 detected sections. `"pages"` means the layout yielded no hierarchy, so every
 page became one node titled `Page N`; past `FLAT_TREE_MAX_NODES` (10) pages that
 flat tree comes back without summaries or optimization, and the local client and
-CLI refuse it. `"unreadable"` means no page carries text and `structure` is
-empty.
+CLI refuse it. `"unreadable"` means no page retains text after layout processing
+and `structure` is empty; the parser may still have extracted text initially.
+
+### Diagnosing extraction failures
+
+`diagnostics` records what the layout pipeline found, before bookmarks, the
+page fallback, or model optimization. It contains counts and page numbers,
+without document text. `text_page_count` and `textless_pages` measure non-whitespace
+text in the parser's spans before layout cleanup, including line-number removal.
+They do not measure whether the text is meaningful or whether it survives cleanup.
+`section_opener_count` counts the candidates returned
+by the section-opener detector; it is not a count of every possible heading.
+`assembled_heading_count` includes nested headings before outline validation.
+`layout_status` is one of:
+
+- `accepted`: the layout outline survived validation.
+- `no_headings`: outline assembly produced no headings.
+- `chapter_validation_failed`: the assembled outline failed the chapter
+  count/coverage check.
+- `heading_gap_too_large`: the assembled outline failed the heading-gap check.
+
+A bookmark tree can still succeed when the layout outline fails; check
+`toc_source` for the final source. Text-only PDFs can have plenty of readable
+text without the visual heading signals Flash needs to form a hierarchy.
+Zero extracted text does not prove that a PDF is scanned: its text encoding
+may also be unreadable to the parser.
+If `text_page_count` is positive but `toc_source` is `"unreadable"`, text was
+extracted but none remained after layout processing; inspect layout filtering.
+
+Inspect the result without model calls:
+
+```python
+from pageindex.flash import page_index_flash
+from pageindex.flash.api import flash_rejection_reason
+
+result = page_index_flash("document.pdf", summary=False, optimize=False)
+print(result["diagnostics"])
+print(flash_rejection_reason(result))  # None if the managed pipelines accept it
+```
+
+The local SDK and CLI include these diagnostics in Flash refusal messages.
+For readable text without a usable hierarchy, try standard indexing
+(`mode="standard"` in the SDK or `--mode standard` in the CLI). When text
+extraction itself fails, check the PDF's text layer or run OCR first.
+These diagnostics locate the failed stage; they do not identify the cause
+of every missed heading or change which outlines Flash accepts.
 
 Every page is in some node: a hierarchy that starts after page 1 is preceded by
 a `Preface` node covering the pages before it, as in standard mode.

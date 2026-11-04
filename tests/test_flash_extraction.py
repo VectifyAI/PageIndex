@@ -1099,6 +1099,9 @@ def test_toc_source_is_always_present(tmp_path):
     assert result["toc_source"] == "detected"
     assert [node["title"] for node in result["structure"]] == [
         "Preface", "Budget", "Team"]
+    assert result["diagnostics"]["layout_status"] == "accepted"
+    assert result["diagnostics"]["assembled_heading_count"] >= 2
+    assert result["diagnostics"]["text_page_count"] == 3
 
 
 def test_no_hierarchy_falls_back_to_page_nodes(tmp_path):

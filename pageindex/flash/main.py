@@ -131,6 +131,9 @@ def extract_toc(
     # per-page (view box, /Rotate) comes from the same engine (PDFium) that
     # produced the block coordinates, so the geometry frame is consistent.
     parsed, page_meta = parse_charlevel_meta_parallel(doc_handle, workers=workers)
+    # Snapshot parser output before layout cleanup (for example line-number removal).
+    textless_pages = [i for i, spans in enumerate(parsed, 1)
+                      if not any(span.text.strip() for span in spans)]
 
     # ----- 2) Per-page layout classification ----------------------------------
     # Heading coordinate projection uses the page viewport.
@@ -229,6 +232,8 @@ def extract_toc(
     from .heading_detection import find_section_openers as _find_section_openers
     title_page_idx = title_winner.page.page_index if title_winner is not None else 0
     section_openers = _find_section_openers(doc, title_page_idx)
+    # Outline assembly can append general candidates to this list in place.
+    section_opener_count = len(section_openers)
 
     # ----- 10) Extend labeled sections and claim body blocks ------------
     # Each labeled heading keeps its label type; body blocks are marked with
@@ -253,6 +258,13 @@ def extract_toc(
 
     # ----- 11) Outline assembly and validation gate ---------------------
     outline_nodes = assemble_outline(doc, section_openers)
+    pending = list(outline_nodes)
+    assembled_heading_count = 0
+    while pending:
+        node = pending.pop()
+        assembled_heading_count += 1
+        pending.extend(node.child_nodes)
+    layout_status = "accepted" if outline_nodes else "no_headings"
     # Validate the assembled outline. Structured outlines must cover enough
     # chapters; unstructured outlines are filtered by density gap.
     # The abstract/references signal rides along with this gate: it is False on
@@ -261,6 +273,7 @@ def extract_toc(
     if is_outline_valid(doc, outline_nodes):
         if not is_chapter_outline_valid(doc, outline_nodes):
             outline_nodes = []
+            layout_status = "chapter_validation_failed"
         has_abstract_or_references = False
     else:
         mark_outline_block_types(outline_nodes)
@@ -270,6 +283,7 @@ def extract_toc(
             and compute_max_heading_gap(outline_nodes, 1)["max_gap"] > 0.85 * page_count
         ):
             outline_nodes = []
+            layout_status = "heading_gap_too_large"
         has_abstract_or_references = has_table_or_prominent(outline_nodes)
     if outline_nodes:
         structure = outline_to_dict_tree(outline_nodes, total_pages=len(pages))
@@ -296,6 +310,14 @@ def extract_toc(
         "has_abstract_or_references_section": has_abstract_or_references,
         "page_texts": page_texts,
         "toc_source": "detected",
+        "diagnostics": {
+            "page_count": len(pages),
+            "text_page_count": len(parsed) - len(textless_pages),
+            "textless_pages": textless_pages,
+            "section_opener_count": section_opener_count,
+            "assembled_heading_count": assembled_heading_count,
+            "layout_status": layout_status,
+        },
     }
     if use_embedded_toc:
         from .embedded_toc import apply_embedded_toc
