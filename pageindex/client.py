@@ -442,16 +442,26 @@ class PageIndexClient:
             cap + min(32, cap) calls run at once. Defaults to 128.
         summary_reasoning_effort (str, optional): Local flash mode only —
             the reasoning effort sent with each node-summary call, over any
-            in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...; a
-            model without the setting drops it). Defaults to ``"none"``
-            unless LiteLLM lists the model as refusing it, and stops
-            sending it once a prompt the server refused with it (HTTP
-            400) goes through without it (never on ``claude-code/``,
-            whose effort is checked up front). ``"none"`` raises on a model
-            whose thinking can't be turned off (Claude Opus 5.5 and Fable
-            under ``anthropic/``, ``bedrock/``, ``vertex_ai/`` or
-            ``azure_ai/``) and on any ``claude-code/`` model; the default
-            runs them at ``"low"``.
+            in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...):
+            a level LiteLLM's model map says the model doesn't take raises
+            before any model call, as chat does (``"none"`` on gpt-5-nano
+            names ``"minimal"``), and a model LiteLLM doesn't know on an
+            OpenAI-format API gets it as is. Defaults to the least
+            thinking the model takes, trying ``"none"``, ``"minimal"``,
+            ``"low"`` in turn (a Claude model under ``anthropic/``,
+            ``bedrock/``, ``vertex_ai/``, ``azure_ai/`` or ``databricks/``:
+            ``thinking`` ``disabled``, then ``between_tools``, then
+            ``"low"``): a level LiteLLM would not send is skipped,
+            ``"minimal"`` is tried only where LiteLLM's model map lists
+            it, a model LiteLLM doesn't know on an OpenAI-format API gets
+            the effort as is, and a level the server refuses (HTTP 400)
+            gives way to the next, then to none sent, once a prompt goes
+            through a step down; the process then skips it (never on
+            ``claude-code/``, whose effort is checked up front).
+            ``"none"`` also raises on a model whose thinking can't be
+            turned off (Claude Opus 5.5 and Fable under those routes) and
+            on any ``claude-code/`` model; the default runs them at
+            ``"low"``.
             Expand keeps the model's own default. A
             ``mode="standard"`` submit refuses any of the summary knobs.
         use_embedded_toc (bool, optional): Local mode only — whether flash
@@ -468,7 +478,24 @@ class PageIndexClient:
         index_backend (dict, optional): Local mode only — connection
             overrides for the indexing lane's LLM calls. Keys are
             LiteLLM's own connection params — ``api_key``, ``api_base``,
-            ``api_version``, ``aws_*``, … — passed through verbatim.
+            ``api_version``, ``aws_*``, … — passed through verbatim. A
+            ``reasoning_effort`` here reaches every indexing call as
+            chosen: a level LiteLLM's model map says the indexing model
+            doesn't take raises before any model call, as chat does, and a
+            model LiteLLM doesn't know on an OpenAI-format API gets it as
+            is. Where LiteLLM's own rule says a model takes
+            ``prompt_cache_options`` (its model map's flag, else its
+            GPT-5.6-on name rule) and the route's map entry, where it has
+            one, prices a cache write above input, indexing sends
+            ``prompt_cache_options={"mode": "explicit"}``, which writes
+            nothing (OpenAI's GPT-5.6 on, direct or through gateways such
+            as OpenRouter; with a ``base_model`` here, as LiteLLM prices
+            that), and stops on a server that refuses it (HTTP 400 or
+            422). A cache choice here wins: ``prompt_cache_options``
+            (``{"mode": "implicit"}`` keeps the model's default caching,
+            which pays for the writes and lets a document indexed again
+            within the cache's lifetime, 30 minutes on OpenAI, read them
+            back), ``prompt_cache_key`` or ``prompt_cache_retention``.
         chat_backend (dict, optional): Default connection overrides for
             the chat surfaces — a chat-side argument like ``chat_model``,
             so on a cloud client it selects own-model chat. A call's own

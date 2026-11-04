@@ -59,9 +59,23 @@ class LocalAPI:
     def _with_backend(self, usage, func, *args):
         """Scope the indexing lane's connection overrides and the `usage`
         tally around one operation — runs inside whatever thread
-        run_off_loop picked."""
-        from .utils import _llm_backend, _llm_usage
-        token = _llm_backend.set(self._index_backend)
+        run_off_loop picked. A reasoning effort among the overrides
+        reaches each indexing model as chosen, or fails first
+        (chosen_effort)."""
+        from .integrations.claude_agent_sdk import is_claude_code
+        from .utils import _llm_backend, _llm_usage, chosen_effort
+        backend = self._index_backend
+        if backend and backend.get("reasoning_effort"):
+            for model in {self._model, self._summary_model}:
+                if not model or is_claude_code(model):
+                    continue
+                forced = chosen_effort(model, backend["reasoning_effort"],
+                                       name='index_backend["reasoning_effort"]'
+                                       ).get("allowed_openai_params")
+                if forced:
+                    backend = {**backend, "allowed_openai_params": sorted(
+                        {*(backend.get("allowed_openai_params") or ()), *forced})}
+        token = _llm_backend.set(backend)
         usage_token = _llm_usage.set(usage)
         try:
             return func(*args)

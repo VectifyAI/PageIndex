@@ -130,28 +130,33 @@ _PUBLISHED_MAP_URL = os.environ.get(
 _published = None
 _published_lock = threading.Lock()
 _filled = False
+_MAP_RETRY = 300  # seconds a failed download stands before the next may start
+_retry_published_at = float("inf")
 
 
 def _published_map():
     """LiteLLM's published model map as downloaded, a Future of its bytes:
     one download per process, on a daemon thread, that runs on any thread
-    wait for together."""
-    global _published
+    wait for together; a failed one, _MAP_RETRY on, gives way to another."""
+    global _published, _retry_published_at
     with _published_lock:
-        if _published is not None:
+        if _published is not None and time.monotonic() < _retry_published_at:
             return _published
         from concurrent.futures import Future
         future = _published = Future()
+        _retry_published_at = float("inf")
         # running: a cancelled waiter can't cancel it for the others
         future.set_running_or_notify_cancel()
 
     def fetch():
+        global _retry_published_at
         try:
             import httpx
             response = httpx.get(_PUBLISHED_MAP_URL, timeout=5)
             response.raise_for_status()
             future.set_result(response.content)
         except Exception as exc:
+            _retry_published_at = time.monotonic() + _MAP_RETRY
             future.set_exception(exc)
     threading.Thread(target=fetch, daemon=True).start()
     return future
@@ -197,21 +202,145 @@ async def learn_published_models() -> bool:
     return _filled
 
 
-def learn_model_if_effort_dropped(model) -> None:
-    """learn_published_models when LiteLLM's packaged map lacks `model` and
-    LiteLLM so drops a reasoning_effort sent with it: drop_params drops it
-    unseen, leaving no refusal to learn on."""
+_MAP_WAIT = 3  # seconds summaries wait on the download, which goes on past it
+
+
+def _in_model_map(model):
+    """Whether LiteLLM's map holds `model` itself, as LiteLLM's own lookup
+    finds it (provider included); its fallback rules answer ids the map
+    lacks with a key the map doesn't hold."""
+    import litellm
+    try:
+        return litellm.get_model_info(model).get("key") in litellm.model_cost
+    except Exception:
+        return False
+
+
+def _openai_format(provider):
+    """A provider whose API takes OpenAI's own request fields: LiteLLM's
+    list of OpenAI-compatible ones, and Azure OpenAI, OpenAI's own API under
+    deployment names."""
+    import litellm
+    return provider == "azure" or provider in litellm.openai_compatible_providers
+
+
+def _effort_dropped_unmapped(model):
+    """LiteLLM's packaged map lacks `model` and LiteLLM so drops a
+    reasoning_effort sent with it: drop_params drops it unseen, leaving no
+    refusal to learn on. Not on an OpenAI-format API, where the effort is
+    the API's own field and goes as is (summary_effort_ladder)."""
     import litellm
     model = _litellm_model(model)
     try:
         litellm.get_model_info(model)
-        return  # in the packaged map: the published one adds nothing for it
+        return False  # in the packaged map: the published one adds nothing for it
     except Exception:
         pass
     provider, name = model.split("/", 1)
-    if "reasoning_effort" not in (litellm.get_supported_openai_params(
-            model=name, custom_llm_provider=provider) or []):
-        run_off_loop(asyncio.run, learn_published_models())
+    return not _openai_format(provider) and "reasoning_effort" not in (
+        litellm.get_supported_openai_params(model=name, custom_llm_provider=provider) or [])
+
+
+def start_learning_if_effort_dropped(model) -> None:
+    """On a daemon thread, starts the published map's download where
+    learn_model_if_effort_dropped will want it, so the document is read
+    meanwhile."""
+    def start():
+        try:
+            if not _MAP_SET_BY_USER and _effort_dropped_unmapped(model):
+                _published_map()
+        except Exception:
+            pass  # learn_model_if_effort_dropped meets it where it can raise
+    threading.Thread(target=start, daemon=True).start()
+
+
+def learn_model_if_effort_dropped(model) -> None:
+    """learn_published_models where _effort_dropped_unmapped, waiting
+    _MAP_WAIT at most for the download: past it the summaries go on with
+    the effort dropped, and a later document in the process learns it."""
+    if _MAP_SET_BY_USER or not _effort_dropped_unmapped(model):
+        return
+    from concurrent.futures import wait
+    if wait([_published_map()], timeout=_MAP_WAIT).not_done:
+        return
+    run_off_loop(asyncio.run, learn_published_models())
+
+
+_refusals = {}  # (model, base URL) -> what its server refused (HTTP 400 or 422), for the process
+
+
+def _refused(model, base):
+    """What `model` at `base` refused in this process, a set its callers
+    read and add to: the request fields chat dropped, the summary efforts
+    that gave way, indexing's prompt_cache_options."""
+    return _refusals.setdefault((model, base), set())
+
+
+def _base(sent):
+    return sent.get("api_base") or sent.get("base_url")
+
+
+_CACHE_CHOICES = ("prompt_cache_options", "prompt_cache_key", "prompt_cache_retention")
+
+
+def _billed_cache_writes(model):
+    """True where LiteLLM's own rule says `model` takes prompt_cache_options
+    (its map's flag, else its GPT-5.6-on name rule) and the route's own map
+    entry, or its bare name's, prices a cache write above input; an id the
+    map lacks is taken at the rule's word. openrouter/openai/gpt-6-luna:nitro
+    reads as openrouter/openai/gpt-6-luna."""
+    import litellm
+    try:
+        from litellm.integrations.anthropic_cache_control_hook import (
+            supports_openai_prompt_cache_breakpoint)
+    except ImportError:
+        return False  # LiteLLM moved it: indexing keeps the model's caching
+    route, _, name = model.rpartition("/")
+    name = name.split(":")[0]
+    model = f"{route}/{name}" if route else name
+    if not supports_openai_prompt_cache_breakpoint(model):
+        return False
+    entry = next((entry for entry in map(litellm.model_cost.get, (model, name))
+                  if isinstance(entry, dict)), None)
+    if entry is None:
+        return True
+    write = entry.get("cache_creation_input_token_cost")
+    price = entry.get("input_cost_per_token")
+    return bool(write and price and write > price)
+
+
+def _cache_off(model, sent):
+    """prompt_cache_options explicit, no breakpoints: no cache writes for a
+    model that bills them above input (OpenAI's GPT-5.6 on write every
+    prompt by default), which an index run doesn't read back (a document
+    indexed again within the cache's lifetime would). {} when the call
+    makes a cache choice of its own, the server refused the option, or
+    _billed_cache_writes says no for the model or the base_model LiteLLM
+    prices it as. A saving never waits on downloading the published map,
+    though entries chat or flash learned from it count."""
+    if any(key in sent or key in (sent.get("extra_body") or {}) for key in _CACHE_CHOICES):
+        return {}
+    if "prompt_cache_options" in _refused(model, _base(sent)):
+        return {}
+    return ({"prompt_cache_options": {"mode": "explicit"}}
+            if _billed_cache_writes(sent.get("base_model") or model) else {})
+
+
+def _refuse_cache_off(model, sent):
+    refused = _refused(model, _base(sent))
+    if "prompt_cache_options" not in refused:
+        refused.add("prompt_cache_options")
+        logging.warning(f"{model} refused prompt_cache_options: indexing "
+                        f"pays for its prompt cache writes")
+
+
+def _refusal(error):
+    """A refusal (400, or 422 from servers that so reject unknown fields) a
+    field the request carries may cause; never a prompt too long for the
+    model."""
+    from litellm.exceptions import ContextWindowExceededError
+    return (getattr(error, "status_code", None) in (400, 422)
+            and not isinstance(error, ContextWindowExceededError))
 
 # Backward compatibility: support CHATGPT_API_KEY as alias for OPENAI_API_KEY
 if not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -302,13 +431,20 @@ def _is_unrecoverable(exc: BaseException) -> bool:
     return getattr(exc, "status_code", None) in _UNRECOVERABLE_STATUS
 
 
-# What turns thinking off on the Claude models that think by default: each
-# one's own switch, as the Anthropic Models API lists it, or its lowest effort
-# where it has none. The first name in the model wins, so a longer name comes
-# before its prefix.
+# Claude's own ways to turn thinking off, then its lowest effort: the ladder
+# down a Claude model's thinking, as LiteLLM sends no thinking field for
+# reasoning_effort "none" (BerriAI/litellm#47924, #44298).
+_CLAUDE_LADDER = ({"thinking": {"type": "disabled"}}, {"thinking": {"type": "between_tools"}},
+                  {"reasoning_effort": "low"})
+_CLAUDE_ROUTES = ("anthropic", "bedrock", "vertex_ai", "azure_ai", "databricks")
+# Where that ladder starts on the Claude models that think by default, as the
+# Anthropic Models API lists their switches: answers known, so no request
+# finds them out. A name matches where no further version number follows
+# it: claude-opus-5 is neither claude-opus-5-5 nor claude-opus-5-6.
 _CLAUDE_NONE = (
     ("claude-sonnet-5-5", {"thinking": {"type": "between_tools"}}),
     ("claude-opus-5-5", {"reasoning_effort": "low"}),
+    ("claude-fable-5-1", {"reasoning_effort": "low"}),
     ("claude-fable-5", {"reasoning_effort": "low"}),
     ("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
     ("claude-sonnet-5", {"thinking": {"type": "disabled"}}),
@@ -319,21 +455,44 @@ _CLAUDE_NONE = (
 def claude_none_switch(model):
     """What replaces reasoning_effort "none" on a Claude model that thinks by
     default (see _CLAUDE_NONE); None for any other model."""
-    return next((swap for name, swap in _CLAUDE_NONE if name in (model or "")), None)
+    return next((swap for name, swap in _CLAUDE_NONE
+                 if re.search(rf"{re.escape(name)}(?![-._]?\d)", model or "")), None)
+
+
+def _claude_routed(model):
+    """A Claude model on a route LiteLLM sends it to as Claude: Anthropic,
+    Bedrock, Vertex, Foundry or Databricks, with "claude" in its id, as
+    LiteLLM tells one there."""
+    model = _strip_prefix(model or "", "litellm/")
+    return model.split("/", 1)[0] in _CLAUDE_ROUTES and "claude" in model.lower()
+
+
+def _claude_ladder(model):
+    """_CLAUDE_LADDER for a Claude model: from its _CLAUDE_NONE row on, else
+    all of it, less disabled where LiteLLM's map says the model always
+    thinks (LiteLLM drops a disabled sent with one, unsent)."""
+    row = claude_none_switch(model)
+    if row is not None:
+        return list(_CLAUDE_LADDER[_CLAUDE_LADDER.index(row):])
+    import litellm
+    try:
+        always = litellm.get_model_info(model).get("thinking_always_on") is True
+    except Exception:
+        always = False
+    return list(_CLAUDE_LADDER[1:] if always else _CLAUDE_LADDER)
 
 
 def _claude_none(model):
-    """claude_none_switch on a model LiteLLM routes to Anthropic, Bedrock,
-    Vertex or Foundry, which LiteLLM sends no thinking field for "none"
-    (BerriAI/litellm#47924, #44298); None elsewhere."""
-    model = _strip_prefix(model or "", "litellm/")
-    if model.split("/", 1)[0] not in ("anthropic", "bedrock", "vertex_ai", "azure_ai"):
+    """What replaces reasoning_effort "none" on a Claude model LiteLLM routes
+    as Claude, the first of its _claude_ladder; None elsewhere."""
+    if not _claude_routed(model):
         return None
-    return claude_none_switch(model)
+    return _claude_ladder(_strip_prefix(model, "litellm/"))[0]
 
 
 def thinking_stays_on(model):
-    """True when reasoning_effort "none" can't turn the model's thinking off."""
+    """True when reasoning_effort "none" can't turn the model's thinking off,
+    as _CLAUDE_NONE knows; one that may try it, and refuse, raises then."""
     return "reasoning_effort" in (_claude_none(model) or {})
 
 
@@ -349,18 +508,31 @@ def _claude_none_kwargs(model, kwargs):
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
-    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
     if is_claude_code(model):
         if chat_history or return_finish_reason:
             raise ValueError("claude-code/ models index in flash mode only; "
                              "standard mode needs an API model.")
         return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
-    import litellm
-    attempts = INDEX_RETRIES + 1
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
-    backend = _llm_backend.get()
+    backend = _llm_backend.get() or {}
     model = _litellm_model(model)
     _quiet_litellm()
+    off = _cache_off(model, backend)
+    try:
+        return _completion(model, messages, {**off, **backend}, return_finish_reason)
+    except Exception as e:
+        if not (off and _refusal(e)):
+            raise
+    # the option is to blame only if the prompt goes through without it
+    reply = _completion(model, messages, backend, return_finish_reason)
+    _refuse_cache_off(model, backend)
+    return reply
+
+
+def _completion(model, messages, sent, return_finish_reason):
+    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
+    import litellm
+    attempts = INDEX_RETRIES + 1
     for i in range(attempts):
         try:
             response = litellm.completion(**_claude_none_kwargs(model, {
@@ -369,7 +541,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                 "drop_params": True,
                 # the loop is the retry policy; the merge lets a backend override win
                 "max_retries": 0,
-                **(backend or {}),
+                **sent,
             }))
             _add_usage(response)
             content = response.choices[0].message.content
@@ -395,15 +567,27 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
 
 async def llm_acompletion(model, prompt, **params):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
-    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
     if is_claude_code(model):
         return await claude_code_complete(model, prompt, **params)
-    import litellm
-    attempts = INDEX_RETRIES + 1
     messages = [{"role": "user", "content": prompt}]
-    backend = _llm_backend.get()
+    sent = {**(_llm_backend.get() or {}), **params}
     model = _litellm_model(model)
     _quiet_litellm()
+    off = _cache_off(model, sent)
+    try:
+        return await _acompletion(model, messages, {**off, **sent})
+    except Exception as e:
+        if not (off and _refusal(e)):
+            raise
+    reply = await _acompletion(model, messages, sent)
+    _refuse_cache_off(model, sent)
+    return reply
+
+
+async def _acompletion(model, messages, sent):
+    from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
+    import litellm
+    attempts = INDEX_RETRIES + 1
     for i in range(attempts):
         try:
             response = await litellm.acompletion(**_claude_none_kwargs(model, {
@@ -411,8 +595,7 @@ async def llm_acompletion(model, prompt, **params):
                 "messages": messages,
                 "drop_params": True,
                 "max_retries": 0,
-                **(backend or {}),
-                **params,
+                **sent,
             }))
             _add_usage(response)
             return response.choices[0].message.content
@@ -1079,30 +1262,146 @@ SUMMARY_INTRO_MAX_PAGES = 3     # cap on leading pages fed into a parent summary
 SUMMARY_MAX_WORDS = 150         # word cap the summary prompts ask for
 TOKENS_PER_WORD = 4 / 3
 SUMMARY_REASONING_EFFORT = "none"
+SUMMARY_EFFORT_LADDER = (SUMMARY_REASONING_EFFORT, "minimal", "low")
+
+
+def _sends(model, params):
+    """What LiteLLM puts on the wire for `model` from `params`: the fields
+    of the request it builds that one without them lacks."""
+    from litellm.utils import get_optional_params
+    provider, name = model.split("/", 1)
+    call = {"model": name, "custom_llm_provider": provider, "drop_params": True}
+    try:
+        bare = get_optional_params(**call)
+        return {key: value for key, value in get_optional_params(**call, **params).items()
+                if bare.get(key) != value}
+    except Exception:
+        return {}
+
+
+def _effort_flags(model):
+    """LiteLLM's map flags for `model`'s effort levels, as LiteLLM reads
+    them: the id's own entry, then its bare name's (azure/gpt-5-nano reads
+    as gpt-5-nano)."""
+    import litellm
+    infos = []
+    for key in (model, model.rsplit("/", 1)[-1]):
+        try:
+            infos.append(litellm.get_model_info(key))
+        except Exception:
+            pass
+    return {level: next((info[f"supports_{level}_reasoning_effort"] for info in infos
+                         if info.get(f"supports_{level}_reasoning_effort") is not None), None)
+            for level in SUMMARY_EFFORT_LADDER}
+
+
+def _rung_key(params):
+    return json.dumps(params, sort_keys=True)
+
+
+def summary_effort_ladder(model):
+    """The summary efforts to try on `model`, least thinking first, as
+    llm_acompletion params. A Claude model LiteLLM routes as Claude takes
+    _claude_ladder. Any other takes the levels of SUMMARY_EFFORT_LADDER that
+    LiteLLM would put on the wire: not one its map flags unsupported,
+    "minimal" only where the map flags it supported (few models have it; a
+    blind try costs a refusal), and, on an OpenAI-format API, a model
+    LiteLLM doesn't know gets the effort as is: it is that API's own field.
+    Never one LiteLLM sends as thinking turned on (an effort on a model that
+    thinks only when asked: a Claude model behind a Bedrock ARN). Less the
+    rungs this process saw the server refuse."""
+    try:
+        model = _litellm_model(model)
+    except Exception:  # the call itself will say why
+        return [{"reasoning_effort": SUMMARY_REASONING_EFFORT}]
+    if _claude_routed(model):
+        rungs = _claude_ladder(model)
+    else:
+        flags, rungs = _effort_flags(model), []
+        for level in SUMMARY_EFFORT_LADDER:
+            if flags[level] is False or (level == "minimal" and flags[level] is not True):
+                continue
+            rung: dict = {"reasoning_effort": level}
+            if (not _sends(model, rung) and not _in_model_map(model)
+                    and _openai_format(model.split("/", 1)[0])):
+                rung["allowed_openai_params"] = ["reasoning_effort"]
+            sent = _sends(model, rung)
+            if sent and (sent.get("thinking") or {}).get("type") in (None, "disabled"):
+                rungs.append(rung)
+    refused = _refused(model, _base(_llm_backend.get() or {}))
+    return [rung for rung in rungs if _rung_key(rung) not in refused]
 
 
 def default_summary_reasoning_effort(model):
-    """SUMMARY_REASONING_EFFORT unless the indexing backend sets a
-    reasoning_effort or thinking or LiteLLM lists the model as refusing
-    it, else None. claude-code/ models, where neither applies, always get it.
-    Where LiteLLM says nothing (openrouter/..., models it has not caught up
-    with) the summaries send it and drop it if the server refuses it; a
-    provider LiteLLM sends it to only for models its map knows (xai/,
-    fireworks_ai/, ...) has it dropped before sending instead, unless the
-    published map, learned first (learn_model_if_effort_dropped), knows it."""
+    """The level summary_effort_ladder starts on ("none" for Claude's own
+    switches off), None when it has no rung or the indexing backend sets a
+    reasoning_effort or thinking. claude-code/ models, where neither
+    applies, always get SUMMARY_REASONING_EFFORT. A provider LiteLLM sends
+    an effort to only for models its map knows (xai/, fireworks_ai/, ...)
+    has it dropped before sending, unless the published map, learned first
+    (learn_model_if_effort_dropped), knows it, or the API is OpenAI's own
+    format."""
     from .integrations.claude_agent_sdk import is_claude_code
     if is_claude_code(model):
         return SUMMARY_REASONING_EFFORT
     if {"reasoning_effort", "thinking"} & (_llm_backend.get() or {}).keys():
         return None
-    import litellm
+    ladder = summary_effort_ladder(model)
+    return ladder[0].get("reasoning_effort", SUMMARY_REASONING_EFFORT) if ladder else None
+
+
+def _litellm_refuses(model, params):
+    """LiteLLM's own refusal of `params` for `model`, as it raises one on a
+    call that drops nothing (chat's), or None."""
+    from litellm.exceptions import UnsupportedParamsError
+    from litellm.utils import get_optional_params
+    provider, name = model.split("/", 1)
     try:
-        info = litellm.get_model_info(_litellm_model(model))
-    except Exception:
-        return SUMMARY_REASONING_EFFORT
-    if info.get(f"supports_{SUMMARY_REASONING_EFFORT}_reasoning_effort") is False:
+        get_optional_params(model=name, custom_llm_provider=provider, **params)
+    except UnsupportedParamsError as refusal:
+        return refusal
+    except Exception:  # the call itself will say why
         return None
-    return SUMMARY_REASONING_EFFORT
+    return None
+
+
+def chosen_effort(model, effort, name="reasoning_effort"):
+    """The LiteLLM kwargs that carry a reasoning effort the caller chose
+    to `model` as chosen, never dropped unseen: as is (a Claude "none"
+    then goes as the model's own off switch, _claude_none_kwargs), with
+    allowed_openai_params where LiteLLM doesn't know the model on an
+    OpenAI-format API, whose own field it is. ValueError, `name` naming
+    the setting, where it can't arrive as chosen: a "none" Claude can't
+    turn thinking off for (thinking_stays_on), or a level LiteLLM refuses
+    for a model its map knows (gpt-5-nano takes no "none"), as chat meets
+    it. A model LiteLLM doesn't know elsewhere goes as LiteLLM takes it,
+    once it has learned what it can (learn_model_if_effort_dropped)."""
+    params = {"reasoning_effort": effort}
+    try:
+        model = _litellm_model(model)
+    except Exception:  # the call itself will say why
+        return params
+    if not model:
+        return params
+    if effort == "none" and _claude_routed(model):
+        if thinking_stays_on(model):
+            raise ValueError(f"{model} can't turn thinking off, so it can't honor "
+                             f"{name}='none'; pass 'low' or leave it unset.")
+        return params
+    if _litellm_refuses(model, params) is None:
+        return params
+    if _in_model_map(model):
+        least = next((level for level in SUMMARY_EFFORT_LADDER
+                      if _litellm_refuses(model, {"reasoning_effort": level}) is None), None)
+        raise ValueError(
+            f"{model} takes no {name}={effort!r}, LiteLLM's model map says; "
+            + ("it takes no reasoning effort: leave it unset." if least is None
+               else f"pass {least!r}, the least it takes, or leave it unset."
+               if effort in SUMMARY_EFFORT_LADDER
+               else "pass a level it takes, or leave it unset."))
+    if _openai_format(model.split("/", 1)[0]):
+        params["allowed_openai_params"] = ["reasoning_effort"]
+    return params
 
 
 class _PriorityGate:
@@ -1247,10 +1546,19 @@ class SummaryScheduler:
         self.structure = structure
         self._pdf_pages = pdf_pages
         self._split_shared_pages = split_shared_pages
-        self._params = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
         from .integrations.claude_agent_sdk import is_claude_code
-        # claude-code/ checks its effort before any prompt: a 400 there isn't the effort's
-        self._drop_refused_effort = drop_refused_effort and not is_claude_code(model)
+        self._ladder = None
+        if not reasoning_effort:
+            self._params = {}
+        elif is_claude_code(model):
+            # it checks its effort before any prompt: a 400 there isn't the effort's
+            self._params = {"reasoning_effort": reasoning_effort}
+        elif drop_refused_effort:  # the default, PageIndex's own
+            self._ladder = summary_effort_ladder(model)
+            self._params = self._ladder[0] if self._ladder else {}
+        else:  # the caller's
+            self._params = chosen_effort(model, reasoning_effort,
+                                         name="summary_reasoning_effort")
         self._model = model
         self._max_intro_pages = max_intro_pages
         self._max_words = max_words or SUMMARY_MAX_WORDS
@@ -1311,13 +1619,24 @@ class SummaryScheduler:
         try:
             return await llm_acompletion(self._model, prompt, **params)
         except Exception as e:
-            if not (params and self._drop_refused_effort
-                    and getattr(e, "status_code", None) == 400):
+            if not (self._ladder and params in self._ladder and _refusal(e)):
                 raise
-        # the effort is to blame only if the prompt goes through without it
-        reply = await llm_acompletion(self._model, prompt)
-        self._params = {}
-        return reply
+        # a refused rung gives way to the next, then to none sent; the ones
+        # passed over are to blame only if the prompt goes through, and the
+        # process then remembers them
+        refused = [params]
+        for rung in self._ladder[self._ladder.index(params) + 1:] + [{}]:
+            try:
+                reply = await llm_acompletion(self._model, prompt, **rung)
+            except Exception as e:
+                if rung and _refusal(e):
+                    refused.append(rung)
+                    continue
+                raise
+            _refused(_litellm_model(self._model), _base(_llm_backend.get() or {})).update(
+                map(_rung_key, refused))
+            self._params = rung
+            return reply
 
     def _leaf_text(self, node):
         if self._split_shared_pages:
