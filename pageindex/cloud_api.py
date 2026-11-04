@@ -60,10 +60,7 @@ class CloudAPI:
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): "standard" or None is the default pipeline.
-                "flash" builds the tree from the PDF's text layer without OCR:
-                pages with no text come back empty, and a PDF with no text, or
-                no headings past 10 pages, ends "failed".
+            mode (str, optional): None (default), the OCR-based cloud pipeline, or "flash".
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
@@ -75,10 +72,10 @@ class CloudAPI:
                 (a taken name gains a numeric suffix), when the server
                 returns it.
         """
-        if mode not in (None, "standard", "flash"):
+        if mode not in (None, "flash"):
             raise PageIndexAPIError(
                 f"Failed to submit document: unknown cloud processing mode {mode!r}. "
-                "Supported: 'standard' (default) or 'flash'."
+                "Cloud supports only 'flash'."
             )
         data: Dict[str, Any] = {'if_retrieval': True}
         if mode == "flash":
