@@ -53,6 +53,8 @@ Usage:
     python3 -m pageindex.tree_optimize --pdf doc.pdf --structure tree.json --out out.json
 """
 
+from .indexing_metrics import retry_scope
+
 import argparse
 import asyncio
 import copy
@@ -790,7 +792,8 @@ async def expand(structure, pages, lines, args, log, frozen):
             attempts += 1
             try:
                 async with semaphore:
-                    with llm_priority(EXPAND_PRIORITY):
+                    with llm_priority(EXPAND_PRIORITY), retry_scope(
+                            "expand_repeat" if attempts > 1 else None):
                         proposed = await propose_children(node, pages, args)
             except Exception as exc:
                 if _is_unrecoverable(exc):

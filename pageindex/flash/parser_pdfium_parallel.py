@@ -23,6 +23,7 @@ sequential path directly.
 from __future__ import annotations
 
 import multiprocessing
+from ..indexing_metrics import record_parameters
 import os
 import sys
 import threading
@@ -153,6 +154,10 @@ def parse_charlevel_meta_parallel(
 
     max_w = max(1, (os.cpu_count() or 2) - 1)
     w = max(1, min(workers if workers is not None else max_w, max_w, n_pages))
+    record_parameters(page_count=n_pages, parser_workers_requested=workers,
+                      parser_parallel_min_pages=min_pages,
+                      parser_workers=1 if w <= 1 or n_pages < min_pages else w,
+                      parser_mode="sequential" if w <= 1 or n_pages < min_pages else "parallel")
     if w <= 1 or n_pages < min_pages:
         return parse_charlevel_meta(doc_handle)
 
@@ -168,6 +173,7 @@ def parse_charlevel_meta_parallel(
         # pool at construction; the sequential path needs none of that.
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             raise
+        record_parameters(parser_mode="sequential_fallback", parser_workers=1)
         return parse_charlevel_meta(doc_handle)
     try:
         with _anonymous_main():
@@ -181,6 +187,8 @@ def parse_charlevel_meta_parallel(
             # Spawn child re-importing an unguarded __main__; a sequential rerun
             # here would silently duplicate the caller's whole run per worker.
             raise
+        record_parameters(parser_mode="sequential_fallback", parser_workers=1,
+                          parser_children_may_outlive_run=True)
         return parse_charlevel_meta(doc_handle)
     executor.shutdown()
 

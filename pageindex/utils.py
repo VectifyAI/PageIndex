@@ -1,4 +1,5 @@
 import contextvars
+from .indexing_metrics import measured_phase, model_request, retry_scope
 import logging
 import os
 import textwrap
@@ -246,7 +247,7 @@ def run_off_loop(func, *args):
     else:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(func, *args).result()
+            return pool.submit(contextvars.copy_context().run, func, *args).result()
     return func(*args)
 
 
@@ -354,7 +355,8 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
         if chat_history or return_finish_reason:
             raise ValueError("claude-code/ models index in flash mode only; "
                              "standard mode needs an API model.")
-        return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
+        with model_request(model, opaque=True):
+            return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
     import litellm
     attempts = INDEX_RETRIES + 1
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
@@ -363,20 +365,22 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
     _quiet_litellm()
     for i in range(attempts):
         try:
-            response = litellm.completion(**_claude_none_kwargs(model, {
-                "model": model,
-                "messages": messages,
-                "drop_params": True,
-                # the loop is the retry policy; the merge lets a backend override win
-                "max_retries": 0,
-                **(backend or {}),
-            }))
-            _add_usage(response)
-            content = response.choices[0].message.content
-            if return_finish_reason:
-                finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
-                return content, finish_reason
-            return content
+            with model_request(model, retry=i > 0,
+                               backend_retries=(backend or {}).get("max_retries", 0)):
+                response = litellm.completion(**_claude_none_kwargs(model, {
+                    "model": model,
+                    "messages": messages,
+                    "drop_params": True,
+                    # the loop is the retry policy; the merge lets a backend override win
+                    "max_retries": 0,
+                    **(backend or {}),
+                }))
+                _add_usage(response)
+                content = response.choices[0].message.content
+                if return_finish_reason:
+                    finish_reason = "max_output_reached" if response.choices[0].finish_reason == "length" else "finished"
+                    return content, finish_reason
+                return content
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
@@ -397,7 +401,8 @@ async def llm_acompletion(model, prompt, **params):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
     from .retry import INDEX_MAX_DELAY, INDEX_RETRIES, delay, should_retry
     if is_claude_code(model):
-        return await claude_code_complete(model, prompt, **params)
+        with model_request(model, opaque=True):
+            return await claude_code_complete(model, prompt, **params)
     import litellm
     attempts = INDEX_RETRIES + 1
     messages = [{"role": "user", "content": prompt}]
@@ -406,16 +411,18 @@ async def llm_acompletion(model, prompt, **params):
     _quiet_litellm()
     for i in range(attempts):
         try:
-            response = await litellm.acompletion(**_claude_none_kwargs(model, {
-                "model": model,
-                "messages": messages,
-                "drop_params": True,
-                "max_retries": 0,
-                **(backend or {}),
-                **params,
-            }))
-            _add_usage(response)
-            return response.choices[0].message.content
+            with model_request(model, retry=i > 0,
+                               backend_retries=params.get("max_retries", (backend or {}).get("max_retries", 0))):
+                response = await litellm.acompletion(**_claude_none_kwargs(model, {
+                    "model": model,
+                    "messages": messages,
+                    "drop_params": True,
+                    "max_retries": 0,
+                    **(backend or {}),
+                    **params,
+                }))
+                _add_usage(response)
+                return response.choices[0].message.content
         except Exception as e:
             if getattr(e, "status_code", None) in _NO_RETRY_STATUS:
                 raise
@@ -1315,7 +1322,8 @@ class SummaryScheduler:
                     and getattr(e, "status_code", None) == 400):
                 raise
         # the effort is to blame only if the prompt goes through without it
-        reply = await llm_acompletion(self._model, prompt)
+        with retry_scope("summary_effort_fallback"):
+            reply = await llm_acompletion(self._model, prompt)
         self._params = {}
         return reply
 
@@ -1324,6 +1332,7 @@ class SummaryScheduler:
             return leaf_own_text(self.structure, node, self._pdf_pages)
         return get_text_of_pdf_pages(self._pdf_pages, node['start_index'], node['end_index'])
 
+    @measured_phase("summaries")
     async def _leaf_summary(self, node, prio):
         text = self._leaf_text(node)
         if count_tokens(text, model=self._model) < self._small_node_tokens:
@@ -1361,6 +1370,7 @@ class SummaryScheduler:
                 node['title'] = written
         return parse_summary(reply)
 
+    @measured_phase("summaries")
     async def _parent_summary(self, node, prio):
         children = node['nodes']
         intro = get_intro_text(node, self._pdf_pages, max_pages=self._max_intro_pages)

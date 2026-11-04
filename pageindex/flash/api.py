@@ -9,6 +9,7 @@ from typing import BinaryIO
 
 import pypdfium2 as pdfium
 
+from ..indexing_metrics import measured_phase, phase, record_parameters
 from ..naming import sanitize_filename
 from .main import extract_toc
 
@@ -82,6 +83,7 @@ async def _summarize(structure, page_list, model, concurrency=None, max_words=No
                          drop_refused_effort=drop_refused_effort)
 
 
+@measured_phase("tree_optimization")
 async def _optimize_async(structure, page_texts, do_expand, model, on_final=None,
                           concurrency=None, summary_words=0):
     """Merge/expand refinement after extraction, overlapped with the summaries
@@ -247,7 +249,12 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
     elif optimize not in ("full", "merge"):
         raise ValueError(
             f"optimize must be 'full', 'merge', or False, got {optimize!r}")
-    result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
+    record_parameters(pipeline="flash", summary=bool(summary), optimize=optimize,
+                      summary_model=summary_model, optimize_model=optimize_model,
+                      summary_concurrency=summary_concurrency,
+                      summary_max_words=summary_max_words, use_embedded_toc=use_embedded_toc)
+    with phase("parse_layout"):
+        result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
     if not structure:
         # the layout yields no hierarchy; the pages themselves are the tree
@@ -272,6 +279,7 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
     if summary and structure and not is_claude_code(summary_model):
         learn_model_if_effort_dropped(summary_model)  # before the default reads the map
     effort = summary_reasoning_effort and summary_reasoning_effort.strip()
+    record_parameters(summary_model=summary_model, optimize_model=optimize_model or summary_model)
     defaulted = not effort
     if summary and structure and defaulted:
         effort = default_summary_reasoning_effort(summary_model)
@@ -283,6 +291,12 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
         # billed its prompts
         import asyncio
         asyncio.run(claude_code_check(summary_model, effort))
+    from ..utils import SUMMARY_CONCURRENCY
+    from ..tree_optimize import EXPAND_CONCURRENCY
+    record_parameters(summary_reasoning_effort=effort,
+                      summary_concurrency=summary_concurrency or SUMMARY_CONCURRENCY,
+                      expand_concurrency=min(EXPAND_CONCURRENCY, summary_concurrency or EXPAND_CONCURRENCY),
+                      summary_max_words=summary_max_words or SUMMARY_MAX_WORDS)
     # bookmark-only extractions carry no page_texts and scanned ones
     # only empty strings; expand needs text
     pages = result.pop("page_texts", None) or []
