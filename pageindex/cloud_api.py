@@ -60,10 +60,10 @@ class CloudAPI:
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): "flash" builds the tree from the PDF's text layer
-                without OCR: pages with no text come back empty, and a PDF with no
-                text, or no headings past 10 pages, ends "failed". "standard" or
-                None is the default pipeline. Other modes are passed through (e.g., "mcp").
+            mode (str, optional): "standard" or None is the default pipeline.
+                "flash" builds the tree from the PDF's text layer without OCR:
+                pages with no text come back empty, and a PDF with no text, or
+                no headings past 10 pages, ends "failed".
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
@@ -75,19 +75,16 @@ class CloudAPI:
                 (a taken name gains a numeric suffix), when the server
                 returns it.
         """
-        word = (mode or "").strip().lower()
-        if word in ("flash", "standard") and mode != word:
+        if mode not in (None, "standard", "flash"):
             raise PageIndexAPIError(
                 f"Failed to submit document: unknown cloud processing mode {mode!r}. "
-                f"Did you mean {word!r}?"
+                "Supported: 'standard' (default) or 'flash'."
             )
         data: Dict[str, Any] = {'if_retrieval': True}
         if mode == "flash":
             # The server rejects if_retrieval alongside algorithm=flash, and
             # node text was if_retrieval's side effect, so ask for it directly.
             data = {'algorithm': 'flash', 'if_add_node_text': 'yes'}
-        elif mode not in (None, "standard"):
-            data['mode'] = mode
         if beta_headers is not None:
             data['beta_headers'] = json.dumps(beta_headers)
         if folder_id is not None:

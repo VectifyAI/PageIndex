@@ -1955,13 +1955,11 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     client.submit_document(sample_pdf, mode="flash", folder_id="f-1")
     assert calls[-1]["data"] == {"algorithm": "flash", "if_add_node_text": "yes",
                                  "folder_id": "f-1"}
-    for variant in ("Flash", " flash", "STANDARD"):
-        with pytest.raises(PageIndexAPIError, match="Did you mean"):
-            client.submit_document(sample_pdf, mode=variant)
+    for bad in ("Flash", " flash", "STANDARD", "mcp"):
+        with pytest.raises(PageIndexAPIError, match="unknown cloud processing mode"):
+            client.submit_document(sample_pdf, mode=bad)
     client.submit_document(sample_pdf, mode="standard")
     assert calls[-1]["data"] == {"if_retrieval": True}
-    client.submit_document(sample_pdf, mode="mcp")
-    assert calls[-1]["data"] == {"if_retrieval": True, "mode": "mcp"}
 
     fake.payload = {"status": "processing", "retrieval_ready": False}
     client.get_tree("pi-1", node_summary=True)
