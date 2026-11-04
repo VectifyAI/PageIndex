@@ -1953,8 +1953,7 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     assert calls[-1]["data"]["metadata"] == json.dumps({"project": "alpha"})
 
     client.submit_document(sample_pdf, mode="flash", folder_id="f-1")
-    assert calls[-1]["data"] == {"algorithm": "flash", "if_add_node_text": "yes",
-                                 "folder_id": "f-1"}
+    assert calls[-1]["data"] == {"algorithm": "flash", "folder_id": "f-1"}
     for bad in ("Flash", " flash", "STANDARD", "mcp"):
         with pytest.raises(PageIndexAPIError, match="unknown cloud processing mode"):
             client.submit_document(sample_pdf, mode=bad)

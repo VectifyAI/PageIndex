@@ -83,8 +83,8 @@ class CloudAPI:
         data: Dict[str, Any] = {'if_retrieval': True}
         if mode == "flash":
             # The server rejects if_retrieval alongside algorithm=flash, and
-            # node text was if_retrieval's side effect, so ask for it directly.
-            data = {'algorithm': 'flash', 'if_add_node_text': 'yes'}
+            # keeps node text for Flash trees by default.
+            data = {'algorithm': 'flash'}
         if beta_headers is not None:
             data['beta_headers'] = json.dumps(beta_headers)
         if folder_id is not None:
