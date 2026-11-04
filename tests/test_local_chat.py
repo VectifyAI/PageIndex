@@ -1030,6 +1030,28 @@ def test_a_remembered_field_the_server_asks_for_goes_again_with_it(
 
 
 @needs_agents
+def test_a_call_leaves_what_another_call_forgot_forgotten(monkeypatch):
+    """A call that inherited the process's refusals, going through after
+    another call forgot one, adds back only the ones it refused itself."""
+    pytest.importorskip("litellm")
+    from agents import Agent, ModelSettings
+    from agents.extensions.models.litellm_model import LitellmModel
+    from pageindex import utils
+    model = LitellmModel(model="groq/qwen/qwen3-32b")
+
+    async def fetch(*args, **kwargs):
+        return _litellm_reply("A")
+    monkeypatch.setattr(model, "_fetch_response", fetch)
+    remembered = utils._refused(model.model, model.base_url)
+    remembered.update({"reasoning_content", "reasoning_details"})
+    replies = local_chat._keep_reply_fields(Agent(name="a", model=model), [])
+    remembered.discard("reasoning_content")  # another call's 400 asked for it
+    replies.refused.add("thinking_blocks")  # this call's own refusal
+    asyncio.run(model._fetch_response(None, [], ModelSettings()))
+    assert remembered == {"reasoning_details", "thinking_blocks"}
+
+
+@needs_agents
 def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
     """Each 400 refuses the field it names, the Agents SDK's own too
     (reasoning_content, for a DeepSeek name), until one goes through."""
@@ -1222,11 +1244,12 @@ def test_summaries_wait_on_the_published_map_at_most_map_wait(monkeypatch):
     monkeypatch.setattr(httpx, "get", slow)
     monkeypatch.setattr(utils, "_MAP_WAIT", 0.05)
     model = f"mistral/{name}"
+    threads, dropped = [], utils._effort_dropped_unmapped
+    monkeypatch.setattr(utils, "_effort_dropped_unmapped",
+                        lambda m: threads.append(threading.current_thread()) or dropped(m))
     utils.start_learning_if_effort_dropped(model)
-    deadline = time.monotonic() + 5
-    while utils._published is None and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert utils._published is not None
+    # checked where it's called (a thread importing LiteLLM would hang a fork)
+    assert threads == [threading.current_thread()] and utils._published is not None
     began = time.monotonic()
     utils.learn_model_if_effort_dropped(model)
     assert time.monotonic() - began < 2 and not utils._filled
@@ -1238,15 +1261,6 @@ def test_summaries_wait_on_the_published_map_at_most_map_wait(monkeypatch):
     # the caller's own LITELLM_LOCAL_MODEL_COST_MAP: neither starts one
     fetched = _publish(monkeypatch, {})
     monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
-
-    class Inline:  # the early start's thread, run where it starts
-        def __init__(self, target, daemon):
-            self.target = target
-
-        def start(self):
-            self.target()
-    monkeypatch.setattr(utils, "threading", types.SimpleNamespace(
-        Thread=Inline, Lock=threading.Lock))
     unlearned = "mistral/test-users-map-mistral"
     utils.start_learning_if_effort_dropped(unlearned)
     utils.learn_model_if_effort_dropped(unlearned)
@@ -1374,14 +1388,57 @@ def test_litellms_refusal_on_an_openai_format_api_sends_the_param_as_is(
     OpenAI-format API (an Azure deployment named its own way) goes again at
     once with the effort as is, as summaries send it, for the server to
     answer; nothing downloads."""
-    pytest.importorskip("litellm")
+    litellm = pytest.importorskip("litellm")
     fetched = _publish(monkeypatch, {})
     sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 4)
+    real, asked = litellm.acompletion, []
+
+    async def acompletion(**kwargs):
+        asked.append({key: kwargs.get(key) for key in (
+            "reasoning_effort", "allowed_openai_params", "drop_params")})
+        return await real(**kwargs)
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
     for _ in range(2):
         out = client.chat_completions("q", model="azure/test-prod-deployment",
                                       reasoning_effort="low")
         assert out.choices[0].message.content == "A"
     assert fetched == [] and len(sent) == 4
+    refused = {"reasoning_effort": "low", "allowed_openai_params": None, "drop_params": None}
+    forced = {**refused, "allowed_openai_params": ["reasoning_effort"]}
+    assert asked == [refused, forced, refused, forced]
+
+
+@needs_agents
+def test_litellms_refusal_for_a_foundry_claude_deployment_stands(client, monkeypatch):
+    """A Claude deployment on Foundry goes out in Anthropic's format, though
+    LiteLLM lists azure_ai as OpenAI-compatible: LiteLLM's refusal of an
+    effort stands once the published map can't lift it, never forced into
+    that body."""
+    pytest.importorskip("litellm")
+    fetched = _publish(monkeypatch, {})
+    _mock_litellm(monkeypatch, [_litellm_reply("A")] * 2)
+    with pytest.raises(PageIndexAPIError, match="does not support"):
+        client.chat_completions("q", model="azure_ai/claude-test-deployment",
+                                reasoning_effort="low")
+    assert len(fetched) == 1
+
+
+def test_the_request_hook_takes_none_off_only_beside_a_claude_switch(monkeypatch):
+    """The fill hook takes a "none" effort off where a thinking switch rides
+    beside it on a Claude route (LiteLLM's Databricks route drops both), and
+    leaves any other request's effort as sent."""
+    pytest.importorskip("litellm")
+    local_chat._register_fill()
+    monkeypatch.setitem(local_chat._REQUESTS, "test-hook-call", local_chat._Replies("m"))
+
+    def hooked(model, effort="none"):
+        return asyncio.run(local_chat._fill_hook.async_pre_call_deployment_hook(
+            {"litellm_call_id": "test-hook-call", "model": model, "messages": [],
+             "reasoning_effort": effort, "thinking": {"type": "disabled"}},
+            "acompletion"))
+    assert "reasoning_effort" not in hooked("databricks/databricks-claude-sonnet-5")
+    assert hooked("databricks/databricks-claude-sonnet-5", "low")["reasoning_effort"] == "low"
+    assert hooked("deepseek/deepseek-chat")["reasoning_effort"] == "none"
 
 
 @needs_agents
@@ -1399,16 +1456,23 @@ def test_a_refused_model_litellms_map_holds_downloads_nothing(client, monkeypatc
     assert fetched == [] and len(sent) == 1
 
 
-def test_another_providers_entry_leaves_a_model_unmapped():
+def test_another_providers_entry_leaves_a_model_unmapped(monkeypatch):
     """An entry another provider owns under the model's bare name doesn't
-    make the model mapped, as LiteLLM's own lookup matches the provider:
-    the published map may still hold the model's own."""
+    make the model mapped, as LiteLLM's own lookup matches the provider,
+    nor does an answer from LiteLLM's fallback rules: the published map may
+    still hold the model's own, and summaries learn it."""
     litellm = pytest.importorskip("litellm")
-    from pageindex.utils import _in_model_map
+    from pageindex.utils import _effort_dropped_unmapped, _in_model_map
+    # its Hugging Face fallback would fetch the model's config from the Hub
+    monkeypatch.setattr(litellm.utils, "_get_max_position_embeddings",
+                        lambda model_name: None)
     litellm.register_model({"sibling-test-model-x9": {"litellm_provider": "deepseek",
                                                       "mode": "chat"}})
     assert _in_model_map("deepseek/sibling-test-model-x9")
     assert not _in_model_map("fireworks_ai/accounts/fireworks/models/sibling-test-model-x9")
+    fallback = "huggingface/meta-llama/Llama-3-8B"
+    litellm.get_model_info(fallback)  # answered, though the map lacks it
+    assert not _in_model_map(fallback) and _effort_dropped_unmapped(fallback)
 
 
 @needs_agents
@@ -4088,6 +4152,29 @@ def test_chat_none_turns_claude_thinking_off(monkeypatch):
         sent("anthropic/claude-opus-5-5", "low", extra_body={"reasoning": {"effort": "none"}})
 
 
+@needs_agents
+def test_chat_none_reaches_databricks_claude_as_its_switch(client, monkeypatch):
+    """The switch that stands in for "none" goes out alone, so Databricks,
+    where LiteLLM drops a switch sent beside "none", gets it too."""
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+    bodies = []
+    reply = {"id": "c", "object": "chat.completion", "created": 0, "model": "m",
+             "choices": [{"index": 0, "finish_reason": "stop",
+                          "message": {"role": "assistant", "content": "ok"}}],
+             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+
+    async def post(self, url=None, *args, **kwargs):
+        bodies.append(kwargs.get("json") or json.loads(kwargs.get("data") or "{}"))
+        return httpx.Response(200, json=reply, request=httpx.Request("POST", str(url)))
+    monkeypatch.setattr(AsyncHTTPHandler, "post", post)
+    client.chat_completions("q", model="databricks/databricks-claude-sonnet-5",
+                            reasoning_effort="none",
+                            backend={"api_key": "test", "base_url": "http://127.0.0.1:9"})
+    assert bodies[-1].get("thinking") == {"type": "disabled"}
+    assert "reasoning_effort" not in bodies[-1]
+
+
 def test_claude_code_chat_refuses_none():
     """A chosen "none" raises before the CLI starts."""
     with pytest.raises(PageIndexAPIError, match="takes no reasoning_effort='none'"):
@@ -6506,15 +6593,19 @@ def test_chat_protocol_messages_is_the_door(client, monkeypatch):
 
 def test_chat_protocol_messages_none_turns_claude_thinking_off(client, monkeypatch):
     """Anthropic's effort takes no "none": a Claude model gets its own
-    thinking switch instead, one that can't turn thinking off raises, and a
-    caller's own thinking or another model keeps the effort field."""
+    thinking switch instead, as the LiteLLM lane sends it (disabled where
+    the table lacks the model), one that can't turn thinking off raises, and
+    a caller's own thinking or a model that isn't Claude keeps the effort
+    field."""
     seen = []
     monkeypatch.setattr(local_chat, "run_messages",
                         lambda c, messages, **kw: seen.append(kw) or "door")
     for model, body in (("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
                         ("anthropic/claude-sonnet-5-5",
                          {"thinking": {"type": "between_tools"}}),
-                        ("claude-x", {"output_config": {"effort": "none"}})):
+                        ("claude-opus-4-8", {"thinking": {"type": "disabled"}}),
+                        ("claude-x", {"thinking": {"type": "disabled"}}),
+                        ("kimi-k2-test", {"output_config": {"effort": "none"}})):
         client.chat("q", protocol="messages", model=model, reasoning_effort="none")
         assert seen[-1]["extra_body"] == body, model
     client.chat("q", protocol="messages", model="claude-haiku-5-5",

@@ -56,17 +56,17 @@ class LocalAPI:
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
-    def _with_backend(self, usage, func, *args):
+    def _with_backend(self, usage, models, func, *args):
         """Scope the indexing lane's connection overrides and the `usage`
         tally around one operation — runs inside whatever thread
-        run_off_loop picked. A reasoning effort among the overrides
-        reaches each indexing model as chosen, or fails first
-        (chosen_effort)."""
+        run_off_loop picked. A reasoning effort among the overrides goes to
+        each of `models`, the ones the operation calls, as chosen_effort
+        carries it, or fails first."""
         from .integrations.claude_agent_sdk import is_claude_code
         from .utils import _llm_backend, _llm_usage, chosen_effort
         backend = self._index_backend
         if backend and backend.get("reasoning_effort"):
-            for model in {self._model, self._summary_model}:
+            for model in dict.fromkeys(models):
                 if not model or is_claude_code(model):
                     continue
                 forced = chosen_effort(model, backend["reasoning_effort"],
@@ -162,12 +162,13 @@ class LocalAPI:
         try:
             if mode == "flash":
                 structure, description = run_off_loop(
-                    self._with_backend, usage, self._index_flash, file_path
+                    self._with_backend, usage, (self._summary_model,),
+                    self._index_flash, file_path
                 )
             else:
                 structure, description = run_off_loop(
-                    self._with_backend, usage, self._index_standard, file_path,
-                    page_texts
+                    self._with_backend, usage, (self._model, self._summary_model),
+                    self._index_standard, file_path, page_texts
                 )
         except PageIndexAPIError:
             raise

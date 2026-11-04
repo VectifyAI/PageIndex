@@ -2649,8 +2649,8 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
                    summary_model="s",
                    index_backend={"api_key": "ik", "api_base": "http://b"})
-    assert api._with_backend(None, _llm_backend.get) == {"api_key": "ik",
-                                                         "api_base": "http://b"}
+    assert api._with_backend(None, ("m", "s"), _llm_backend.get) == {
+        "api_key": "ik", "api_base": "http://b"}
     assert _llm_backend.get() is None
 
     reply = SimpleNamespace(choices=[SimpleNamespace(
@@ -2664,7 +2664,7 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
                         ("gpt-4o", "openai/gpt-4o"),
                         ("my-finetune-v2", "openai/my-finetune-v2")):
         captured.clear()
-        api._with_backend(None, lambda: llm_completion(model, "p"))
+        api._with_backend(None, (model,), lambda: llm_completion(model, "p"))
         assert captured["model"] == wire
         assert captured["api_key"] == "ik"
         assert captured["api_base"] == "http://b"
@@ -2992,7 +2992,8 @@ def test_a_server_refusing_the_cache_option_indexes_without_it(
     once without it; once that goes through, that server never gets it
     again (one warning) while another server for the model still does. A
     400 the prompt gets without the option too refuses nothing, and a
-    prompt too long for the model is never sent again."""
+    prompt too long for the model, or one a content filter stopped, is
+    never sent again."""
     class Rejected(Exception):
         status_code = 400
 
@@ -3043,16 +3044,16 @@ def test_a_server_refusing_the_cache_option_indexes_without_it(
     index("http://d", complete, acomplete)
     assert calls == [True, False, False]
 
-    from litellm.exceptions import ContextWindowExceededError
-
-    def too_long(**kw):
-        calls.append("prompt_cache_options" in kw)
-        raise ContextWindowExceededError(message="too long", model="m", llm_provider="openai")
-    monkeypatch.setattr(cache_map, "completion", too_long)
-    calls.clear()
-    with pytest.raises(ContextWindowExceededError):
-        pageindex.utils.llm_completion("gpt-test-billed", "p")
-    assert calls == [True]
+    from litellm.exceptions import ContentPolicyViolationError, ContextWindowExceededError
+    for error in (ContextWindowExceededError, ContentPolicyViolationError):
+        def stopped(**kw):
+            calls.append("prompt_cache_options" in kw)
+            raise error(message="stopped", model="m", llm_provider="openai")
+        monkeypatch.setattr(cache_map, "completion", stopped)
+        calls.clear()
+        with pytest.raises(error):
+            pageindex.utils.llm_completion("gpt-test-billed", "p")
+        assert calls == [True], error
 
 
 def test_indexing_cache_choice_follows_litellms_own_rule(cache_map):
@@ -3403,7 +3404,10 @@ def test_claude_none_sends_the_models_own_off_switch(monkeypatch):
                             ("anthropic/claude-opus-6", off),
                             ("bedrock/global.anthropic.claude-opus-6", off),
                             ("anthropic/claude-opus-5-6", off),
+                            ("anthropic/claude-fable-5-2", between),
                             ("anthropic/claude-fable-6", between),
+                            ("anthropic/claude-opus-5-5-20261001", low),
+                            ("bedrock/anthropic.claude-sonnet-5-20261001-v1:0", off),
                             ("vertex_ai/claude-opus-4-7@20260416", off),
                             ("bedrock/global.anthropic.claude-opus-4-8", off),
                             ("azure_ai/my-claude", off),
@@ -4261,8 +4265,9 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
 
 def test_summary_effort_ladder_follows_litellms_map(monkeypatch):
     """Least thinking first: a level LiteLLM's map flags unsupported is
-    skipped (LiteLLM would drop it unsent), "minimal" is tried only where
-    the map flags it; a model the map lacks tries "none", then "low"."""
+    skipped (a server LiteLLM passes it to as is would refuse it),
+    "minimal" is tried only where the map flags it; a model the map lacks
+    tries "none", then "low"."""
     pytest.importorskip("litellm")
     import litellm
     from pageindex.utils import summary_effort_ladder
@@ -4287,6 +4292,22 @@ def test_summary_effort_ladder_follows_litellms_map(monkeypatch):
                           ("openai/ladder-silent", ["none", "low"]),
                           ("openai/ladder-unmapped", ["none", "low"])):
         assert summary_effort_ladder(model) == [{"reasoning_effort": level} for level in ladder], model
+
+
+def test_pageindexs_own_litellm_lookups_print_nothing(capsys, monkeypatch):
+    """The lookups PageIndex makes before any call (the summary ladder, the
+    Messages lane's Claude switch) keep LiteLLM's "Provider List" banner off
+    stdout, as its calls do, one with no model id too."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex.utils import claude_none_switch, llm_completion, summary_effort_ladder
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    summary_effort_ladder("mistral/test-unknown-banner")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    claude_none_switch("claude-test-banner")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    with pytest.raises(litellm.BadRequestError):
+        llm_completion("", "p")
+    assert "Provider List" not in capsys.readouterr().out
 
 
 def test_summary_effort_ladder_is_what_litellm_would_send():
@@ -4327,13 +4348,19 @@ def test_summary_effort_ladder_is_what_litellm_would_send():
         assert summary_effort_ladder(model) == ladder, model
     _refused("openai/gpt-6-luna", None).add(_rung_key({"reasoning_effort": "none"}))
     assert summary_effort_ladder("openai/gpt-6-luna") == efforts("low")
+    token = pageindex.utils._llm_backend.set({"api_base": "http://other"})
+    try:  # another server's refusals are its own
+        assert summary_effort_ladder("openai/gpt-6-luna") == efforts("none", "low")
+    finally:
+        pageindex.utils._llm_backend.reset(token)
 
 
 def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monkeypatch):
     """A default effort refused (400 or 422) steps up the ladder, then to
     none sent, once a prompt goes through a step up, calls refused after
     the step included; a prompt refused at every step keeps it; another
-    refusal (a prompt too long for the model too) or a chosen effort
+    refusal (a prompt too long for the model, or one a content filter
+    stopped) or a chosen effort
     is never resent without it, nor is any on claude-code/, which checks
     its effort up front (dropped, the calls would leave its workflow)."""
     from conftest import build_pdf
@@ -4383,10 +4410,11 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
         assert len(sent) > 3 and sent[:2] == ["none", "low"] and set(sent[2:]) == {"low"}
         run(optimize, lambda params: params.get("reasoning_effort") == "none", status=422)
         assert len(sent) > 3 and sent[:2] == ["none", "low"] and set(sent[2:]) == {"low"}
-        from litellm.exceptions import ContextWindowExceededError
-        run(optimize, lambda params: len(sent) == 1,
-            error=ContextWindowExceededError("too long", "gpt-9-preview", "openai"))
-        assert len(sent) > 1 and set(sent) == {"none"}
+        from litellm.exceptions import ContentPolicyViolationError, ContextWindowExceededError
+        for error in (ContextWindowExceededError, ContentPolicyViolationError):
+            run(optimize, lambda params: len(sent) == 1,
+                error=error("stopped", "gpt-9-preview", "openai"))
+            assert len(sent) > 1 and set(sent) == {"none"}, error
         run(optimize, lambda params: len(sent) <= 3)
         assert len(sent) > 4 and sent[:3] == ["none", "low", None] and set(sent[3:]) == {"none"}
         run(optimize, lambda params: "reasoning_effort" in params, model="gpt-5-nano")
@@ -4451,6 +4479,7 @@ def test_flash_refuses_a_chosen_effort_the_model_cannot_honor(tmp_path, monkeypa
             ("azure/gpt-5-nano", "none", "'minimal', the least"),
             ("gpt-6.1-sol", "none", "'low', the least"),
             ("gpt-5-nano", "xhigh", "pass a level it takes"),
+            ("gpt-5.5-pro", "none", "pass a level it takes"),
             ("gpt-4o", "high", "it takes no reasoning effort")):
         with pytest.raises(ValueError, match=match):
             flash_api.page_index_flash(str(pdf), summary_model=model,
@@ -4463,7 +4492,7 @@ def test_flash_refuses_a_chosen_effort_the_model_cannot_honor(tmp_path, monkeypa
             lambda path: {**real(path), "index_model": "anthropic/claude-opus-5-5"}))
         with pytest.raises(ValueError, match="can't turn thinking off"):
             flash_api.page_index_flash(str(pdf), summary_reasoning_effort="none")
-    assert not calls
+    assert not calls and not reads
     forced = {"allowed_openai_params": ["reasoning_effort"]}
     least = {"anthropic/claude-opus-5-5": "low", "gpt-5-nano": "minimal"}  # the defaults
     for model, effort, summary in (("anthropic/claude-opus-5-5", None, {}),
@@ -4473,6 +4502,7 @@ def test_flash_refuses_a_chosen_effort_the_model_cannot_honor(tmp_path, monkeypa
                                    ("gpt-6-luna", "none", {}),
                                    ("gpt-5-nano", "minimal", {}),
                                    ("azure/test-prod-deployment", "low", forced),
+                                   ("azure_ai/claude-test-deployment", "low", {}),
                                    ("mistral/test-unmapped-mistral", "low", {})):
         flash_api.page_index_flash(str(pdf), summary_model=model,
                                    summary_reasoning_effort=effort)
@@ -4496,9 +4526,10 @@ def test_summary_max_words_reaches_the_local_indexer():
 def test_an_index_backend_effort_reaches_the_model_as_chosen(tmp_path, sample_pdf,
                                                              monkeypatch):
     """A reasoning_effort in index_backend reaches the indexing calls as
-    chosen: a level LiteLLM's map says the model doesn't take fails the
-    submit before any model call, and a model LiteLLM doesn't know on an
-    OpenAI-format API gets it as is, beside the caller's own allowed
+    chosen: a level LiteLLM's map says a model the submit calls doesn't
+    take fails it before any model call (flash calls the summary model
+    alone, standard the index model too), and a model LiteLLM doesn't know
+    on an OpenAI-format API gets it as is, beside the caller's own allowed
     params."""
     pytest.importorskip("litellm")
     from pageindex import PageIndexLocalClient
@@ -4524,6 +4555,12 @@ def test_an_index_backend_effort_reaches_the_model_as_chosen(tmp_path, sample_pd
     PageIndexLocalClient(index_model="gpt-6-luna", index_backend={
         "reasoning_effort": "none"}).submit_document(sample_pdf)
     assert seen.pop() == {"reasoning_effort": "none"}
+    legacy = PageIndexLocalClient(index_model="gpt-4o", summary_model="gpt-5-nano",
+                                  index_backend={"reasoning_effort": "minimal"})
+    legacy.submit_document(sample_pdf)
+    assert seen.pop() == {"reasoning_effort": "minimal"}
+    with pytest.raises(PageIndexAPIError, match="openai/gpt-4o takes no"):
+        legacy.submit_document(sample_pdf, mode="standard")
 
 
 def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):

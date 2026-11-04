@@ -445,8 +445,10 @@ class PageIndexClient:
             in ``index_backend`` (``"none"``, ``"low"``, ``"high"``, ...):
             a level LiteLLM's model map says the model doesn't take raises
             before any model call, as chat does (``"none"`` on gpt-5-nano
-            names ``"minimal"``), and a model LiteLLM doesn't know on an
-            OpenAI-format API gets it as is. Defaults to the least
+            names ``"minimal"``), a model LiteLLM doesn't know on an
+            OpenAI-format API gets it as is, and one it doesn't know on
+            another API goes as LiteLLM takes it, which drops the effort
+            unless LiteLLM's published map knows the model. Defaults to the least
             thinking the model takes, trying ``"none"``, ``"minimal"``,
             ``"low"`` in turn (a Claude model under ``anthropic/``,
             ``bedrock/``, ``vertex_ai/``, ``azure_ai/`` or ``databricks/``:
@@ -454,8 +456,8 @@ class PageIndexClient:
             ``"low"``): a level LiteLLM would not send is skipped,
             ``"minimal"`` is tried only where LiteLLM's model map lists
             it, a model LiteLLM doesn't know on an OpenAI-format API gets
-            the effort as is, and a level the server refuses (HTTP 400)
-            gives way to the next, then to none sent, once a prompt goes
+            the effort as is, and a level the server refuses (HTTP 400 or
+            422) gives way to the next, then to none sent, once a prompt goes
             through a step down; the process then skips it (never on
             ``claude-code/``, whose effort is checked up front).
             ``"none"`` also raises on a model whose thinking can't be
@@ -481,9 +483,11 @@ class PageIndexClient:
             ``api_version``, ``aws_*``, … — passed through verbatim. A
             ``reasoning_effort`` here reaches every indexing call as
             chosen: a level LiteLLM's model map says the indexing model
-            doesn't take raises before any model call, as chat does, and a
+            doesn't take raises before any model call, as chat does, a
             model LiteLLM doesn't know on an OpenAI-format API gets it as
-            is. Where LiteLLM's own rule says a model takes
+            is, and one it doesn't know on another API goes as LiteLLM
+            takes it, which drops the effort unless its map knows the
+            model. Where LiteLLM's own rule says a model takes
             ``prompt_cache_options`` (its model map's flag, else its
             GPT-5.6-on name rule) and the route's map entry, where it has
             one, prices a cache write above input, indexing sends
@@ -1359,8 +1363,8 @@ class PageIndexClient:
                 ``reasoning.effort``, Messages ``output_config.effort``.
                 ``"none"`` turns a Claude model's thinking off with its own
                 switch, on Messages and through LiteLLM to Anthropic,
-                Bedrock, Vertex or Foundry (Sonnet 5.5's still thinks
-                between tool calls), and raises on one that can't
+                Bedrock, Vertex, Foundry or Databricks (Sonnet 5.5's still
+                thinks between tool calls), and raises on one that can't
                 (Opus 5.5, Fable) and on any ``claude-code/`` model.
                 Unset sends nothing — the model's default applies.
             show_process: Answer lane, streamed chat — weave the run into

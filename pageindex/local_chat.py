@@ -441,13 +441,15 @@ def _keep_redacted(translate):
 
 
 def _register_fill() -> None:
-    """The LiteLLM pre-request hook that fills a run's requests, in
-    litellm.callbacks: added before each request, again if a caller
+    """The LiteLLM pre-request hook that fills a run's requests, and takes
+    a "none" effort off where a Claude thinking switch stands in for it,
+    in litellm.callbacks: added before each request, again if a caller
     replaced the list. The first call also wraps LiteLLM's Converse
     thinking converter (_keep_redacted)."""
     global _fill_hook
     import litellm
     from litellm.integrations.custom_logger import CustomLogger
+    from .utils import _claude_routed
     with _FILL_LOCK:
         if _fill_hook is None:
             name = "translate_thinking_blocks_to_reasoning_content_blocks"
@@ -468,6 +470,12 @@ def _register_fill() -> None:
                             or not isinstance(kwargs.get("messages"), list)):
                         return None
                     messages = replies.fill(kwargs["messages"])
+                    if (kwargs.get("reasoning_effort") == "none" and "thinking" in kwargs
+                            and _claude_routed(str(kwargs.get("model") or ""))):
+                        # the switch stands in for "none" (_openai_agent): beside
+                        # it, LiteLLM's Databricks route drops both
+                        kwargs = {key: value for key, value in kwargs.items()
+                                  if key != "reasoning_effort"}
                     if (kwargs.get("cache_control_injection_points")
                             and _gateway(str(kwargs.get("model") or ""),
                                          kwargs.get("base_url"))):
@@ -579,7 +587,7 @@ def _chat_retry(replies: _Replies, remembered: set):
                     and not lifted):
                 lifted = True
                 if not _in_model_map(replies.model):
-                    if not _openai_format(replies.model.split("/", 1)[0]):
+                    if not _openai_format(replies.model):
                         return _again_with_published_models()
                     replies.forced.update(_litellm_allows(text))
                     if replies.forced:
@@ -588,7 +596,7 @@ def _chat_retry(replies: _Replies, remembered: set):
             def named(keys):
                 return {key for key in keys
                         if re.search(rf"\b{re.escape(key)}\b", text)}
-            wanted = named(replies.inherited - replies.sent)
+            wanted = named(replies.inherited)
             if wanted:
                 replies.refused -= wanted
                 replies.inherited -= wanted
@@ -635,7 +643,8 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     replies.inherited = set(remembered)
 
     def through():
-        remembered.update(replies.refused)
+        # its own refusals only: a field another call forgot meanwhile stays forgotten
+        remembered.update(replies.refused - replies.inherited)
     for message in messages:
         if not (isinstance(message, dict)
                 and message.get("role") == "assistant"):
@@ -719,10 +728,8 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         raise PageIndexAPIError(
             f"'{model_name}' routes through LiteLLM, which failed to "
             f"import: {exc}") from exc
-    from .utils import (_litellm_model, _mute_litellm_bridge_usage_warning,
-                        _quiet_litellm)
+    from .utils import _litellm_model, _mute_litellm_bridge_usage_warning
     _mute_litellm_bridge_usage_warning()
-    _quiet_litellm()
     try:
         wire = _litellm_model(model_name)
     except litellm.NotFoundError as exc:
@@ -954,7 +961,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                 "reasoning_effort='none'; pass 'low' or leave it unset.")
         swap = _claude_none(model_name)
         if swap:
-            # LiteLLM keeps a thinking switch and drops the "none" beside it
+            # the request hook (_register_fill) takes the "none" off beside it
             settings = dataclasses.replace(settings, extra_args={**args, **swap})
     return Agent(
         name="PageIndex",
