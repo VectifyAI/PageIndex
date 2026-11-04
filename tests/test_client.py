@@ -1952,6 +1952,13 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     client.submit_document(sample_pdf, metadata={"project": "alpha"})
     assert calls[-1]["data"]["metadata"] == json.dumps({"project": "alpha"})
 
+    client.submit_document(sample_pdf, mode="flash", folder_id="f-1")
+    assert calls[-1]["data"] == {"algorithm": "flash", "folder_id": "f-1"}
+    client.submit_document(sample_pdf, mode="standard")
+    assert calls[-1]["data"] == {"if_retrieval": True}
+    client.submit_document(sample_pdf, mode="mcp")
+    assert calls[-1]["data"] == {"if_retrieval": True, "mode": "mcp"}
+
     fake.payload = {"status": "processing", "retrieval_ready": False}
     client.get_tree("pi-1", node_summary=True)
     assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=True&include_text=true")

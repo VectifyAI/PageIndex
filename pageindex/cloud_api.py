@@ -60,7 +60,9 @@ class CloudAPI:
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): Processing mode (e.g., "mcp"). Defaults to None.
+            mode (str, optional): "flash" builds the tree from the PDF's text layer
+                (no OCR; a scanned PDF ends "failed"); "standard" or None is the
+                default pipeline. Other modes are passed through (e.g., "mcp").
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
@@ -73,7 +75,10 @@ class CloudAPI:
                 returns it.
         """
         data: Dict[str, Any] = {'if_retrieval': True}
-        if mode is not None:
+        if mode == "flash":
+            # The server rejects if_retrieval alongside algorithm=flash.
+            data = {'algorithm': 'flash'}
+        elif mode not in (None, "standard"):
             data['mode'] = mode
         if beta_headers is not None:
             data['beta_headers'] = json.dumps(beta_headers)
