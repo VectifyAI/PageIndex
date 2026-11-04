@@ -808,8 +808,9 @@ class PageIndexClient:
             mode (str, optional): Processing mode. Local defaults to "flash";
                 pass "standard" for a full LLM-built tree. Cloud defaults to
                 "standard"; "flash" builds the tree from the PDF's text layer
-                without OCR (a scanned PDF ends "failed"). Other cloud modes
-                are passed through (e.g. "mcp").
+                without OCR: pages with no text come back empty, and a PDF with
+                no text, or no headings past 10 pages, ends "failed". Other
+                cloud modes are passed through (e.g. "mcp").
             beta_headers (list[str], optional): Cloud-only beta feature headers.
             folder_id (str, optional): Cloud-only folder (workspace) ID.
             metadata (dict, optional): Your own JSON-serializable tags for the
