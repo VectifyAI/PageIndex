@@ -1782,10 +1782,10 @@ class PageIndexClient:
                 its own thinking control, and the values mean what the
                 backend says they mean. ``"none"`` is the exception: it
                 turns a Claude model's thinking off on Anthropic, Bedrock,
-                Vertex or Foundry (Sonnet 5.5's still thinks between tool
-                calls), and raises on one that can't (Opus 5.5, Fable) and
-                on any ``claude-code/`` model. Unset sends nothing
-                (the backend's default applies).
+                Vertex, Foundry or Databricks (Sonnet 5.5's still thinks
+                between tool calls), and raises on one that can't (Opus
+                5.5, Fable) and on any ``claude-code/`` model. Unset sends
+                nothing (the backend's default applies).
             extra_body: Extra request fields beyond this method's
                 parameters, merged last so they win. The managed endpoint
                 and OpenAI-compatible backends take them verbatim in the
