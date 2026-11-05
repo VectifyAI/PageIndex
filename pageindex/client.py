@@ -451,7 +451,9 @@ class PageIndexClient:
             LiteLLM drops even then raises too), and one it doesn't know
             elsewhere, ``openai/`` included, goes as LiteLLM takes it,
             which may drop the effort unless LiteLLM's published map knows
-            the model. Defaults to the least
+            the model. A global ``litellm.drop_params = True`` turns these
+            checks off: LiteLLM then drops a level the model doesn't take,
+            unseen. Defaults to the least
             thinking the model takes, trying ``"none"``, ``"minimal"``,
             ``"low"`` in turn (a Claude model under ``anthropic/``,
             ``bedrock/``, ``vertex_ai/``, ``azure_ai/`` or ``databricks/``:
@@ -492,7 +494,9 @@ class PageIndexClient:
             is (a level LiteLLM drops even then raises too), and one it
             doesn't know elsewhere, ``openai/`` included, goes as LiteLLM
             takes it, which may drop the effort unless its map knows the
-            model. Where
+            model. A global ``litellm.drop_params = True`` turns these
+            checks off: LiteLLM then drops a level the model doesn't take,
+            unseen. Where
             LiteLLM's own rule says a model takes
             ``prompt_cache_options`` (its model map's flag, else its
             GPT-5.6-on name rule) and the route's map entry, where it has
