@@ -63,7 +63,8 @@ def test_printed_heading_with_extra_text_dissolves_once():
         {"title": "Note 6 - Leases", "level": 1, "page": 13},
         {"title": "4.1 DOT", "level": 1, "page": 14},
         {"title": "第十二条 不可抗力 Article 12 Force Majeure", "level": 1, "page": 15},
-        {"title": "End", "level": 1, "page": 16},
+        {"title": "2.1 Short title", "level": 1, "page": 16},
+        {"title": "End", "level": 1, "page": 17},
     ]
     detected = [_node("JPMorgan Chase & Co. Consolidated balance sheets "
                       "(unaudited)", 3),
@@ -80,8 +81,9 @@ def test_printed_heading_with_extra_text_dissolves_once():
                 _node("Note 6 - Leases 6.1 Rent.", 13),
                 _node("4 System Overview 4.1 DOT", 14),
                 _node("第十二条 不可抗力 第 十 二 条 不 可 抗 力 A A rticle 12 "
-                      "Force Majeure", 15)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=17)
+                      "Force Majeure", 15),
+                _node("2.1 Reasonably long section title", 16)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=18)
     assert _titles(merged) == [
         "Consolidated balance sheets", "Revenue", "Note 18 - Leases",
         "Note 18 - Leases Firm as lessee", "Fair value",
@@ -89,7 +91,7 @@ def test_printed_heading_with_extra_text_dissolves_once():
         "Derivatives netting and collateral", "Note 26 - Restrictions on cash",
         "2. Detailed Terms", "Item 4. Mine Safety Disclosures.", "3、项目进度",
         "3 金迈斯", "Note 6 - Leases", "Note 6 - Leases 6.1 Rent.", "4.1 DOT",
-        "第十二条 不可抗力 Article 12 Force Majeure", "End"]
+        "第十二条 不可抗力 Article 12 Force Majeure", "2.1 Short title", "End"]
 
 
 def test_letter_spaced_duplicate_dissolves():
@@ -239,6 +241,20 @@ def test_tail_section_leaves_a_conclusion_holding_another_tail():
     assert _titles(merged) == ["Discussion", "Conclusion", "Acknowledgements",
                                "References"]
     assert (merged[1]["end_index"], merged[2]["start_index"]) == (17, 17)
+
+
+def test_tail_section_climbs_to_the_children_of_a_lone_root():
+    entries = [
+        {"title": "Agentic AI: a survey", "level": 1, "page": 1},
+        {"title": "Introduction", "level": 2, "page": 1},
+        {"title": "References", "level": 2, "page": 5},
+    ]
+    detected = [_node("References", 5, style="S", y=0.1),
+                _node("Authors and Affiliations", 7, style="S", y=0.2)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=8)
+    assert _titles(merged[0]["nodes"]) == ["Introduction", "References",
+                                           "Authors and Affiliations"]
+    assert merged[0]["nodes"][1]["end_index"] == 7
 
 
 def test_subsection_on_the_next_bookmarks_page_joins_its_section():

@@ -71,7 +71,8 @@ _PAREN_TAIL = re.compile(r"\s*\([^()]*\)\s*$")
 _CJK_ENUMERATOR = re.compile(r"^\s*[（(]?[一二三四五六七八九十百]+[、)）]")
 _SECTION_KEY = re.compile(
     r"^\s*(?:([A-Za-z]+)\.?\s+(\d{1,3}[A-Z]?(?:\.\d+)*)(?![\w-]|\.\d)"
-    r"|(\d{1,3}(?:\.\d+)*)\.\s|(第[一二三四五六七八九十百\d]+[章节条]))")
+    r"|(\d{1,3}(?:\.\d+)*)\.\s|(\d{1,3}(?:\.\d+)+)(?![\w-]|\.\d)"
+    r"|(第[一二三四五六七八九十百\d]+[章节条]))")
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _ROMAN = re.compile(r"m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -352,8 +353,8 @@ def _section_key(title: str) -> Optional[tuple[str, str]]:
     match = _SECTION_KEY.match(title)
     if not match:
         return None
-    return ((match.group(1) or "").lower(),
-            match.group(2) or match.group(3) or match.group(4))
+    label, *numbers = match.groups()
+    return (label or "").lower(), next(number for number in numbers if number)
 
 
 def _printed_as(title: str, frame_title: str) -> bool:
@@ -631,13 +632,12 @@ def merge_bookmark_tree(
     that prints its title after a header (for a numbered bookmark, any
     text before its number: "Chapter 2", a merged parent heading), before
     a parenthetical or a short remark, cut off, or in new words under the
-    same section key ("Note 26", "2.", "第十二条"), or the first node on
-    the next page that prints it behind numbering ("9 Conclusion").
-    Dissolving holds
-    fuzzy matches to a higher bar than title repair: at the repair bar,
-    wordy-overlapping titles of distinct sections false-match, and a
-    false dissolve deletes a real heading, while an escaped garbled
-    duplicate only leaves a stray leaf.
+    same section key ("Note 26", "2.", "2.1", "第十二条"), or the first
+    node on the next page that prints it behind numbering ("9 Conclusion").
+    Dissolving holds fuzzy matches to a higher bar than title repair: at
+    the repair bar, wordy-overlapping titles of distinct sections
+    false-match, and a false dissolve deletes a real heading, while an
+    escaped garbled duplicate only leaves a stray leaf.
 
     A surviving numbered node whose section number belongs to a section
     ending on its page joins that section. Any other node attaches along
@@ -655,7 +655,8 @@ def merge_bookmark_tree(
     near-zero gap would claim the section is empty, the signature of
     margin-box noise rather than of a tail section. Numbering-driven
     climbs are exempt: the numbering itself proves the level relation. A
-    climb must reach a numbering parent or the top level; one stopped
+    climb must reach a numbering parent or the top level (just below the
+    root when one root bookmark titles the whole document); one stopped
     halfway -- by missing evidence, an earlier number, a same-style
     detected heading under the candidate enumerated like the node, or a
     candidate with content after the node's page -- leaves the node at
@@ -750,6 +751,8 @@ def merge_bookmark_tree(
             cand = flat[pos]
             if _subtree_max_start(cand) > node["start_index"]:
                 return idx
+            if parent_pos[pos] is None and len(roots) == 1:
+                return pos
             if (_numeral_prefix(cand["title"]) is not None
                     and _numeral_prefix(node["title"]) is not None):
                 if _numeral_child(cand["title"], node["title"]):
