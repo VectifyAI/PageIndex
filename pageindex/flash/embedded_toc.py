@@ -47,8 +47,6 @@ from typing import Optional, Union
 
 import pypdfium2 as pdfium
 
-from .main import REFERENCES_KEYWORDS, _normalize_text_key
-
 IGNORE, SKELETON, FULL = 1, 2, 3
 
 # Same-page titles at or above this similarity refer to the same section.
@@ -70,8 +68,10 @@ _GENERIC_TITLE = re.compile(
 )
 _LATEX_SPAN = re.compile(r"\$.*?\$")
 _PAREN_TAIL = re.compile(r"\s*\([^()]*\)\s*$")
-_LABELLED_NUMBER = re.compile(
-    r"^\s*([A-Za-z]+)\.?\s+(\d{1,3}[A-Z]?(?:\.\d+)*)(?![\w-]|\.\d)")
+_CJK_ENUMERATOR = re.compile(r"^\s*[（(]?[一二三四五六七八九十百]+[、)）]")
+_SECTION_KEY = re.compile(
+    r"^\s*(?:([A-Za-z]+)\.?\s+(\d{1,3}[A-Z]?(?:\.\d+)*)(?![\w-]|\.\d)"
+    r"|(\d{1,3}(?:\.\d+)*)\.\s)")
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _ROMAN = re.compile(r"m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -341,13 +341,15 @@ def _same_text(title: str, other: str) -> bool:
             == _normalize_title("".join(other.split())))
 
 
-def _labelled_number(title: str) -> Optional[tuple[str, str]]:
-    match = _LABELLED_NUMBER.match(title)
-    return (match.group(1).lower(), match.group(2)) if match else None
+def _section_key(title: str) -> Optional[tuple[str, str]]:
+    match = _SECTION_KEY.match(title)
+    if not match:
+        return None
+    return (match.group(1) or "").lower(), match.group(2) or match.group(3)
 
 
 def _printed_as(title: str, frame_title: str) -> bool:
-    """``title`` is ``frame_title`` printed headed, annotated, cut or reworded."""
+    """``title`` is ``frame_title`` printed headed, annotated, cut or renamed."""
     tokens, frame_tokens = _title_tokens(title), _title_tokens(frame_title)
     tail = len(frame_tokens)
     if not tokens or not tail or _numeral_prefix(title) != _numeral_prefix(frame_title):
@@ -357,16 +359,19 @@ def _printed_as(title: str, frame_title: str) -> bool:
         return True
     if len(tokens) < tail and frame_tokens[:len(tokens)] == tokens:
         return True
-    key = _labelled_number(title)
-    return (key is not None and key == _labelled_number(frame_title)
-            and tokens[:tail] != frame_tokens)
+    if tokens[:tail] == frame_tokens:
+        remark = tokens[tail:]
+        return (len(remark) <= 3 and title.rstrip().endswith(".")
+                and not any(token.isdigit() for token in remark))
+    key = _section_key(title)
+    return key is not None and key == _section_key(frame_title)
 
 
-def _references_heading(title: str) -> bool:
-    """A references heading as ``find_references`` reads one ("12. References")."""
-    words = _normalize_text_key(title).split()
-    return 1 <= len(words) <= 4 and (" ".join(words) in REFERENCES_KEYWORDS
-                                      or words[-1] in REFERENCES_KEYWORDS)
+def _enumerated_alike(title: str, other: str) -> bool:
+    """Both titles open with a section number, or both with "一、"-style ones."""
+    return ((_numeral_prefix(title) is not None
+             and _numeral_prefix(other) is not None)
+            or bool(_CJK_ENUMERATOR.match(title) and _CJK_ENUMERATOR.match(other)))
 
 
 def _same_heading(node: dict, chapter: dict,
@@ -610,8 +615,9 @@ def merge_bookmark_tree(
     the same section number -- or equals one starting on the page before,
     dissolves without a trace, its children re-placed individually. A
     bookmark no node has matched yet also takes the first node on its page
-    that prints its title with a header, a parenthetical, a cut-off tail
-    or new words under the same label and number. Dissolving holds
+    that prints its title after a header, before a parenthetical or a
+    short remark, cut off, or in new words under the same section key
+    ("Note 26", "2."). Dissolving holds
     fuzzy matches to a higher bar than title repair: at the repair bar,
     wordy-overlapping titles of distinct sections false-match, and a
     false dissolve deletes a real heading, while an escaped garbled
@@ -635,8 +641,8 @@ def merge_bookmark_tree(
     climbs are exempt: the numbering itself proves the level relation. A
     climb must reach a numbering parent or the top level; one stopped
     halfway -- by missing evidence, an earlier number, a same-style
-    detected heading under the candidate (references headings aside), or
-    a candidate with content after the node's page -- leaves the node at
+    detected heading under the candidate enumerated like the node, or a
+    candidate with content after the node's page -- leaves the node at
     the anchor.
 
     Two noise filters prune the whole detected tree before placement:
@@ -734,10 +740,10 @@ def merge_bookmark_tree(
                 pos = parent_pos[pos]
                 continue
             if (not _style_climbs(node, cand) or _claims_empty(node, cand)
-                    or (not _references_heading(node["title"])
-                        and any(id(child) not in frame_ids
-                                and _style_climbs(node, child)
-                                for child in cand["nodes"]))):
+                    or any(id(child) not in frame_ids
+                           and _style_climbs(node, child)
+                           and _enumerated_alike(node["title"], child["title"])
+                           for child in cand["nodes"])):
                 return idx
             pos = parent_pos[pos]
         return None

@@ -1,3 +1,5 @@
+import pytest
+
 from pageindex.flash.embedded_toc import merge_bookmark_tree
 
 
@@ -55,7 +57,11 @@ def test_printed_heading_with_extra_text_dissolves_once():
         {"title": "Results", "level": 1, "page": 7},
         {"title": "Derivatives netting and collateral", "level": 1, "page": 8},
         {"title": "Note 26 - Restrictions on cash", "level": 1, "page": 9},
-        {"title": "End", "level": 1, "page": 10},
+        {"title": "2. Detailed Terms", "level": 1, "page": 10},
+        {"title": "Item 4. Mine Safety Disclosures.", "level": 1, "page": 11},
+        {"title": "3、项目进度", "level": 1, "page": 12},
+        {"title": "Note 6 - Leases", "level": 1, "page": 13},
+        {"title": "End", "level": 1, "page": 14},
     ]
     detected = [_node("JPMorgan Chase & Co. Consolidated balance sheets "
                       "(unaudited)", 3),
@@ -65,14 +71,19 @@ def test_printed_heading_with_extra_text_dissolves_once():
                 _node("Assets measured at fair value", 6),
                 _node("5.2 Ablation Results", 7),
                 _node("Derivatives netting", 8),
-                _node("Note 26 – Restricted cash and other assets", 9)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=11)
+                _node("Note 26 – Restricted cash and other assets", 9),
+                _node("2. Defined Terms", 10),
+                _node("Item 4. Mine Safety Disclosures. Not applicable.", 11),
+                _node("3 金迈斯", 12),
+                _node("Note 6 - Leases 6.1 Rent.", 13)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=15)
     assert _titles(merged) == [
         "Consolidated balance sheets", "Revenue", "Note 18 - Leases",
         "Note 18 - Leases Firm as lessee", "Fair value",
         "Assets measured at fair value", "Results", "5.2 Ablation Results",
         "Derivatives netting and collateral", "Note 26 - Restrictions on cash",
-        "End"]
+        "2. Detailed Terms", "Item 4. Mine Safety Disclosures.", "3、项目进度",
+        "3 金迈斯", "Note 6 - Leases", "Note 6 - Leases 6.1 Rent.", "End"]
 
 
 def test_letter_spaced_duplicate_dissolves():
@@ -192,22 +203,24 @@ def test_climb_without_evidence_to_the_top_stays_at_the_anchor():
     assert _titles(risk["nodes"]) == ["We Face Intense Competition"]
 
 
-def test_peer_of_a_same_style_detected_child_stays():
+@pytest.mark.parametrize("first, second", [("1. Directors", "2. Controller"),
+                                           ("一、 董事声明", "二、 实际控制人声明")])
+def test_peer_of_a_same_style_detected_child_stays(first, second):
     entries = [
         {"title": "Part 11", "level": 1, "page": 541},
         {"title": "Part 12 Declarations", "level": 1, "page": 548},
         {"title": "Part 13 Annexes", "level": 1, "page": 559},
     ]
     detected = [_node("Part 12 Declarations", 548, style="S", y=0.1),
-                _node("1. Directors", 548, style="S", y=0.15),
-                _node("2. Controller", 549, style="S", y=0.1)]
+                _node(first, 548, style="S", y=0.15),
+                _node(second, 549, style="S", y=0.1)]
     merged = merge_bookmark_tree(detected, entries, n_pages=560)
     declarations = merged[1]
     assert declarations["end_index"] == 559
-    assert _titles(declarations["nodes"]) == ["1. Directors", "2. Controller"]
+    assert _titles(declarations["nodes"]) == [first, second]
 
 
-def test_references_leave_a_conclusion_holding_its_acknowledgements():
+def test_tail_section_leaves_a_conclusion_holding_another_tail():
     entries = [
         {"title": "Discussion", "level": 1, "page": 15},
         {"title": "Conclusion", "level": 1, "page": 16},
