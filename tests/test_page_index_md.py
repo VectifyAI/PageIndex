@@ -1,6 +1,6 @@
 import unittest
 
-from pageindex.page_index_md import extract_nodes_from_markdown
+from pageindex.page_index_md import extract_node_text_content, extract_nodes_from_markdown
 
 
 class ExtractNodesFromMarkdownTest(unittest.TestCase):
@@ -17,6 +17,30 @@ class ExtractNodesFromMarkdownTest(unittest.TestCase):
                 }
             ],
         )
+
+
+class ExtractNodeTextContentTest(unittest.TestCase):
+    def _nodes(self, markdown):
+        node_list, lines = extract_nodes_from_markdown(markdown)
+        return [(n["title"], n["level"], n["text"]) for n in extract_node_text_content(node_list, lines)]
+
+    def test_text_before_first_heading_becomes_preface(self):
+        self.assertEqual(
+            self._nodes("Intro with the key fact.\n\n## Install\n\npip install x\n"),
+            [("Preface", 2, "Intro with the key fact."), ("Install", 2, "## Install\n\npip install x")],
+        )
+
+    def test_file_without_headings_keeps_its_text(self):
+        self.assertEqual(self._nodes("Just notes.\nSecond line.\n"), [("Preface", 1, "Just notes.\nSecond line.")])
+
+    def test_front_matter_is_not_preface(self):
+        self.assertEqual(
+            self._nodes("---\ntitle: Notes\n---\n\n# Notes\n\nBody.\n"),
+            [("Notes", 1, "# Notes\n\nBody.")],
+        )
+
+    def test_no_preface_when_file_starts_with_a_heading(self):
+        self.assertEqual(self._nodes("# Title\n\nBody.\n"), [("Title", 1, "# Title\n\nBody.")])
 
 
 class MarkdownCliTest(unittest.TestCase):
