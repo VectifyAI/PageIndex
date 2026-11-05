@@ -205,7 +205,7 @@ def page_index_flash(pdf, summary=True, summary_model=None,
         cfg = ConfigLoader().load()
         summary_model = getattr(cfg, 'summary_model', None) or cfg.model
     if summary:
-        _refuse_effort(summary_model, effort, wait=False)
+        _refuse_effort(summary_model, effort)
     from ..integrations.claude_agent_sdk import claude_code_workflows, is_claude_code
     prewarm = ()
     if summary and is_claude_code(summary_model):
@@ -218,11 +218,11 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                                  summary_max_words, summary_reasoning_effort)
 
 
-def _refuse_effort(model, effort, wait=True):
-    """Raise when a chosen ``effort`` can't reach ``model`` as chosen. Not
-    ``wait``ing, a verdict LiteLLM's published map may change only starts
-    its download: the summaries' own check judges it, the PDF read by
-    then and before any model call (expand's included)."""
+def _refuse_effort(model, effort):
+    """Raise when a chosen ``effort`` can't reach ``model`` as chosen. A
+    verdict LiteLLM's published map may change, its download still
+    running, the summaries' own check judges: the PDF read by then and
+    before any model call (expand's included)."""
     from ..integrations.claude_agent_sdk import is_claude_code
     if effort == "none" and is_claude_code(model):
         raise ValueError(
@@ -230,7 +230,7 @@ def _refuse_effort(model, effort, wait=True):
             "or leave it unset.")
     if effort and not is_claude_code(model):
         from ..utils import chosen_effort, start_learning_if_effort_dropped
-        if wait or not start_learning_if_effort_dropped(model, effort):
+        if not start_learning_if_effort_dropped(model, effort):
             chosen_effort(model, effort, name="summary_reasoning_effort")
 
 

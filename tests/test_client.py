@@ -4591,7 +4591,8 @@ def test_flash_reads_the_pdf_while_the_map_decides_a_chosen_effort(tmp_path, mon
     judged once the PDF is read, the published map downloading meanwhile:
     "xhigh" goes to an Azure GPT-6 the map says takes it and raises for one
     it says doesn't, still before any model call. A model the packaged map
-    knows is judged before the read, downloading nothing."""
+    knows is judged before the read, downloading nothing, as is one the
+    map, downloaded, still lacks."""
     import copy
     import threading
     from conftest import build_pdf
@@ -4647,6 +4648,12 @@ def test_flash_reads_the_pdf_while_the_map_decides_a_chosen_effort(tmp_path, mon
                                            summary_reasoning_effort="xhigh")
             assert not calls  # expand's neither
         assert len(reads) == 1 and len(fetched) == 1, model
+    # the map in, a deployment name it can't know is judged before the read
+    reads.clear(), fetched.clear(), calls.clear()
+    with pytest.raises(ValueError, match="LiteLLM drops it"):
+        flash_api.page_index_flash(str(pdf), summary_model="azure/gpt-5-mini-prod",
+                                   summary_reasoning_effort="none")
+    assert not reads and not fetched and not calls
 
 
 def test_summary_max_words_reaches_the_local_indexer():
