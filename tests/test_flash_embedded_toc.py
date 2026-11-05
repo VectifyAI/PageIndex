@@ -301,6 +301,38 @@ def test_tail_section_climbs_to_the_children_of_a_lone_root():
     assert merged[0]["nodes"][1]["end_index"] == 7
 
 
+def test_heading_read_before_a_bookmarks_own_heading_goes_before_it():
+    entries = [
+        {"title": "Introduction", "level": 1, "page": 1},
+        {"title": "Conclusion", "level": 1, "page": 5},
+        {"title": "References", "level": 1, "page": 5},
+    ]
+    detected = [_node("Abstract", 1, style="S", y=0.2),
+                _node("1 Introduction", 1, style="S", y=0.6),
+                _node("6 Conclusion", 5, style="S", y=0.1),
+                _node("Acknowledgments", 5, style="S", y=0.5),
+                _node("References", 5, style="S", y=0.7)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=8)
+    assert [n["title"] for n in merged] == [
+        "Abstract", "Introduction", "Conclusion", "Acknowledgments",
+        "References"]
+
+
+def test_heading_read_before_a_bookmark_skips_no_section_between():
+    entries = [
+        {"title": "Conclusion", "level": 1, "page": 10},
+        {"title": "Additional Discussion", "level": 1, "page": 16},
+    ]
+    detected = [_node("Conclusion", 10, style="S", y=0.1),
+                _node("References", 12, style="S", y=0.1),
+                _node("Appendix", 16, style="A", y=0.1),
+                _node("Additional Discussion", 16, style="S", y=0.3)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=20)
+    assert _titles(merged) == ["Conclusion", "References",
+                               "Additional Discussion", "Appendix"]
+    assert merged[0]["end_index"] == 12
+
+
 def test_subsection_on_the_next_bookmarks_page_joins_its_section():
     entries = [
         {"title": "3 Computing", "level": 1, "page": 4},

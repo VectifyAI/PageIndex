@@ -670,8 +670,12 @@ def merge_bookmark_tree(
 
     The bookmark tree is the frame. Each flat bookmark node owns the page
     range up to the next entry's start, and every detected node is
-    anchored to the deepest bookmark section active at its start page. A
-    detected subtree that fits inside its anchor's range moves under it
+    anchored to the deepest bookmark section active at its start page,
+    unless it is read before the printed heading of a bookmark starting
+    on that page or the one before: then it anchors to the bookmark
+    before (if that one starts there too) and goes ahead of the later
+    bookmark among its siblings, as an Abstract does before Introduction.
+    A detected subtree that fits inside its anchor's range moves under it
     whole; one that spans ranges is dissolved, leaving a leaf, with its
     children placed individually. A node whose normalized title matches
     a frame heading starting on its page -- equal (letter spacing aside),
@@ -742,7 +746,7 @@ def merge_bookmark_tree(
     collect(roots, None)
     if not flat:
         return structure
-    frame_ids = {id(frame) for frame in flat}
+    frame_index = {id(frame): pos for pos, frame in enumerate(flat)}
 
     range_end = [
         flat[pos + 1]["start_index"] if pos + 1 < len(flat) else n_pages + 1
@@ -760,21 +764,21 @@ def merge_bookmark_tree(
 
     matched_frames: set[int] = set()
 
-    def dissolve_target(node: dict, idx: int) -> Optional[int]:
+    def dissolve_target(node: dict, idx: int, matched: set[int]) -> Optional[int]:
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             if _same_heading(node, flat[pos], _DISSOLVE_SIMILARITY):
-                matched_frames.add(pos)
+                matched.add(pos)
                 return pos
             pos -= 1
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             frame_title = flat[pos]["title"]
-            if pos not in matched_frames and (
+            if pos not in matched and (
                     _printed_as(node["title"], frame_title)
                     if flat[pos]["start_index"] == node["start_index"]
                     else _numbered_print(node["title"], frame_title)):
-                matched_frames.add(pos)
+                matched.add(pos)
                 return pos
             pos -= 1
         return None
@@ -819,7 +823,7 @@ def merge_bookmark_tree(
                 pos = parent_pos[pos]
                 continue
             if (not _style_climbs(node, cand) or _claims_empty(node, cand)
-                    or any(id(child) not in frame_ids
+                    or any(id(child) not in frame_index
                            and _style_climbs(node, child)
                            and _enumerated_alike(node["title"], child["title"])
                            for child in cand["nodes"])):
@@ -853,19 +857,35 @@ def merge_bookmark_tree(
                 kept.append(node)
         return kept
 
-    def insert_by_page(siblings: list[dict], node: dict) -> None:
+    read_pos: dict[int, int] = {}
+    heading_pos: dict[int, int] = {}
+
+    def insert_by_page(siblings: list[dict], node: dict, read_at: int) -> None:
         pos = len(siblings)
         for sibling_pos, sibling in enumerate(siblings):
-            if sibling["start_index"] > node["start_index"]:
+            if (sibling["start_index"] > node["start_index"]
+                    or (sibling["start_index"] == node["start_index"]
+                        and heading_pos.get(frame_index.get(id(sibling), -1), -1)
+                        > read_at)):
                 pos = sibling_pos
                 break
         siblings.insert(pos, node)
+
+    def read_before(node: dict, idx: Optional[int]) -> Optional[int]:
+        """Step past bookmarks starting here whose heading is read after the node."""
+        page = node["start_index"]
+        while (idx is not None and heading_pos.get(idx, -1) > read_pos[id(node)]
+               and flat[idx]["start_index"] >= page - 1
+               and (idx == 0 or flat[idx - 1]["start_index"] >= page - 1)):
+            idx = idx - 1 if idx else None
+        return idx
 
     front: list[dict] = []
 
     def place(node: dict) -> None:
         children = node.get("nodes") or []
-        idx = anchor_index(node["start_index"])
+        read_at = read_pos[id(node)]
+        idx = read_before(node, anchor_index(node["start_index"]))
         if idx is None:
             if _subtree_max_start(node) < flat[0]["start_index"]:
                 front.append(node)
@@ -874,7 +894,7 @@ def merge_bookmark_tree(
                 for child in children:
                     place(child)
             return
-        matched = dissolve_target(node, idx)
+        matched = dissolve_target(node, idx, matched_frames)
         if matched is not None:
             frame = flat[matched]
             for key in ("_style", "_y"):
@@ -888,13 +908,29 @@ def merge_bookmark_tree(
             chosen = choose_parent(node, idx)
         siblings = roots if chosen is None else flat[chosen]["nodes"]
         if _subtree_max_start(node) < range_end[idx]:
-            insert_by_page(siblings, node)
+            insert_by_page(siblings, node, read_at)
             return
-        insert_by_page(siblings, dict(node, nodes=[]))
+        insert_by_page(siblings, dict(node, nodes=[]), read_at)
         for child in children:
             place(child)
 
-    for root in prune(structure):
+    pruned = prune(structure)
+    reading: list[dict] = []
+
+    def read(nodes: list[dict]) -> None:
+        for node in nodes:
+            reading.append(node)
+            read(node.get("nodes") or [])
+
+    read(pruned)
+    found: set[int] = set()
+    for pos, node in enumerate(reading):
+        read_pos[id(node)] = pos
+        idx = anchor_index(node["start_index"])
+        target = None if idx is None else dissolve_target(node, idx, found)
+        if target is not None:
+            heading_pos.setdefault(target, pos)
+    for root in pruned:
         place(root)
     return _finalize(front + roots, n_pages)
 
