@@ -562,9 +562,10 @@ def _litellm_allows(text) -> set:
 def _chat_retry(replies: _Replies, remembered: set):
     """Once again after LiteLLM refused the request itself for a model its
     map lacks: on an OpenAI-format API with the params it named as they are,
-    that API's own fields (as summaries send an effort), elsewhere with the
-    entries its packaged model map lacks taken from the published one (a
-    model newer than the package). A model the map holds gains nothing from
+    that API's own fields (as summaries send an effort), where it named
+    none (its GPT-5 rules refusing "xhigh") and elsewhere with the entries
+    its packaged model map lacks taken from the published one (a model
+    newer than the package). A model the map holds gains nothing from
     either. Again at once without the fields a 400 names, of those the
     request had that may be refused, for the rest of the call, and of the
     process at that model and base URL once a request goes through without
@@ -592,6 +593,7 @@ def _chat_retry(replies: _Replies, remembered: set):
                     replies.forced.update(_litellm_allows(text))
                     if replies.forced:
                         return RetryDecision(retry=True, delay=0)
+                    return _again_with_published_models()
 
             def named(keys):
                 return {key for key in keys

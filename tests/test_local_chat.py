@@ -1271,6 +1271,28 @@ def test_a_chosen_level_litellm_refuses_learns_the_published_map(monkeypatch):
         assert len(fetched) == 1 and _litellm_refuses(model, xhigh) is None, name
 
 
+def test_chosen_effort_learns_the_published_map_before_it_judges(monkeypatch):
+    """A chosen level LiteLLM refuses for a model its packaged map lacks
+    goes once the published map's entry takes it, on any route ("xhigh" on
+    a GPT-6 newer than the package, which LiteLLM's GPT-5 rules refuse even
+    with allowed_openai_params on azure/); a deployment that takes it as is
+    downloads nothing."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import chosen_effort
+    fetched = _publish(monkeypatch, {})
+    assert chosen_effort("azure/test-prod-deployment", "low") == {
+        "reasoning_effort": "low", "allowed_openai_params": ["reasoning_effort"]}
+    assert not fetched
+    for provider in ("openai", "azure", "azure_ai"):
+        name = f"gpt-6.9-test-chosen-{provider}"
+        key = name if provider == "openai" else f"{provider}/{name}"
+        fetched = _publish(monkeypatch, {key: {
+            "litellm_provider": provider, "mode": "chat", "supports_reasoning": True,
+            "supports_xhigh_reasoning_effort": True}})
+        assert chosen_effort(f"{provider}/{name}", "xhigh") == {"reasoning_effort": "xhigh"}
+        assert len(fetched) == 1, provider
+
+
 def test_summaries_wait_on_the_published_map_at_most_map_wait(monkeypatch):
     """The early start begins the one download on a thread; summaries wait
     for it _MAP_WAIT at most, then go on with the effort dropped while it
@@ -1453,6 +1475,23 @@ def test_litellms_refusal_on_an_openai_format_api_sends_the_param_as_is(
     refused = {"reasoning_effort": "low", "allowed_openai_params": None, "drop_params": None}
     forced = {**refused, "allowed_openai_params": ["reasoning_effort"]}
     assert asked == [refused, forced, refused, forced]
+
+
+@needs_agents
+def test_a_refusal_naming_no_param_on_an_openai_format_api_learns_the_map(
+        client, monkeypatch):
+    """LiteLLM's GPT-5 rules refusing "xhigh" for an Azure GPT-6 its
+    packaged map lacks name no param to send as is: the request goes again
+    with the published map's entry in, and answers."""
+    pytest.importorskip("litellm")
+    key = "azure/gpt-6.9-test-chat-xhigh"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {key: {
+        "litellm_provider": "azure", "mode": "chat", "supports_reasoning": True,
+        "supports_xhigh_reasoning_effort": True, "supports_function_calling": True}})
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 2)
+    out = client.chat_completions("q", model=key, reasoning_effort="xhigh")
+    assert out.choices[0].message.content == "A"
+    assert len(fetched) == 1 and len(sent) == 2
 
 
 @needs_agents
