@@ -106,6 +106,33 @@ def test_printed_heading_with_extra_text_dissolves_once():
         "Appendix Proofs", "End"]
 
 
+def test_printed_reference_or_continuation_dissolves():
+    contents_line = ("7.4 How we assess financeability 136 "
+                     "7.5 Setting a fairer price control 140")
+    entries = [
+        {"title": "Missing Proofs in Section Enumeration", "level": 1, "page": 2},
+        {"title": "WordNet: tab:wordnet-results Visualizations", "level": 1,
+         "page": 3},
+        {"title": "Financial Performance Summary", "level": 1, "page": 4},
+        {"title": "1. General Information (3.2.S.1)", "level": 1, "page": 5},
+        {"title": "How we'll finance the plan", "level": 1, "page": 6},
+        {"title": "End", "level": 1, "page": 7},
+    ]
+    detected = [_node("D Missing Proofs in section 4", 2),
+                _node("E. WordNet: Table 1 Visualizations", 3),
+                _node("Financial Performance Summary for Fiscal 2015", 4),
+                _node("1. General Information (3.2.S.1) a. Nomenclature "
+                      "(3.2.S.1.1)", 5),
+                _node(contents_line, 6)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=8)
+    assert _titles(merged) == [
+        "Missing Proofs in Section Enumeration",
+        "WordNet: tab:wordnet-results Visualizations",
+        "Financial Performance Summary", "1. General Information (3.2.S.1)",
+        "1. General Information (3.2.S.1) a. Nomenclature (3.2.S.1.1)",
+        "How we'll finance the plan", contents_line, "End"]
+
+
 def test_letter_spaced_duplicate_dissolves():
     entries = [
         {"title": "3 Methodology", "level": 1, "page": 11},

@@ -364,6 +364,28 @@ def _section_key(title: str) -> Optional[tuple[str, str]]:
     return (label or "").lower(), next(number for number in numbers if number)
 
 
+def _shared_head(tokens: list[str], other: list[str]) -> int:
+    count = 0
+    while count < min(len(tokens), len(other)) and tokens[count] == other[count]:
+        count += 1
+    return count
+
+
+def _reference_resolved(tokens: list[str], frame_tokens: list[str]) -> bool:
+    """The print resolves a reference the bookmark kept ("Table 1" for "tab:results")."""
+    if _numeral_token(frame_tokens[0]):
+        return False
+    body = list(tokens)
+    while len(body) > 1 and _numeral_token(body[0]) and body[0] != frame_tokens[0]:
+        body.pop(0)
+    head = _shared_head(body, frame_tokens)
+    foot = _shared_head(body[head:][::-1], frame_tokens[head:][::-1])
+    printed = body[head:len(body) - foot]
+    booked = frame_tokens[head:len(frame_tokens) - foot]
+    return (head + foot >= 2 and 0 < len(printed) <= 3 and printed[-1].isdigit()
+            and bool(booked) and not any(token.isdigit() for token in booked))
+
+
 def _printed_as(title: str, frame_title: str) -> bool:
     """``title`` is ``frame_title`` printed headed, annotated, cut or renamed."""
     tokens, frame_tokens = _title_tokens(title), _title_tokens(frame_title)
@@ -377,6 +399,8 @@ def _printed_as(title: str, frame_title: str) -> bool:
     if (len(tokens) == tail > 1 and tokens[1:] == frame_tokens[1:]
             and _numeral_token(tokens[0]) != _numeral_token(frame_tokens[0])):
         return True
+    if _reference_resolved(tokens, frame_tokens):
+        return True
     if numeral is not None and _numeral_prefix(title) is None:
         core = frame_tokens[len(_title_tokens(numeral)):]
         if len(tokens) < len(core) and core[:len(tokens)] == tokens:
@@ -386,6 +410,11 @@ def _printed_as(title: str, frame_title: str) -> bool:
     if len(tokens) < tail and frame_tokens[:len(tokens)] == tokens:
         return True
     if tokens[:tail] == frame_tokens:
+        bare = _LATEX_SPAN.sub("", title)
+        words = list(_TOKEN.finditer(bare))
+        if len(words) > tail and re.match(r"[a-z]{2,}\b(?![.)])",
+                                          bare[words[tail].start():]):
+            return True
         remark = tokens[tail:]
         return (len(remark) <= 3 and title.rstrip().endswith(".")
                 and not any(token.isdigit() for token in remark))
@@ -654,12 +683,14 @@ def merge_bookmark_tree(
     individually. A bookmark no node has matched yet also takes the first
     node on its page that prints its title after a header (for a numbered
     bookmark, any text before its number: "Chapter 2", a merged parent
-    heading), before a parenthetical or a short remark, cut off (its
-    number may go too), with words inserted inside it ("Line of business
-    and Corporate equity"), with a number for its label word ("A. Proofs"
-    for "Appendix Proofs"), or in new words under the same section key
-    ("Note 26", "2.", "2.1", "第十二条"), or the first node on the next
-    page that prints it behind numbering ("9 Conclusion").
+    heading), before a parenthetical, a short remark or a lowercase
+    continuation ("... for Fiscal 2015"), cut off (its number may go too),
+    with words inserted inside it ("Line of business and Corporate
+    equity"), with a number for its label word ("A. Proofs" for "Appendix
+    Proofs"), with a short reference resolved where the bookmark kept a
+    label ("Table 1" for "tab:wordnet-results"), or in new words under the
+    same section key ("Note 26", "2.", "2.1", "第十二条"), or the first node
+    on the next page that prints it behind numbering ("9 Conclusion").
     Dissolving holds fuzzy matches to a higher bar than title repair: at
     the repair bar, wordy-overlapping titles of distinct sections
     false-match, and a false dissolve deletes a real heading, while an
