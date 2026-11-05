@@ -53,7 +53,9 @@ def test_printed_heading_with_extra_text_dissolves_once():
         {"title": "Note 18 - Leases", "level": 1, "page": 5},
         {"title": "Fair value", "level": 1, "page": 6},
         {"title": "Results", "level": 1, "page": 7},
-        {"title": "End", "level": 1, "page": 8},
+        {"title": "Derivatives netting and collateral", "level": 1, "page": 8},
+        {"title": "Note 26 - Restrictions on cash", "level": 1, "page": 9},
+        {"title": "End", "level": 1, "page": 10},
     ]
     detected = [_node("JPMorgan Chase & Co. Consolidated balance sheets "
                       "(unaudited)", 3),
@@ -61,12 +63,15 @@ def test_printed_heading_with_extra_text_dissolves_once():
                 _node("Note 18 - Leases Firm as lessee", 5),
                 _node("Fair value", 6),
                 _node("Assets measured at fair value", 6),
-                _node("5.2 Ablation Results", 7)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=9)
+                _node("5.2 Ablation Results", 7),
+                _node("Derivatives netting", 8),
+                _node("Note 26 – Restricted cash and other assets", 9)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=11)
     assert _titles(merged) == [
         "Consolidated balance sheets", "Revenue", "Note 18 - Leases",
         "Note 18 - Leases Firm as lessee", "Fair value",
         "Assets measured at fair value", "Results", "5.2 Ablation Results",
+        "Derivatives netting and collateral", "Note 26 - Restrictions on cash",
         "End"]
 
 
@@ -202,7 +207,21 @@ def test_peer_of_a_same_style_detected_child_stays():
     assert _titles(declarations["nodes"]) == ["1. Directors", "2. Controller"]
 
 
-def test_numbering_before_the_candidate_stays():
+def test_references_leave_a_conclusion_holding_its_acknowledgements():
+    entries = [
+        {"title": "Discussion", "level": 1, "page": 15},
+        {"title": "Conclusion", "level": 1, "page": 16},
+    ]
+    detected = [_node("Conclusion", 16, style="S", y=0.1),
+                _node("Acknowledgements", 16, style="S", y=0.12),
+                _node("References", 17, style="S", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=26)
+    assert _titles(merged) == ["Discussion", "Conclusion", "Acknowledgements",
+                               "References"]
+    assert (merged[1]["end_index"], merged[2]["start_index"]) == (17, 17)
+
+
+def test_subsection_on_the_next_bookmarks_page_joins_its_section():
     entries = [
         {"title": "3 Computing", "level": 1, "page": 4},
         {"title": "3.2 CPU", "level": 2, "page": 4},
@@ -211,9 +230,9 @@ def test_numbering_before_the_candidate_stays():
     ]
     detected = [_node("3.2.2 SIMD", 5), _node("3.3 GPU Kernels", 5)]
     merged = merge_bookmark_tree(detected, entries, n_pages=9)
-    gpu = merged[0]["nodes"][1]
-    assert (gpu["title"], gpu["end_index"]) == ("3.3 GPU", 7)
-    assert _titles(gpu["nodes"]) == ["3.2.2 SIMD", "3.3 GPU Kernels"]
+    cpu, gpu = merged[0]["nodes"]
+    assert _titles(cpu["nodes"]) == ["3.2.2 SIMD"]
+    assert (gpu["end_index"], _titles(gpu["nodes"])) == (7, ["3.3 GPU Kernels"])
 
 
 def test_word_led_by_digits_is_no_section_number():

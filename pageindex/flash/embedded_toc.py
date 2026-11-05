@@ -47,6 +47,8 @@ from typing import Optional, Union
 
 import pypdfium2 as pdfium
 
+from .main import REFERENCES_KEYWORDS, _normalize_text_key
+
 IGNORE, SKELETON, FULL = 1, 2, 3
 
 # Same-page titles at or above this similarity refer to the same section.
@@ -68,6 +70,8 @@ _GENERIC_TITLE = re.compile(
 )
 _LATEX_SPAN = re.compile(r"\$.*?\$")
 _PAREN_TAIL = re.compile(r"\s*\([^()]*\)\s*$")
+_LABELLED_NUMBER = re.compile(
+    r"^\s*([A-Za-z]+)\.?\s+(\d{1,3}[A-Z]?(?:\.\d+)*)(?![\w-]|\.\d)")
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _ROMAN = re.compile(r"m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -337,13 +341,32 @@ def _same_text(title: str, other: str) -> bool:
             == _normalize_title("".join(other.split())))
 
 
-def _printed_with_extra(title: str, frame_title: str) -> bool:
-    """``title`` ends with ``frame_title``, a parenthetical aside."""
-    frame_tokens = _title_tokens(frame_title)
+def _labelled_number(title: str) -> Optional[tuple[str, str]]:
+    match = _LABELLED_NUMBER.match(title)
+    return (match.group(1).lower(), match.group(2)) if match else None
+
+
+def _printed_as(title: str, frame_title: str) -> bool:
+    """``title`` is ``frame_title`` printed headed, annotated, cut or reworded."""
+    tokens, frame_tokens = _title_tokens(title), _title_tokens(frame_title)
     tail = len(frame_tokens)
-    return (tail > 0 and _numeral_prefix(title) == _numeral_prefix(frame_title)
-            and frame_tokens in (_title_tokens(title)[-tail:],
-                                 _title_tokens(_PAREN_TAIL.sub("", title))[-tail:]))
+    if not tokens or not tail or _numeral_prefix(title) != _numeral_prefix(frame_title):
+        return False
+    if frame_tokens in (tokens[-tail:],
+                        _title_tokens(_PAREN_TAIL.sub("", title))[-tail:]):
+        return True
+    if len(tokens) < tail and frame_tokens[:len(tokens)] == tokens:
+        return True
+    key = _labelled_number(title)
+    return (key is not None and key == _labelled_number(frame_title)
+            and tokens[:tail] != frame_tokens)
+
+
+def _references_heading(title: str) -> bool:
+    """A references heading as ``find_references`` reads one ("12. References")."""
+    words = _normalize_text_key(title).split()
+    return 1 <= len(words) <= 4 and (" ".join(words) in REFERENCES_KEYWORDS
+                                      or words[-1] in REFERENCES_KEYWORDS)
 
 
 def _same_heading(node: dict, chapter: dict,
@@ -587,31 +610,34 @@ def merge_bookmark_tree(
     the same section number -- or equals one starting on the page before,
     dissolves without a trace, its children re-placed individually. A
     bookmark no node has matched yet also takes the first node on its page
-    that ends with its title, a parenthetical aside. Dissolving holds
+    that prints its title with a header, a parenthetical, a cut-off tail
+    or new words under the same label and number. Dissolving holds
     fuzzy matches to a higher bar than title repair: at the repair bar,
     wordy-overlapping titles of distinct sections false-match, and a
     false dissolve deletes a real heading, while an escaped garbled
     duplicate only leaves a stray leaf.
 
-    A surviving node attaches along its anchor's ancestor chain -- the
-    open sections at its page, the only parents page containment allows.
-    It climbs past a candidate only on positive evidence that it is the
-    candidate's peer, not its child: a numbering prefix outside the
-    candidate's numbering and after it, or the same style fingerprint --
-    face, weight and size as one hash; a larger raw size in a different
-    face is not seniority (margin-box titles run larger-regular than bold
-    subsection headings). Frame nodes learn style and position from the
-    duplicates that dissolve into them; detection exports the
-    ``_style``/``_y`` keys and ``extract_toc`` strips them after the
-    merge. A same-page climb must also leave the candidate real content
-    below its heading -- climbing past it on a near-zero gap would claim
-    the section is empty, the signature of margin-box noise rather than
-    of a tail section. Numbering-driven climbs are exempt: the numbering
-    itself proves the level relation. A climb must reach a numbering
-    parent or the top level; one stopped halfway -- by missing evidence,
-    an earlier number, a same-style detected heading under the candidate,
-    or a candidate with content after the node's page -- leaves the node
-    at the anchor.
+    A surviving numbered node whose section number belongs to a section
+    ending on its page joins that section. Any other node attaches along
+    its anchor's ancestor chain -- the open sections at its page, the only
+    parents page containment allows. It climbs past a candidate only on
+    positive evidence that it is the candidate's peer, not its child: a
+    numbering prefix outside the candidate's numbering and after it, or
+    the same style fingerprint -- face, weight and size as one hash; a
+    larger raw size in a different face is not seniority (margin-box
+    titles run larger-regular than bold subsection headings). Frame nodes
+    learn style and position from the duplicates that dissolve into them;
+    detection exports the ``_style``/``_y`` keys and ``extract_toc``
+    strips them after the merge. A same-page climb must also leave the
+    candidate real content below its heading -- climbing past it on a
+    near-zero gap would claim the section is empty, the signature of
+    margin-box noise rather than of a tail section. Numbering-driven
+    climbs are exempt: the numbering itself proves the level relation. A
+    climb must reach a numbering parent or the top level; one stopped
+    halfway -- by missing evidence, an earlier number, a same-style
+    detected heading under the candidate (references headings aside), or
+    a candidate with content after the node's page -- leaves the node at
+    the anchor.
 
     Two noise filters prune the whole detected tree before placement:
     titles recurring across it (running labels, not sections) and
@@ -622,12 +648,16 @@ def merge_bookmark_tree(
     roots = _build_bookmark_nodes(entries)
     flat: list[dict] = []
     parent_pos: list[Optional[int]] = []
+    last_pos: list[int] = []
 
     def collect(nodes: list[dict], parent: Optional[int]) -> None:
         for node in nodes:
+            pos = len(flat)
             flat.append(node)
             parent_pos.append(parent)
-            collect(node["nodes"], len(flat) - 1)
+            last_pos.append(pos)
+            collect(node["nodes"], pos)
+            last_pos[pos] = len(flat) - 1
 
     collect(roots, None)
     if not flat:
@@ -648,23 +678,33 @@ def merge_bookmark_tree(
                 break
         return idx
 
-    matched: set[int] = set()
+    matched_frames: set[int] = set()
 
     def dissolve_target(node: dict, idx: int) -> Optional[int]:
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             if _same_heading(node, flat[pos], _DISSOLVE_SIMILARITY):
-                matched.add(pos)
+                matched_frames.add(pos)
                 return pos
             pos -= 1
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] == node["start_index"]:
-            if (pos not in matched
-                    and _printed_with_extra(node["title"], flat[pos]["title"])):
-                matched.add(pos)
+            if (pos not in matched_frames
+                    and _printed_as(node["title"], flat[pos]["title"])):
+                matched_frames.add(pos)
                 return pos
             pos -= 1
         return None
+
+    def boundary_parent(node: dict, idx: int) -> Optional[int]:
+        found = None
+        for pos in range(idx):
+            after = last_pos[pos] + 1
+            if (after <= idx
+                    and flat[after]["start_index"] >= node["start_index"]
+                    and _numeral_child(flat[pos]["title"], node["title"])):
+                found = pos
+        return found
 
     def _style_climbs(node: dict, cand: dict) -> bool:
         return (node.get("_style") is not None
@@ -694,9 +734,10 @@ def merge_bookmark_tree(
                 pos = parent_pos[pos]
                 continue
             if (not _style_climbs(node, cand) or _claims_empty(node, cand)
-                    or any(id(child) not in frame_ids
-                           and _style_climbs(node, child)
-                           for child in cand["nodes"])):
+                    or (not _references_heading(node["title"])
+                        and any(id(child) not in frame_ids
+                                and _style_climbs(node, child)
+                                for child in cand["nodes"]))):
                 return idx
             pos = parent_pos[pos]
         return None
@@ -757,7 +798,9 @@ def merge_bookmark_tree(
             for child in children:
                 place(child)
             return
-        chosen = choose_parent(node, idx)
+        chosen = boundary_parent(node, idx)
+        if chosen is None:
+            chosen = choose_parent(node, idx)
         siblings = roots if chosen is None else flat[chosen]["nodes"]
         if _subtree_max_start(node) < range_end[idx]:
             insert_by_page(siblings, node)
