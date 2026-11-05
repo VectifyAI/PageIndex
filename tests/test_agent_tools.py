@@ -2206,6 +2206,114 @@ def test_synth_escape_hatches():
     assert dashed("v") == "ok"
 
 
+def test_synth_injection_attempts_in_parameter_defaults(tmp_path):
+    """Malicious parameter default strings must not be executed or cause
+    syntax errors during tool synthesis. They must be safely preserved and
+    passed as plain data."""
+    import inspect
+    canary = tmp_path / "pwned.txt"
+    calls = []
+
+    class _Bridge:
+        def call_tool(self, name, args):
+            calls.append((name, args))
+            return _text_block("ok"), False
+
+    class _EvilObject:
+        def __repr__(self):
+            canary.write_text("evil_repr_called")
+            return "1; import os; os.system('id')"
+
+    payloads = [
+        f"1;import os;os.system('touch {canary}')",
+        "'); import sys; sys.exit(1); ('",
+        "\nimport os\nos.system('id')\n",
+        "''' + __import__('os').system('id') + '''",
+        "${7*7}",
+        "{{7*7}}",
+        "'; DROP TABLE users; --",
+        _EvilObject(),
+    ]
+
+    for idx, payload in enumerate(payloads):
+        tool = _synth(_Bridge(), {
+            "name": f"safe_tool_{idx}",
+            "description": "Safe tool description",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "code_param": {"type": "string", "default": payload},
+                    "normal_param": {"type": "string"},
+                },
+                "required": ["normal_param"],
+            },
+        })
+
+        assert not canary.exists()
+        # Verify default invocation
+        res = tool(normal_param="hello")
+        assert res == "ok"
+        assert calls[-1] == (f"safe_tool_{idx}", {"normal_param": "hello", "code_param": payload})
+        assert not canary.exists()
+
+        # Verify overriding default works
+        res2 = tool(normal_param="hello", code_param="custom")
+        assert res2 == "ok"
+        assert calls[-1] == (f"safe_tool_{idx}", {"normal_param": "hello", "code_param": "custom"})
+        assert not canary.exists()
+
+
+def test_synth_complex_defaults_and_resolutions():
+    """Tool synthesis safely handles complex strings (newlines, quotes, backslashes,
+    unicode/emojis, JSON literals) in defaults and accurately binds them."""
+    import inspect
+    calls = []
+
+    class _Bridge:
+        def call_tool(self, name, args):
+            calls.append((name, args))
+            return _text_block("ok"), False
+
+    complex_defaults = {
+        "with_quotes": "hello \"world\" and 'single' and `backticks`",
+        "with_newlines": "line1\nline2\r\ntab:\tbackslash:\\",
+        "with_json": '{"nested": {"key": [1, 2, "3"]}}',
+        "with_unicode": "日本語 • 🚀 • 🌟 • 𝒳",
+        "numeric_default": 42,
+        "bool_default": False,
+    }
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "req": {"type": "string"},
+            **{k: {"default": v} for k, v in complex_defaults.items()}
+        },
+        "required": ["req"],
+    }
+
+    tool = _synth(_Bridge(), {
+        "name": "complex_tool",
+        "description": "Tool with complex defaults",
+        "inputSchema": schema,
+    })
+
+    # Check signature parameter defaults
+    sig = inspect.signature(tool)
+    for k, v in complex_defaults.items():
+        assert sig.parameters[k].default == v
+
+    # Calling with only required argument should populate all defaults correctly
+    assert tool(req="run") == "ok"
+    expected = {"req": "run", **complex_defaults}
+    assert calls[-1] == ("complex_tool", expected)
+
+    # Positional invocation resolves properly
+    assert tool("run_pos") == "ok"
+    expected_pos = {"req": "run_pos", **complex_defaults}
+    assert calls[-1] == ("complex_tool", expected_pos)
+
+
 def test_annotation_for_both_nullable_encodings():
     """Servers have emitted nullables as type-arrays and as anyOf unions;
     both must map to Optional, not degrade to Any."""
