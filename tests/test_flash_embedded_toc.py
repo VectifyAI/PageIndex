@@ -336,6 +336,26 @@ def test_heading_read_before_a_bookmark_skips_no_section_between():
     assert merged[0]["end_index"] == 12
 
 
+def test_recurring_section_in_a_heading_style_is_kept():
+    entries = [{"title": "Basics", "level": 1, "page": 1},
+               {"title": "Methods", "level": 1, "page": 10},
+               {"title": "Results", "level": 1, "page": 20}]
+    detected = [
+        _node("1 Basics", 1, style="H", y=0.1, children=[
+            _node("ACME Corp", 2, style="R"), _node("ACME Corp", 3, style="R"),
+            _node("Key Terms", 4, style="H"), _node("Key Terms", 5, style="H"),
+            _node("Key Terms", 6, style="H"), _node("Note:", 7, style="N"),
+            _node("Notes", 8, style="H")]),
+        _node("2 Methods", 10, style="H", y=0.1, children=[
+            _node("ACME Corp", 11, style="R"), _node("Note:", 15, style="N"),
+            _node("Notes", 18, style="H")]),
+        _node("3 Results", 20, style="H", y=0.1, children=[
+            _node("Note:", 25, style="N"), _node("Notes", 28, style="H")])]
+    merged = merge_bookmark_tree(detected, entries, n_pages=30)
+    assert _titles(merged) == ["Basics", "Notes", "Methods", "Notes",
+                               "Results", "Notes"]
+
+
 def test_numbered_children_stay_with_a_spanning_detected_parent():
     entries = [
         {"title": "9.3 Engagement methods", "level": 1, "page": 170},

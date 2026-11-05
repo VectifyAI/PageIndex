@@ -58,8 +58,9 @@ _DISSOLVE_SIMILARITY = 0.9
 _MIN_SECTION_GAP = 0.15
 
 # Backfill noise filters: a normalized title recurring this often across the
-# detected tree is a running label, not a section; a title longer than this
-# is a paragraph lead picked up as a heading.
+# detected tree is a running label, not a section (unless printed like a
+# bookmark's heading and never on adjacent pages: a chapter's "Notes"); a
+# title longer than this is a paragraph lead picked up as a heading.
 _BACKFILL_DUP_MIN = 3
 _BACKFILL_MAX_TITLE = 100
 
@@ -745,8 +746,11 @@ def merge_bookmark_tree(
     Two noise filters prune the whole detected tree before placement:
     titles recurring across it (running labels, not sections) and
     overlong titles (paragraph leads picked up as headings) are spliced
-    out, their children promoted into their place. Nodes wholly before
-    the first bookmark stay at the root.
+    out, their children promoted into their place. A recurring title
+    printed in the style of a bookmark's own heading and never on
+    adjacent pages is a section each chapter repeats (Notes, Exercises,
+    Loan modifications) and stays. Nodes wholly before the first bookmark
+    stay at the root.
     """
     roots = _build_bookmark_nodes(entries)
     flat: list[dict] = []
@@ -858,18 +862,29 @@ def merge_bookmark_tree(
             pos = parent_pos[pos]
         return None
 
-    title_counts: Counter = Counter()
+    title_pages: dict[str, list[int]] = {}
+    # Styles a bookmark's own printed heading uses
+    section_styles: set[str] = set()
+    style_matches: dict[int, Optional[str]] = {}
 
-    def count_titles(nodes: list[dict]) -> None:
+    def survey(nodes: list[dict]) -> None:
         for node in nodes:
-            title_counts[_normalize_title(node["title"])] += 1
-            count_titles(node.get("nodes") or [])
+            norm = _normalize_title(node["title"])
+            title_pages.setdefault(norm, []).append(node["start_index"])
+            idx = anchor_index(node["start_index"])
+            if (node.get("_style") is not None and idx is not None
+                    and dissolve_target(node, idx, style_matches) is not None):
+                section_styles.add(node["_style"])
+            survey(node.get("nodes") or [])
 
-    count_titles(structure)
+    survey(structure)
 
     def filtered_out(node: dict) -> bool:
         norm = _normalize_title(node["title"])
-        if norm and title_counts[norm] >= _BACKFILL_DUP_MIN:
+        pages = sorted(title_pages.get(norm, ()))
+        if (norm and len(pages) >= _BACKFILL_DUP_MIN
+                and not (node.get("_style") in section_styles
+                         and all(b - a > 1 for a, b in zip(pages, pages[1:])))):
             return True
         return len(node["title"]) > _BACKFILL_MAX_TITLE
 
