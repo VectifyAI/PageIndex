@@ -632,7 +632,7 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     model = agent.model
     if not isinstance(model, LitellmModel):
         return None
-    from .utils import _refused
+    from .utils import _joined, _refused
     fetch = model._fetch_response
     replies = _Replies(model.model, nested=not _openai_protocol(model.model))
     # a field this server refused stays out for the process once a request
@@ -657,11 +657,9 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     async def fetching(system_instructions, input, model_settings, *args,
                        **kwargs):
         call_id = str(uuid.uuid4())
-        extra_args = {**(model_settings.extra_args or {}),
-                      "litellm_call_id": call_id}
-        if replies.forced:
-            extra_args["allowed_openai_params"] = sorted(replies.forced.union(
-                extra_args.get("allowed_openai_params") or ()))
+        extra_args = _joined(model_settings.extra_args or {}, {"litellm_call_id": call_id},
+                             {"allowed_openai_params": sorted(replies.forced)}
+                             if replies.forced else {})
         model_settings = dataclasses.replace(model_settings,
                                              extra_args=extra_args)
         _register_fill()

@@ -250,9 +250,10 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
         raise ValueError(
             f"optimize must be 'full', 'merge', or False, got {optimize!r}")
     from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
+    effort = summary_reasoning_effort and summary_reasoning_effort.strip()
     if summary and not is_claude_code(summary_model):
         from ..utils import start_learning_if_effort_dropped
-        start_learning_if_effort_dropped(summary_model)  # downloads while the PDF is read
+        start_learning_if_effort_dropped(summary_model, effort)  # downloads while the PDF is read
     result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
     if not structure:
@@ -271,8 +272,7 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
     from ..utils import (SUMMARY_MAX_WORDS, default_summary_reasoning_effort,
                          learn_model_if_effort_dropped)
     if summary and structure and not is_claude_code(summary_model):
-        learn_model_if_effort_dropped(summary_model)  # before the default reads the map
-    effort = summary_reasoning_effort and summary_reasoning_effort.strip()
+        learn_model_if_effort_dropped(summary_model, effort)  # before the default or the chosen check reads the map
     defaulted = not effort
     if summary and structure and defaulted:
         effort = default_summary_reasoning_effort(summary_model)

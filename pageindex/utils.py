@@ -211,14 +211,18 @@ _MAP_WAIT = 3  # seconds summaries wait on the download, which goes on past it
 
 
 def _in_model_map(model):
-    """Whether LiteLLM's map holds `model` itself, as LiteLLM's own lookup
-    finds it (provider included); its fallback rules answer ids the map
-    lacks with a key the map doesn't hold."""
+    """Whether LiteLLM's map holds `model` itself, or the indexing backend's
+    base_model LiteLLM reads it as, as LiteLLM's own lookup finds it
+    (provider included); its fallback rules answer ids the map lacks with a
+    key the map doesn't hold."""
     import litellm
-    try:
-        return litellm.get_model_info(model).get("key") in litellm.model_cost
-    except Exception:
-        return False
+    for name in filter(None, ((_llm_backend.get() or {}).get("base_model"), model)):
+        try:
+            if litellm.get_model_info(name).get("key") in litellm.model_cost:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def _openai_format(model):
@@ -232,35 +236,42 @@ def _openai_format(model):
                                    and not _claude_routed(model))
 
 
-def _effort_dropped_unmapped(model):
+def _effort_dropped_unmapped(model, effort=None):
     """LiteLLM's packaged map lacks `model` and LiteLLM so drops a
-    reasoning_effort sent with it: drop_params drops it unseen, leaving no
-    refusal to learn on. Not on an OpenAI-format API, where the effort is
-    the API's own field and goes as is (summary_effort_ladder)."""
+    reasoning_effort sent with it, or the level the caller chose (`effort`,
+    else the indexing backend's: "xhigh" on openai/gpt-6.1-terra):
+    drop_params drops it unseen, leaving no refusal to learn on. Not on an
+    OpenAI-format API, where the effort is the API's own field and goes as
+    is (summary_effort_ladder)."""
     import litellm
     model = _litellm_model(model)
+    if _in_model_map(model) or _openai_format(model):
+        return False
     provider, name = model.split("/", 1)
-    return not (_in_model_map(model) or _openai_format(model)) and "reasoning_effort" not in (
-        litellm.get_supported_openai_params(model=name, custom_llm_provider=provider) or [])
+    if "reasoning_effort" not in (litellm.get_supported_openai_params(
+            model=name, custom_llm_provider=provider) or []):
+        return True
+    effort = effort or (_llm_backend.get() or {}).get("reasoning_effort")
+    return bool(effort) and _litellm_refuses(model, {"reasoning_effort": effort}) is not None
 
 
-def start_learning_if_effort_dropped(model) -> None:
+def start_learning_if_effort_dropped(model, effort=None) -> None:
     """Starts the published map's download where
     learn_model_if_effort_dropped will want it, so the document is read
     meanwhile. The check runs here: a thread importing LiteLLM would leave
     a child forked meanwhile waiting on its import lock."""
     try:
-        if not _MAP_SET_BY_USER and _effort_dropped_unmapped(model):
+        if not _MAP_SET_BY_USER and _effort_dropped_unmapped(model, effort):
             _published_map()
     except Exception:
         pass  # learn_model_if_effort_dropped meets it where it can raise
 
 
-def learn_model_if_effort_dropped(model) -> None:
+def learn_model_if_effort_dropped(model, effort=None) -> None:
     """learn_published_models where _effort_dropped_unmapped, waiting
     _MAP_WAIT at most for the download: past it the summaries go on with
     the effort dropped, and a later document in the process learns it."""
-    if _MAP_SET_BY_USER or not _effort_dropped_unmapped(model):
+    if _MAP_SET_BY_USER or not _effort_dropped_unmapped(model, effort):
         return
     from concurrent.futures import wait
     if wait([_published_map()], timeout=_MAP_WAIT).not_done:
@@ -1351,8 +1362,9 @@ def summary_effort_ladder(model):
     blind try costs a refusal), and, on an OpenAI-format API, a model
     LiteLLM doesn't know gets the effort as is: it is that API's own field.
     Never one LiteLLM sends as thinking turned on (an effort on a model that
-    thinks only when asked: a Claude model behind a Bedrock ARN). Less the
-    rungs this process saw the server refuse."""
+    thinks only when asked: a Claude model behind a Bedrock ARN, Amazon
+    Nova 2 by its reasoningConfig). Less the rungs this process saw the
+    server refuse."""
     try:
         model = _litellm_model(model)
     except Exception:  # the call itself will say why
@@ -1369,7 +1381,8 @@ def summary_effort_ladder(model):
             if not sent and not _in_model_map(model) and _openai_format(model):
                 rung["allowed_openai_params"] = ["reasoning_effort"]
                 sent = _sends(model, rung)
-            if sent and (sent.get("thinking") or {}).get("type") in (None, "disabled"):
+            switch = sent.get("thinking") or sent.get("reasoningConfig") or {}
+            if sent and switch.get("type") in (None, "disabled"):
                 rungs.append(rung)
     refused = _refused(model, _base(_llm_backend.get() or {}))
     return [rung for rung in rungs if _rung_key(rung) not in refused]
@@ -1443,7 +1456,8 @@ def chosen_effort(model, effort, name="reasoning_effort"):
         least = next((level for level in SUMMARY_EFFORT_LADDER
                       if _litellm_refuses(model, {"reasoning_effort": level}) is None), None)
         if "reasoning_effort" not in (litellm.get_supported_openai_params(
-                model=bare, custom_llm_provider=provider) or []):
+                model=bare, custom_llm_provider=provider,
+                base_model=(_llm_backend.get() or {}).get("base_model")) or []):
             hint = "it takes no reasoning effort: leave it unset."
         elif least and effort in SUMMARY_EFFORT_LADDER:
             hint = f"pass {least!r}, the least it takes, or leave it unset."

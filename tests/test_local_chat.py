@@ -1052,6 +1052,27 @@ def test_a_call_leaves_what_another_call_forgot_forgotten(monkeypatch):
 
 
 @needs_agents
+def test_forced_params_join_the_callers_allowed_openai_params(monkeypatch):
+    """Params a refusal forced join the caller's own
+    allowed_openai_params, never replace them, as on the index lane."""
+    pytest.importorskip("litellm")
+    from agents import Agent, ModelSettings
+    from agents.extensions.models.litellm_model import LitellmModel
+    model = LitellmModel(model="azure/test-prod-deployment")
+    seen = []
+
+    async def fetch(system_instructions, input, model_settings, *args, **kwargs):
+        seen.append(set(model_settings.extra_args["allowed_openai_params"]))
+        return _litellm_reply("A")
+    monkeypatch.setattr(model, "_fetch_response", fetch)
+    replies = local_chat._keep_reply_fields(Agent(name="a", model=model), [])
+    replies.forced.add("reasoning_effort")
+    asyncio.run(model._fetch_response(None, [], ModelSettings(
+        extra_args={"allowed_openai_params": ["service_tier"]})))
+    assert seen == [{"service_tier", "reasoning_effort"}]
+
+
+@needs_agents
 def test_refused_fields_go_again_one_by_one(client, store_path, monkeypatch):
     """Each 400 refuses the field it names, the Agents SDK's own too
     (reasoning_content, for a DeepSeek name), until one goes through."""
@@ -1225,6 +1246,31 @@ def test_indexing_learns_a_model_whose_effort_litellm_would_drop(monkeypatch):
     assert len(fetched) == 1 and sent() == "none"
 
 
+def test_a_chosen_level_litellm_refuses_learns_the_published_map(monkeypatch):
+    """A chosen level LiteLLM refuses for a model its packaged map lacks
+    ("xhigh" on a GPT-6 newer than it) learns the published map, OpenAI's
+    own API included, then goes: chosen for the summaries or in the
+    index backend. A level LiteLLM takes there downloads nothing."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import _litellm_refuses, _llm_backend, learn_model_if_effort_dropped
+    xhigh = {"reasoning_effort": "xhigh"}
+    for name, backend, effort in (("gpt-6.9-test-chosen-xhigh", {}, "xhigh"),
+                                  ("gpt-6.9-test-backend-xhigh", xhigh, None)):
+        model = f"openai/{name}"
+        fetched = _publish(monkeypatch, {name: {
+            "litellm_provider": "openai", "mode": "chat", "supports_reasoning": True,
+            "supports_xhigh_reasoning_effort": True}})
+        learn_model_if_effort_dropped(model)
+        learn_model_if_effort_dropped(model, "high")
+        assert not fetched and _litellm_refuses(model, xhigh), name
+        token = _llm_backend.set(backend)
+        try:
+            learn_model_if_effort_dropped(model, effort)
+        finally:
+            _llm_backend.reset(token)
+        assert len(fetched) == 1 and _litellm_refuses(model, xhigh) is None, name
+
+
 def test_summaries_wait_on_the_published_map_at_most_map_wait(monkeypatch):
     """The early start begins the one download on a thread; summaries wait
     for it _MAP_WAIT at most, then go on with the effort dropped while it
@@ -1246,7 +1292,8 @@ def test_summaries_wait_on_the_published_map_at_most_map_wait(monkeypatch):
     model = f"mistral/{name}"
     threads, dropped = [], utils._effort_dropped_unmapped
     monkeypatch.setattr(utils, "_effort_dropped_unmapped",
-                        lambda m: threads.append(threading.current_thread()) or dropped(m))
+                        lambda m, effort=None: threads.append(threading.current_thread())
+                        or dropped(m, effort))
     utils.start_learning_if_effort_dropped(model)
     # checked where it's called (a thread importing LiteLLM would hang a fork)
     assert threads == [threading.current_thread()] and utils._published is not None

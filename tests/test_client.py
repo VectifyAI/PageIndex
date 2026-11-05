@@ -4275,18 +4275,23 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
         assert all("reasoning_effort" not in p for p in expands)
 
     # a model LiteLLM's packaged map lacks is learned before the default
-    # reads it, its download started before the PDF is read
-    order = []
+    # reads it, its download started before the PDF is read; both weigh a
+    # chosen effort
+    order, efforts = [], []
     monkeypatch.setattr(pageindex.utils, "start_learning_if_effort_dropped",
-                        lambda model: order.append("start"))
+                        lambda model, effort: order.append("start") or efforts.append(effort))
     monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: order.append("read") or {
         "structure": copy.deepcopy(tree), "page_texts": list(pages)})
     monkeypatch.setattr(pageindex.utils, "learn_model_if_effort_dropped",
-                        lambda model: order.append("learn"))
+                        lambda model, effort: order.append("learn") or efforts.append(effort))
     monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
                         lambda model: order.append("default"))
     flash_api.page_index_flash(str(pdf), summary_model="m", optimize=False)
     assert order == ["start", "read", "learn", "default"]
+    efforts.clear()
+    flash_api.page_index_flash(str(pdf), summary_model="m", optimize=False,
+                               summary_reasoning_effort=" high ")
+    assert efforts == ["high", "high"]
 
     order.clear()
     monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
@@ -4369,6 +4374,7 @@ def test_summary_effort_ladder_is_what_litellm_would_send():
                           ("bedrock/qwen.test-unknown-v9", []),
                           ("bedrock/arn:aws:bedrock:us-east-1:123456789012:"
                            "application-inference-profile/test", []),
+                          ("bedrock/us.amazon.nova-2-lite-v1:0", []),
                           ("deepseek/deepseek-chat", efforts("none")),
                           ("anthropic/claude-3-7-sonnet-20250219", [off, between, low]),
                           ("anthropic/claude-haiku-5-5", [off, between, low]),
@@ -4390,8 +4396,9 @@ def test_summary_effort_ladder_is_what_litellm_would_send():
 def test_effort_checks_read_the_backend_as_the_call_carries_it():
     """The index backend's base_model and allowed_openai_params count where
     the summary ladder and a chosen effort ask LiteLLM: a deployment named
-    for nothing LiteLLM knows takes its base_model's ladder and refusals,
-    and the caller's own allowed_openai_params let a level through."""
+    for nothing LiteLLM knows is known as its base_model, taking its ladder
+    and refusals, and the caller's own allowed_openai_params let a level
+    through."""
     pytest.importorskip("litellm")
     from pageindex.utils import _llm_backend, chosen_effort, summary_effort_ladder
 
@@ -4404,10 +4411,14 @@ def test_effort_checks_read_the_backend_as_the_call_carries_it():
     nano = {"base_model": "azure/gpt-5-nano"}
     assert under(nano, summary_effort_ladder, "azure/my-nano-deploy") == [
         {"reasoning_effort": "minimal"}, {"reasoning_effort": "low"}]
-    with pytest.raises(ValueError, match="LiteLLM drops it"):
+    with pytest.raises(ValueError, match="pass 'minimal', the least it takes"):
         under(nano, chosen_effort, "azure/my-nano-deploy", "none")
     assert under(nano, chosen_effort, "azure/my-nano-deploy", "minimal") == {
         "reasoning_effort": "minimal"}
+    four = {"base_model": "azure/gpt-4o"}
+    assert under(four, summary_effort_ladder, "azure/my-4o-deploy") == []
+    with pytest.raises(ValueError, match="it takes no reasoning effort"):
+        under(four, chosen_effort, "azure/my-4o-deploy", "low")
     with pytest.raises(ValueError, match="azure/gpt-4o takes no"):
         chosen_effort("azure/gpt-4o", "low")
     assert under({"allowed_openai_params": ["reasoning_effort"]}, chosen_effort,
