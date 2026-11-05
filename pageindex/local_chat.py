@@ -23,7 +23,11 @@ from urllib.parse import urlparse
 from .agent_tools import _base_instructions, targeting_block
 from .chat_stream import (ChatStream, MessagesStream, ChatObject,
                           _yaml_as_dict)
-from .errors import PageIndexAPIError, _pageindex_cause
+from .errors import (
+    PageIndexAPIError,
+    PageIndexValidationError,
+    _pageindex_cause,
+)
 
 _yaml_as_dict()  # every ChatObject subclass lives in this module
 
@@ -52,7 +56,7 @@ def _system_text(content: Any) -> str:
                  if isinstance(part, dict) and isinstance(part.get("text"), str)]
         if texts and len(texts) == len(content):
             return "\n".join(texts)
-    raise PageIndexAPIError(
+    raise PageIndexValidationError(
         "system message content must be a string or a list of text parts."
     )
 
@@ -103,12 +107,12 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
     lanes = 'chat(protocol="responses") or chat(protocol="messages")'
     messages = list(messages)
     if not messages:
-        raise PageIndexAPIError("messages must be a non-empty list.")
+        raise PageIndexValidationError("messages must be a non-empty list.")
     system_texts: list[str] = []
     history: list[dict] = []
     for message in messages:
         if not isinstance(message, dict) or "role" not in message:
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "Each message must be a dict with 'role' and 'content'.")
         role = message["role"]
         if role in ("system", "developer"):
@@ -121,7 +125,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
             output = message.get("content")
             if (not isinstance(call_id, str)
                     or not isinstance(output, (str, list))):
-                raise PageIndexAPIError(
+                raise PageIndexValidationError(
                     "A tool message needs a string tool_call_id and string "
                     "or list content.")
             # the SDK reads Chat Completions content parts as they are
@@ -130,7 +134,7 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
         elif role in ("user", "assistant"):
             content = message.get("content")
             if not isinstance(content, str):
-                raise PageIndexAPIError(
+                raise PageIndexValidationError(
                     f"{text_only} takes text messages only: content must be "
                     "a string. For images or other structured items, use an "
                     f"API model with {lanes}; for tool history, an API chat "
@@ -140,13 +144,13 @@ def _split_chat_messages(messages, text_only: Optional[str] = None,
                 )
             history.append({"role": role, "content": content})
         else:
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 f"{text_only} takes text messages only: no {role!r} "
                 "messages. For tool history, use an API chat model."
                 if text_only else f"Unsupported role {role!r} on this lane."
             )
     if not history:
-        raise PageIndexAPIError("messages must contain a user or assistant "
+        raise PageIndexValidationError("messages must contain a user or assistant "
                                 "message.")
     return system_texts, history
 
@@ -715,7 +719,7 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         try:
             sdk_client = openai.AsyncOpenAI(**_sdk_backend(backend))
         except (openai.OpenAIError, TypeError) as exc:
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 f"The OpenAI backend is not configured: {exc}") from exc
         # A caller-owned transport must survive the per-call close.
         sdk_client._pageindex_caller_http = "http_client" in (backend or {})
@@ -725,7 +729,7 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         from agents.extensions.models.litellm_model import LitellmModel
         import litellm
     except ImportError as exc:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"'{model_name}' routes through LiteLLM, which failed to "
             f"import: {exc}") from exc
     from .utils import _litellm_model, _mute_litellm_bridge_usage_warning
@@ -733,7 +737,7 @@ def _openai_model(protocol: str, model_name: str, backend=None):
     try:
         wire = _litellm_model(model_name)
     except litellm.NotFoundError as exc:
-        raise PageIndexAPIError(str(exc)) from exc
+        raise PageIndexValidationError(str(exc)) from exc
     return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
                         base_url=(backend or {}).get("base_url"))
 
@@ -861,12 +865,12 @@ def _refuse_skeleton(extra_body) -> None:
     if extra_body is None:
         return
     if not isinstance(extra_body, Mapping):
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "extra_body must be a dict of request fields, got "
             f"{type(extra_body).__name__}.")
     hit = sorted(_SKELETON_KEYS.intersection(extra_body))
     if hit:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"extra_body cannot carry {', '.join(hit)}: the managed prompt, "
             "conversation and tools are the SDK's. Extend the prompt with "
             "instructions= or a leading system row; pass the conversation "
@@ -874,7 +878,7 @@ def _refuse_skeleton(extra_body) -> None:
     hit = sorted(set(_ARGUMENT_KEYS).intersection(extra_body))
     if hit:
         use = dict.fromkeys(_ARGUMENT_KEYS[key] for key in hit)
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"extra_body cannot carry {', '.join(hit)}: use "
             f"{' / '.join(use)} instead.")
 
@@ -949,7 +953,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
             "extra_args": extra_args,
             **routed})
     except ValidationError as exc:
-        raise PageIndexAPIError(f"Invalid model settings: {exc}") from exc
+        raise PageIndexValidationError(f"Invalid model settings: {exc}") from exc
     effort = settings.reasoning.effort if settings.reasoning else None
     args = settings.extra_args or {}
     if protocol == "chat" and "none" in (effort, args.get("reasoning_effort")) \
@@ -975,7 +979,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
 def _validate_max_turns(max_turns) -> None:
     if max_turns is not None and (not isinstance(max_turns, int)
                                   or max_turns < 1):
-        raise PageIndexAPIError("max_turns must be a positive integer.")
+        raise PageIndexValidationError("max_turns must be a positive integer.")
 
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
@@ -1410,23 +1414,23 @@ def _process_options(show_process) -> dict:
     if show_process is True:
         return dict(_PROCESS_DEFAULTS)
     if not isinstance(show_process, Mapping):
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "show_process must be True, False, or a dict with the keys "
             "thinking / tool_call / tool_result (bools) and max_chars "
             "(int).")
     unknown = set(show_process) - set(_PROCESS_DEFAULTS)
     if unknown:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "Unknown show_process keys: "
             f"{', '.join(sorted(map(repr, unknown)))} "
             "— valid keys: thinking, tool_call, tool_result, max_chars.")
     options = {**_PROCESS_DEFAULTS, **show_process}
     for key in ("thinking", "tool_call", "tool_result"):
         if not isinstance(options[key], bool):
-            raise PageIndexAPIError(f"show_process[{key!r}] must be a bool.")
+            raise PageIndexValidationError(f"show_process[{key!r}] must be a bool.")
     cap = options["max_chars"]
     if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "show_process['max_chars'] must be a positive int.")
     return options
 
@@ -1646,7 +1650,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     _validate_max_turns(max_turns)
     if isinstance(messages, str):
         if not messages.strip():
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 "messages must be a non-empty string or a list of "
                 "message dicts.")
         messages = [{"role": "user", "content": messages}]
@@ -1697,7 +1701,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          ) -> Union[ChatObject, Iterator[str],
                                     Iterator[ChatObject]]:
     if enable_citations:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "enable_citations needs the managed chat endpoint — "
             + ("drop the chat model configuration to use it, or "
                if getattr(client, "api_key", None) else "")
@@ -1863,7 +1867,7 @@ def run_responses(client, input, model: Optional[str] = None,
             and all(isinstance(item, dict) for item in input)):
         items = list(input)
     else:
-        raise PageIndexAPIError("messages must be a non-empty string or list "
+        raise PageIndexValidationError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)
@@ -2078,13 +2082,13 @@ def _require_anthropic() -> None:
     try:
         import anthropic
     except ImportError as exc:
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "chat(protocol='messages') drives your own chat model and "
             "requires the Anthropic SDK — "
             "pip install anthropic (or pip install 'pageindex[anthropic]')."
         ) from exc
     if tuple(int(n) for n in anthropic.__version__.split(".")[:2]) < (0, 122):
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             "chat(protocol='messages') requires anthropic 0.122.0 or newer, "
             f"found {anthropic.__version__} — pip install -U anthropic.")
 
@@ -2124,7 +2128,7 @@ def _anthropic_client(backend, route):
     except (anthropic.AnthropicError, ValueError, TypeError) as exc:
         # Vertex/Foundry refuse a missing region or credential right at
         # construction, each with its own type; same contract for all.
-        raise PageIndexAPIError(
+        raise PageIndexValidationError(
             f"The Anthropic backend is not configured: {exc}") from exc
     if key is not None and len(_ANTHROPIC_CLIENTS) < 8:
         # cache capped at 8 backends; the tail constructs per call.
@@ -2148,7 +2152,7 @@ def _anthropic_system(client, extra_system) -> list[dict]:
         return blocks
     if isinstance(extra_system, list):
         return blocks + list(extra_system)
-    raise PageIndexAPIError("system must be a string or a list of blocks.")
+    raise PageIndexValidationError("system must be a string or a list of blocks.")
 
 
 def _cache_marks(system_blocks, messages) -> int:
@@ -2271,7 +2275,7 @@ def run_messages(client, messages, model: str, route: str,
         messages = [{"role": "user", "content": messages}]
     if (not isinstance(messages, list) or not messages
             or not all(isinstance(message, dict) for message in messages)):
-        raise PageIndexAPIError("messages must be a non-empty string or a "
+        raise PageIndexValidationError("messages must be a non-empty string or a "
                                 "list of message dicts.")
     scope = client._local_doc_scope(doc_id)
     block = targeting_block(client, doc_id, folder_id)

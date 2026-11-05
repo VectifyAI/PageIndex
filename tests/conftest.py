@@ -7,6 +7,12 @@ def _llm_key(monkeypatch):
     claude-code/ index calls run in processes unless a test opens workflows."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # Non-empty placeholder for PageIndexCloudClient(api_key=...) fixtures
+    # that never reach the network. Real keys are loaded from
+    # PAGEINDEX_API_KEY in production code; tests gated on a live key
+    # (test_agent_tools::LIVE_KEY) keep using PAGEINDEX_API_KEY and
+    # therefore keep their skip behavior.
+    monkeypatch.setenv("PAGEINDEX_TEST_API_KEY", "pi-test-key")
     monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "0")
 
 

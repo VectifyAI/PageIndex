@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 
 from .chat_stream import ChatStream, MessagesStream, ChatObject
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexValidationError
 from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
                     IndexConfig, LocalIndexConfig)
 
@@ -16,7 +16,7 @@ if _TYPE_CHECKING:
 
 __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
-    "PageIndexAPIError",
+    "PageIndexAPIError", "PageIndexValidationError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
     "ChatProcessOptions", "ChatStream", "MessagesStream", "ChatObject",
     "page_index", "page_index_main", "page_index_flash",
