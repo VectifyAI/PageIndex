@@ -313,7 +313,9 @@ class _Replies:
         self.missed = False  # a request went out without the fill
         self.unanswered: Optional[bool] = None  # the latest stream, so far
         self.sent: set = set()  # latest request's fields a 400 may refuse
-        self.refused: set = set()  # fields a 400 refused in this call
+        self.refused: set = set()  # fields a 400 refused in this call, or before (_keep_reply_fields)
+        self.inherited: set = set()  # of those, the ones refused before
+        self.forced: set = set()  # params LiteLLM refused that go as they are
 
     def _call_id(self, call: dict) -> str:
         # LiteLLM folds a Gemini signature into the id; the SDK strips it
@@ -439,13 +441,15 @@ def _keep_redacted(translate):
 
 
 def _register_fill() -> None:
-    """The LiteLLM pre-request hook that fills a run's requests, in
-    litellm.callbacks: added before each request, again if a caller
+    """The LiteLLM pre-request hook that fills a run's requests, and takes
+    a "none" effort off where a Claude thinking switch stands in for it,
+    in litellm.callbacks: added before each request, again if a caller
     replaced the list. The first call also wraps LiteLLM's Converse
     thinking converter (_keep_redacted)."""
     global _fill_hook
     import litellm
     from litellm.integrations.custom_logger import CustomLogger
+    from .utils import _claude_routed
     with _FILL_LOCK:
         if _fill_hook is None:
             name = "translate_thinking_blocks_to_reasoning_content_blocks"
@@ -466,6 +470,12 @@ def _register_fill() -> None:
                             or not isinstance(kwargs.get("messages"), list)):
                         return None
                     messages = replies.fill(kwargs["messages"])
+                    if (kwargs.get("reasoning_effort") == "none" and "thinking" in kwargs
+                            and _claude_routed(str(kwargs.get("model") or ""))):
+                        # the switch stands in for "none" (_openai_agent): beside
+                        # it, LiteLLM's Databricks route drops both
+                        kwargs = {key: value for key, value in kwargs.items()
+                                  if key != "reasoning_effort"}
                     if (kwargs.get("cache_control_injection_points")
                             and _gateway(str(kwargs.get("model") or ""),
                                          kwargs.get("base_url"))):
@@ -539,31 +549,64 @@ async def _again_with_published_models():
     return False
 
 
-def _chat_retry(replies: _Replies):
-    """Once again after LiteLLM refused the request itself, with the
-    entries its packaged model map lacks taken from the published one (a
-    model newer than the package). Again at once without the fields a 400
-    names, of those the request had that may be refused, for the rest of
-    the call: each retry refuses what its 400 named. A reply with no
-    choices goes again, as on the index lane. Anything else by the SDK's
-    one retry rule, within retry.CHAT_RETRIES."""
+def _litellm_allows(text) -> set:
+    """The params a LiteLLM refusal says to send as allowed_openai_params."""
+    import ast
+    found = re.search(r"allowed_openai_params=(\[[^\]]*\])", text)
+    try:
+        return set(ast.literal_eval(found.group(1))) if found else set()
+    except (ValueError, SyntaxError):
+        return set()
+
+
+def _chat_retry(replies: _Replies, remembered: set):
+    """Once again after LiteLLM refused the request itself for a model its
+    map lacks: on an OpenAI-format API with the params it named as they are,
+    that API's own fields (as summaries send an effort), where it named
+    none (its GPT-5 rules refusing "xhigh") and elsewhere with the entries
+    its packaged model map lacks taken from the published one (a model
+    newer than the package). A model the map holds gains nothing from
+    either. Again at once without the fields a 400 names, of those the
+    request had that may be refused, for the rest of the call, and of the
+    process at that model and base URL once a request goes through without
+    it (_keep_reply_fields); with one a 400 names that the call withheld
+    only as the process remembered it refused, forgotten. Each retry acts
+    on what its 400 named. A reply with no choices goes again, as on the
+    index lane. Anything else by the SDK's one retry rule, within
+    retry.CHAT_RETRIES."""
     from agents import ModelRetrySettings, RetryDecision
     from litellm.exceptions import UnsupportedParamsError
     from .retry import CHAT_RETRIES, SDK_MAX_DELAY, agent_policy, delay
-    learned = False
+    from .utils import _in_model_map, _openai_format
+    lifted = False
 
     def policy(context):
-        nonlocal learned
+        nonlocal lifted
         if context.normalized.status_code in (400, 422):
-            if (isinstance(context.error, UnsupportedParamsError)
-                    and not learned):
-                learned = True
-                return _again_with_published_models()
             text = str(context.error)
-            named = {key for key in replies.sent
-                     if re.search(rf"\b{re.escape(key)}\b", text)}
-            if named:
-                replies.refused.update(named)
+            if (isinstance(context.error, UnsupportedParamsError)
+                    and not lifted):
+                lifted = True
+                if not _in_model_map(replies.model):
+                    if not _openai_format(replies.model):
+                        return _again_with_published_models()
+                    replies.forced.update(_litellm_allows(text))
+                    if replies.forced:
+                        return RetryDecision(retry=True, delay=0)
+                    return _again_with_published_models()
+
+            def named(keys):
+                return {key for key in keys
+                        if re.search(rf"\b{re.escape(key)}\b", text)}
+            wanted = named(replies.inherited)
+            if wanted:
+                replies.refused -= wanted
+                replies.inherited -= wanted
+                remembered.difference_update(wanted)
+                return RetryDecision(retry=True, delay=0)
+            refused = named(replies.sent)
+            if refused:
+                replies.refused.update(refused)
                 return RetryDecision(retry=True, delay=0)
         if getattr(context.error, "no_choices", False):
             return RetryDecision(retry=True, delay=delay(
@@ -591,8 +634,19 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     model = agent.model
     if not isinstance(model, LitellmModel):
         return None
+    from .utils import _joined, _refused
     fetch = model._fetch_response
     replies = _Replies(model.model, nested=not _openai_protocol(model.model))
+    # a field this server refused stays out for the process once a request
+    # went through without it: a 400 naming a field it wants instead
+    # (DeepSeek's missing reasoning_content) never gets that far
+    remembered = _refused(model.model, model.base_url)
+    replies.refused = set(remembered)
+    replies.inherited = set(remembered)
+
+    def through():
+        # its own refusals only: a field another call forgot meanwhile stays forgotten
+        remembered.update(replies.refused - replies.inherited)
     for message in messages:
         if not (isinstance(message, dict)
                 and message.get("role") == "assistant"):
@@ -605,8 +659,11 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
     async def fetching(system_instructions, input, model_settings, *args,
                        **kwargs):
         call_id = str(uuid.uuid4())
-        model_settings = dataclasses.replace(model_settings, extra_args={
-            **(model_settings.extra_args or {}), "litellm_call_id": call_id})
+        extra_args = _joined(model_settings.extra_args or {}, {"litellm_call_id": call_id},
+                             {"allowed_openai_params": sorted(replies.forced)}
+                             if replies.forced else {})
+        model_settings = dataclasses.replace(model_settings,
+                                             extra_args=extra_args)
         _register_fill()
         _REQUESTS[call_id] = replies
         try:
@@ -620,6 +677,7 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
             if not result.choices:
                 raise _no_choices(model.model)
             replies.record(result.choices[0].message.model_dump())
+            through()
             return result
         create = getattr(result[1], "chunk_creator", None)
         if create is not None:  # LiteLLM's CustomStreamWrapper
@@ -635,14 +693,16 @@ def _keep_reply_fields(agent, messages) -> Optional[_Replies]:
         async with aclosing(stream_response(*args, **kwargs)) as events:  # type: ignore[arg-type]
             async for event in events:
                 # before the end, the SDK's retry may still send it again
-                if event.type == "response.completed" and replies.unanswered:
-                    raise _no_choices(model.model)
+                if event.type == "response.completed":
+                    if replies.unanswered:
+                        raise _no_choices(model.model)
+                    through()
                 yield event
 
     model._fetch_response = fetching
     model.stream_response = streaming
     agent.model_settings = dataclasses.replace(
-        agent.model_settings, retry=_chat_retry(replies))
+        agent.model_settings, retry=_chat_retry(replies, remembered))
     return replies
 
 
@@ -668,10 +728,8 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         raise PageIndexAPIError(
             f"'{model_name}' routes through LiteLLM, which failed to "
             f"import: {exc}") from exc
-    from .utils import (_litellm_model, _mute_litellm_bridge_usage_warning,
-                        _quiet_litellm)
+    from .utils import _litellm_model, _mute_litellm_bridge_usage_warning
     _mute_litellm_bridge_usage_warning()
-    _quiet_litellm()
     try:
         wire = _litellm_model(model_name)
     except litellm.NotFoundError as exc:
@@ -903,7 +961,7 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                 "reasoning_effort='none'; pass 'low' or leave it unset.")
         swap = _claude_none(model_name)
         if swap:
-            # LiteLLM keeps a thinking switch and drops the "none" beside it
+            # the request hook (_register_fill) takes the "none" off beside it
             settings = dataclasses.replace(settings, extra_args={**args, **swap})
     return Agent(
         name="PageIndex",
