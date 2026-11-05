@@ -292,6 +292,7 @@ class LocalAPI:
         else:
             structure = self._require_data(
                 self._store.get_tree(doc_id), "Failed to get tree result")
+            self._require_pages(doc_id, "Failed to get tree result")
         result = [_format_tree_node(node, node_summary) for node in structure]
         return self._completed_envelope(doc_id, result, meta)
 
@@ -331,7 +332,34 @@ class LocalAPI:
         if not pages:
             raise PageIndexAPIError(
                 f"{error_prefix}: stored document has no page content.")
-        return pages
+        page_num = self._require_doc(doc_id, error_prefix).get("pageNum")
+        by_index = {}
+        for page in pages:
+            if not isinstance(page, dict):
+                raise PageIndexAPIError(
+                    f"{error_prefix}: stored document page cache has a non-object entry.")
+            index = page.get("page_index")
+            if (not isinstance(index, int) or isinstance(index, bool)
+                    or index < 1):
+                raise PageIndexAPIError(
+                    f"{error_prefix}: stored document page cache has invalid "
+                    f"page_index {index!r}.")
+            if index in by_index:
+                raise PageIndexAPIError(
+                    f"{error_prefix}: stored document page cache repeats "
+                    f"page_index {index}.")
+            if not isinstance(page.get("markdown"), str):
+                raise PageIndexAPIError(
+                    f"{error_prefix}: stored document page cache page {index} "
+                    "has non-string markdown.")
+            by_index[index] = page
+        expected = list(range(1, page_num + 1))
+        if sorted(by_index) != expected:
+            raise PageIndexAPIError(
+                f"{error_prefix}: stored document page cache does not match "
+                f"pageNum={page_num}: expected pages 1..{page_num}, found "
+                f"{sorted(by_index)}.")
+        return [by_index[index] for index in expected]
 
     def _completed_envelope(self, doc_id: str, result, meta: dict) -> dict[str, Any]:
         return {
