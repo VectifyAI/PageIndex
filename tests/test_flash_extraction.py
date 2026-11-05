@@ -1072,7 +1072,9 @@ def test_bookmark_title_printed_a_page_after_its_target_is_no_child():
     heading with exactly the bookmark's title on the next page is the
     bookmark's own heading, not a child of it, while another title there
     stays a child. The title behind numbering there is the bookmark's
-    heading only while the bookmark has none on its own page."""
+    heading only while the bookmark has none on its own page, or a running
+    header repeating the section number of the one it has; its title
+    carried on with "(Continued)" is the bookmark's too."""
     from pageindex.flash.embedded_toc import merge_bookmark_tree
 
     entries = [{"title": "Overview", "level": 1, "page": 1}, {"title": "Declarations", "level": 1, "page": 5},
@@ -1081,6 +1083,8 @@ def test_bookmark_title_printed_a_page_after_its_target_is_no_child():
                 {"title": "Signatures", "start_index": 7, "end_index": 8, "nodes": []},
                 {"title": "A. Appendix", "start_index": 10, "end_index": 10, "nodes": []},
                 {"title": "3 Findings", "start_index": 11, "end_index": 11, "nodes": []},
+                {"title": "3. FINDINGS", "start_index": 12, "end_index": 12, "nodes": []},
+                {"title": "Findings (Continued)", "start_index": 12, "end_index": 12, "nodes": []},
                 {"title": "I. Findings", "start_index": 12, "end_index": 12, "nodes": []}]
     tree = {node["title"]: node for node in merge_bookmark_tree(detected, entries, 12)}
     assert [child["title"] for child in tree["Declarations"]["nodes"]] == ["Signatures"]

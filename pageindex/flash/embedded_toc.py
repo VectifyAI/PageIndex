@@ -72,7 +72,7 @@ _CJK_ENUMERATOR = re.compile(r"^\s*[（(]?[一二三四五六七八九十百]+[�
 _SECTION_KEY = re.compile(
     r"^\s*(?:([A-Za-z]+)\.?\s+(\d{1,3}[A-Z]?(?:\.\d+)*)(?![\w-]|\.\d)"
     r"|(\d{1,3}(?:\.\d+)*)\.\s|(\d{1,3}(?:\.\d+)+)(?![\w-]|\.\d)"
-    r"|(第[一二三四五六七八九十百\d]+[章节条]))")
+    r"|(第[一二三四五六七八九十百\d]+[章节条]|[一二三四五六七八九十百]+、))")
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _ROMAN = re.compile(r"m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -347,6 +347,12 @@ def _numbered_print(title: str, frame_title: str) -> bool:
     base = _normalize_title(frame_title)
     return (bool(base) and _normalize_title(title).endswith(base)
             and _numbered_variant(title, base))
+
+
+def _continued(title: str, frame_title: str) -> bool:
+    """``title`` carries ``frame_title`` onto a later page ("... (Continued)")."""
+    return (bool(_PAREN_TAIL.search(title))
+            and _same_text(_PAREN_TAIL.sub("", title), frame_title))
 
 
 def _same_text(title: str, other: str) -> bool:
@@ -693,8 +699,12 @@ def merge_bookmark_tree(
     equity"), with a number for its label word ("A. Proofs" for "Appendix
     Proofs"), with a short reference resolved where the bookmark kept a
     label ("Table 1" for "tab:wordnet-results"), or in new words under the
-    same section key ("Note 26", "2.", "2.1", "第十二条"), or the first node
-    on the next page that prints it behind numbering ("9 Conclusion").
+    same section key ("Note 26", "2.", "2.1", "第十二条", "二、"), or the
+    first node on the next page that prints it behind numbering ("9
+    Conclusion"). One that has its heading takes, from the next page, only
+    a copy under the same section number (a running header), not "I.
+    Findings" after "3 Findings", or its title carried on with a
+    parenthetical ("J15ZJ (15 Ton) (Continued)").
     Dissolving holds fuzzy matches to a higher bar than title repair: at
     the repair bar, wordy-overlapping titles of distinct sections
     false-match, and a false dissolve deletes a real heading, while an
@@ -762,23 +772,31 @@ def merge_bookmark_tree(
                 break
         return idx
 
-    matched_frames: set[int] = set()
+    # bookmark position -> section number of the heading it took
+    matched_frames: dict[int, Optional[str]] = {}
 
-    def dissolve_target(node: dict, idx: int, matched: set[int]) -> Optional[int]:
+    def dissolve_target(node: dict, idx: int,
+                        matched: dict[int, Optional[str]]) -> Optional[int]:
+        numeral = _numeral_prefix(node["title"])
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             if _same_heading(node, flat[pos], _DISSOLVE_SIMILARITY):
-                matched.add(pos)
+                matched.setdefault(pos, numeral)
                 return pos
             pos -= 1
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             frame_title = flat[pos]["title"]
-            if pos not in matched and (
-                    _printed_as(node["title"], frame_title)
-                    if flat[pos]["start_index"] == node["start_index"]
-                    else _numbered_print(node["title"], frame_title)):
-                matched.add(pos)
+            same_page = flat[pos]["start_index"] == node["start_index"]
+            free = pos not in matched or (
+                not same_page and numeral is not None and matched[pos] == numeral)
+            if same_page:
+                takes = free and _printed_as(node["title"], frame_title)
+            else:
+                takes = ((free and _numbered_print(node["title"], frame_title))
+                         or _continued(node["title"], frame_title))
+            if takes:
+                matched.setdefault(pos, numeral)
                 return pos
             pos -= 1
         return None
@@ -923,7 +941,7 @@ def merge_bookmark_tree(
             read(node.get("nodes") or [])
 
     read(pruned)
-    found: set[int] = set()
+    found: dict[int, Optional[str]] = {}
     for pos, node in enumerate(reading):
         read_pos[id(node)] = pos
         idx = anchor_index(node["start_index"])

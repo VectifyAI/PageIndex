@@ -69,7 +69,8 @@ def test_printed_heading_with_extra_text_dissolves_once():
         {"title": "Line of business equity", "level": 1, "page": 18},
         {"title": "Setting a PIN", "level": 1, "page": 19},
         {"title": "Appendix Proofs", "level": 1, "page": 20},
-        {"title": "End", "level": 1, "page": 21},
+        {"title": "二、邻里公约 2. Neighborhood Convention", "level": 1, "page": 21},
+        {"title": "End", "level": 1, "page": 22},
     ]
     detected = [_node("JPMorgan Chase & Co. Consolidated balance sheets "
                       "(unaudited)", 3),
@@ -91,8 +92,10 @@ def test_printed_heading_with_extra_text_dissolves_once():
                 _node("DO THE RIGHT THING FOR CONSUMERS", 17),
                 _node("Line of business and Corporate equity", 18),
                 _node("Setting a PIN 1 Set a PIN.", 19),
-                _node("A. Proofs", 20)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=22)
+                _node("A. Proofs", 20),
+                _node("二、 邻里公 约 二 、 邻 里 公 约 2. Neighborhood Convention "
+                      "2 . N e i g h b o r h o o d C o n v e n t i o n", 21)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=23)
     assert _titles(merged) == [
         "Consolidated balance sheets", "Revenue", "Note 18 - Leases",
         "Note 18 - Leases Firm as lessee", "Fair value",
@@ -103,7 +106,7 @@ def test_printed_heading_with_extra_text_dissolves_once():
         "第十二条 不可抗力 Article 12 Force Majeure", "2.1 Short title",
         "2. Do the Right Thing for consumers: The law",
         "Line of business equity", "Setting a PIN", "Setting a PIN 1 Set a PIN.",
-        "Appendix Proofs", "End"]
+        "Appendix Proofs", "二、邻里公约 2. Neighborhood Convention", "End"]
 
 
 def test_printed_reference_or_continuation_dissolves():
