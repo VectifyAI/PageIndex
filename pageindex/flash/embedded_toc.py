@@ -71,7 +71,7 @@ _PAREN_TAIL = re.compile(r"\s*\([^()]*\)\s*$")
 _CJK_ENUMERATOR = re.compile(r"^\s*[（(]?[一二三四五六七八九十百]+[、)）]")
 _SECTION_KEY = re.compile(
     r"^\s*(?:([A-Za-z]+)\.?\s+(\d{1,3}[A-Z]?(?:\.\d+)*)(?![\w-]|\.\d)"
-    r"|(\d{1,3}(?:\.\d+)*)\.\s)")
+    r"|(\d{1,3}(?:\.\d+)*)\.\s|(第[一二三四五六七八九十百\d]+[章节条]))")
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _ROMAN = re.compile(r"m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -334,6 +334,13 @@ def _numbered_variant(title: str, base_norm: str) -> bool:
     return bool(head) and all(_numeral_token(token) for token in head)
 
 
+def _numbered_print(title: str, frame_title: str) -> bool:
+    """``title`` is ``frame_title`` behind numbering ("9 Conclusion")."""
+    base = _normalize_title(frame_title)
+    return (bool(base) and _normalize_title(title).endswith(base)
+            and _numbered_variant(title, base))
+
+
 def _same_text(title: str, other: str) -> bool:
     """Equal once normalized, letter spacing ("R E F E R E N C E S") aside."""
     return (_normalize_title(title) == _normalize_title(other)
@@ -345,18 +352,22 @@ def _section_key(title: str) -> Optional[tuple[str, str]]:
     match = _SECTION_KEY.match(title)
     if not match:
         return None
-    return (match.group(1) or "").lower(), match.group(2) or match.group(3)
+    return ((match.group(1) or "").lower(),
+            match.group(2) or match.group(3) or match.group(4))
 
 
 def _printed_as(title: str, frame_title: str) -> bool:
     """``title`` is ``frame_title`` printed headed, annotated, cut or renamed."""
     tokens, frame_tokens = _title_tokens(title), _title_tokens(frame_title)
     tail = len(frame_tokens)
-    if not tokens or not tail or _numeral_prefix(title) != _numeral_prefix(frame_title):
+    if not tokens or not tail:
         return False
+    numeral = _numeral_prefix(frame_title)
     if frame_tokens in (tokens[-tail:],
                         _title_tokens(_PAREN_TAIL.sub("", title))[-tail:]):
-        return True
+        return numeral is not None or _numeral_prefix(title) is None
+    if _numeral_prefix(title) != numeral:
+        return False
     if len(tokens) < tail and frame_tokens[:len(tokens)] == tokens:
         return True
     if tokens[:tail] == frame_tokens:
@@ -378,6 +389,7 @@ def _same_heading(node: dict, chapter: dict,
                   similarity: float = _REPAIR_SIMILARITY) -> bool:
     node_norm = _normalize_title(node["title"])
     chapter_norm = _normalize_title(chapter["title"])
+    node_squeezed = _normalize_title("".join(node["title"].split()))
     if not node_norm or not chapter_norm:
         return False
     # A bookmark can target the page before its printed title
@@ -386,10 +398,10 @@ def _same_heading(node: dict, chapter: dict,
     if node["start_index"] != chapter["start_index"]:
         return False
     return (_same_text(node["title"], chapter["title"])
-            or (node_norm.endswith(chapter_norm)
-                and _numbered_variant(node["title"], chapter_norm))
-            or (chapter_norm.endswith(node_norm)
-                and _numbered_variant(chapter["title"], node_norm))
+            or _numbered_print(node["title"], chapter["title"])
+            or any(chapter_norm.endswith(norm)
+                   and _numbered_variant(chapter["title"], norm)
+                   for norm in (node_norm, node_squeezed))
             or (_similarity(node_norm, chapter_norm) >= similarity
                 and not _numbered_apart(node["title"], chapter["title"])))
 
@@ -611,13 +623,17 @@ def merge_bookmark_tree(
     whole; one that spans ranges is dissolved, leaving a leaf, with its
     children placed individually. A node whose normalized title matches
     a frame heading starting on its page -- equal (letter spacing aside),
-    apart by a numbering prefix, or apart by character-level garble under
-    the same section number -- or equals one starting on the page before,
+    apart by a numbering prefix (also when a numbered bookmark prints
+    letter-spaced), or apart by character-level garble under the same
+    section number -- or equals one starting on the page before,
     dissolves without a trace, its children re-placed individually. A
     bookmark no node has matched yet also takes the first node on its page
-    that prints its title after a header, before a parenthetical or a
-    short remark, cut off, or in new words under the same section key
-    ("Note 26", "2."). Dissolving holds
+    that prints its title after a header (for a numbered bookmark, any
+    text before its number: "Chapter 2", a merged parent heading), before
+    a parenthetical or a short remark, cut off, or in new words under the
+    same section key ("Note 26", "2.", "第十二条"), or the first node on
+    the next page that prints it behind numbering ("9 Conclusion").
+    Dissolving holds
     fuzzy matches to a higher bar than title repair: at the repair bar,
     wordy-overlapping titles of distinct sections false-match, and a
     false dissolve deletes a real heading, while an escaped garbled
@@ -694,9 +710,12 @@ def merge_bookmark_tree(
                 return pos
             pos -= 1
         pos = idx
-        while pos >= 0 and flat[pos]["start_index"] == node["start_index"]:
-            if (pos not in matched_frames
-                    and _printed_as(node["title"], flat[pos]["title"])):
+        while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
+            frame_title = flat[pos]["title"]
+            if pos not in matched_frames and (
+                    _printed_as(node["title"], frame_title)
+                    if flat[pos]["start_index"] == node["start_index"]
+                    else _numbered_print(node["title"], frame_title)):
                 matched_frames.add(pos)
                 return pos
             pos -= 1

@@ -61,7 +61,9 @@ def test_printed_heading_with_extra_text_dissolves_once():
         {"title": "Item 4. Mine Safety Disclosures.", "level": 1, "page": 11},
         {"title": "3、项目进度", "level": 1, "page": 12},
         {"title": "Note 6 - Leases", "level": 1, "page": 13},
-        {"title": "End", "level": 1, "page": 14},
+        {"title": "4.1 DOT", "level": 1, "page": 14},
+        {"title": "第十二条 不可抗力 Article 12 Force Majeure", "level": 1, "page": 15},
+        {"title": "End", "level": 1, "page": 16},
     ]
     detected = [_node("JPMorgan Chase & Co. Consolidated balance sheets "
                       "(unaudited)", 3),
@@ -75,25 +77,30 @@ def test_printed_heading_with_extra_text_dissolves_once():
                 _node("2. Defined Terms", 10),
                 _node("Item 4. Mine Safety Disclosures. Not applicable.", 11),
                 _node("3 金迈斯", 12),
-                _node("Note 6 - Leases 6.1 Rent.", 13)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=15)
+                _node("Note 6 - Leases 6.1 Rent.", 13),
+                _node("4 System Overview 4.1 DOT", 14),
+                _node("第十二条 不可抗力 第 十 二 条 不 可 抗 力 A A rticle 12 "
+                      "Force Majeure", 15)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=17)
     assert _titles(merged) == [
         "Consolidated balance sheets", "Revenue", "Note 18 - Leases",
         "Note 18 - Leases Firm as lessee", "Fair value",
         "Assets measured at fair value", "Results", "5.2 Ablation Results",
         "Derivatives netting and collateral", "Note 26 - Restrictions on cash",
         "2. Detailed Terms", "Item 4. Mine Safety Disclosures.", "3、项目进度",
-        "3 金迈斯", "Note 6 - Leases", "Note 6 - Leases 6.1 Rent.", "End"]
+        "3 金迈斯", "Note 6 - Leases", "Note 6 - Leases 6.1 Rent.", "4.1 DOT",
+        "第十二条 不可抗力 Article 12 Force Majeure", "End"]
 
 
 def test_letter_spaced_duplicate_dissolves():
     entries = [
+        {"title": "3 Methodology", "level": 1, "page": 11},
         {"title": "Conclusion", "level": 1, "page": 12},
         {"title": "References", "level": 1, "page": 13},
     ]
-    detected = [_node("R E F E R E N C E S", 13)]
+    detected = [_node("M e tho do logy", 11), _node("R E F E R E N C E S", 13)]
     merged = merge_bookmark_tree(detected, entries, n_pages=14)
-    assert _titles(merged) == ["Conclusion", "References"]
+    assert _titles(merged) == ["3 Methodology", "Conclusion", "References"]
 
 
 def test_similar_title_under_another_number_survives():
