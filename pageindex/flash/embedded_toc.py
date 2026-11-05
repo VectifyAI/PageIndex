@@ -314,6 +314,13 @@ def _numbered_apart(title: str, other: str) -> bool:
     return mine is not None and theirs is not None and mine != theirs
 
 
+def _ends_apart(title: str, other: str) -> bool:
+    """Both titles end in a number and the numbers differ ("Part I" vs "Part II")."""
+    mine, theirs = _title_tokens(title), _title_tokens(other)
+    return (bool(mine and theirs) and mine[-1].isdigit()
+            and theirs[-1].isdigit() and mine[-1] != theirs[-1])
+
+
 def _numeral_token(token: str) -> bool:
     return token.isdigit() or len(token) == 1 or not re.search("[a-z]", token)
 
@@ -367,6 +374,13 @@ def _printed_as(title: str, frame_title: str) -> bool:
     if frame_tokens in (tokens[-tail:],
                         _title_tokens(_PAREN_TAIL.sub("", title))[-tail:]):
         return numeral is not None or _numeral_prefix(title) is None
+    if (len(tokens) == tail > 1 and tokens[1:] == frame_tokens[1:]
+            and _numeral_token(tokens[0]) != _numeral_token(frame_tokens[0])):
+        return True
+    if numeral is not None and _numeral_prefix(title) is None:
+        core = frame_tokens[len(_title_tokens(numeral)):]
+        if len(tokens) < len(core) and core[:len(tokens)] == tokens:
+            return True
     if _numeral_prefix(title) != numeral:
         return False
     if len(tokens) < tail and frame_tokens[:len(tokens)] == tokens:
@@ -375,6 +389,11 @@ def _printed_as(title: str, frame_title: str) -> bool:
         remark = tokens[tail:]
         return (len(remark) <= 3 and title.rstrip().endswith(".")
                 and not any(token.isdigit() for token in remark))
+    rest = iter(tokens)
+    if (len(tokens) > tail > 1 and tokens[0] == frame_tokens[0]
+            and tokens[-1] == frame_tokens[-1]
+            and all(token in rest for token in frame_tokens)):
+        return True
     key = _section_key(title)
     return key is not None and key == _section_key(frame_title)
 
@@ -403,8 +422,11 @@ def _same_heading(node: dict, chapter: dict,
             or any(chapter_norm.endswith(norm)
                    and _numbered_variant(chapter["title"], norm)
                    for norm in (node_norm, node_squeezed))
-            or (_similarity(node_norm, chapter_norm) >= similarity
-                and not _numbered_apart(node["title"], chapter["title"])))
+            or (not _numbered_apart(node["title"], chapter["title"])
+                and (_similarity(node_norm, chapter_norm) >= similarity
+                     or (_similarity(node_squeezed, _normalize_title(
+                             "".join(chapter["title"].split()))) >= similarity
+                         and not _ends_apart(node["title"], chapter["title"])))))
 
 
 def _subtree_max_start(node: dict) -> int:
@@ -626,14 +648,18 @@ def merge_bookmark_tree(
     a frame heading starting on its page -- equal (letter spacing aside),
     apart by a numbering prefix (also when a numbered bookmark prints
     letter-spaced), or apart by character-level garble under the same
-    section number -- or equals one starting on the page before,
-    dissolves without a trace, its children re-placed individually. A
-    bookmark no node has matched yet also takes the first node on its page
-    that prints its title after a header (for a numbered bookmark, any
-    text before its number: "Chapter 2", a merged parent heading), before
-    a parenthetical or a short remark, cut off, or in new words under the
-    same section key ("Note 26", "2.", "2.1", "第十二条"), or the first
-    node on the next page that prints it behind numbering ("9 Conclusion").
+    section number (letter-spaced too, unless the two end in different
+    numbers: "Part I", "Part II") -- or equals one starting on the page
+    before, dissolves without a trace, its children re-placed
+    individually. A bookmark no node has matched yet also takes the first
+    node on its page that prints its title after a header (for a numbered
+    bookmark, any text before its number: "Chapter 2", a merged parent
+    heading), before a parenthetical or a short remark, cut off (its
+    number may go too), with words inserted inside it ("Line of business
+    and Corporate equity"), with a number for its label word ("A. Proofs"
+    for "Appendix Proofs"), or in new words under the same section key
+    ("Note 26", "2.", "2.1", "第十二条"), or the first node on the next
+    page that prints it behind numbering ("9 Conclusion").
     Dissolving holds fuzzy matches to a higher bar than title repair: at
     the repair bar, wordy-overlapping titles of distinct sections
     false-match, and a false dissolve deletes a real heading, while an

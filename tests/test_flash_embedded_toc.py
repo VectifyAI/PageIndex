@@ -64,7 +64,12 @@ def test_printed_heading_with_extra_text_dissolves_once():
         {"title": "4.1 DOT", "level": 1, "page": 14},
         {"title": "第十二条 不可抗力 Article 12 Force Majeure", "level": 1, "page": 15},
         {"title": "2.1 Short title", "level": 1, "page": 16},
-        {"title": "End", "level": 1, "page": 17},
+        {"title": "2. Do the Right Thing for consumers: The law", "level": 1,
+         "page": 17},
+        {"title": "Line of business equity", "level": 1, "page": 18},
+        {"title": "Setting a PIN", "level": 1, "page": 19},
+        {"title": "Appendix Proofs", "level": 1, "page": 20},
+        {"title": "End", "level": 1, "page": 21},
     ]
     detected = [_node("JPMorgan Chase & Co. Consolidated balance sheets "
                       "(unaudited)", 3),
@@ -82,8 +87,12 @@ def test_printed_heading_with_extra_text_dissolves_once():
                 _node("4 System Overview 4.1 DOT", 14),
                 _node("第十二条 不可抗力 第 十 二 条 不 可 抗 力 A A rticle 12 "
                       "Force Majeure", 15),
-                _node("2.1 Reasonably long section title", 16)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=18)
+                _node("2.1 Reasonably long section title", 16),
+                _node("DO THE RIGHT THING FOR CONSUMERS", 17),
+                _node("Line of business and Corporate equity", 18),
+                _node("Setting a PIN 1 Set a PIN.", 19),
+                _node("A. Proofs", 20)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=22)
     assert _titles(merged) == [
         "Consolidated balance sheets", "Revenue", "Note 18 - Leases",
         "Note 18 - Leases Firm as lessee", "Fair value",
@@ -91,18 +100,26 @@ def test_printed_heading_with_extra_text_dissolves_once():
         "Derivatives netting and collateral", "Note 26 - Restrictions on cash",
         "2. Detailed Terms", "Item 4. Mine Safety Disclosures.", "3、项目进度",
         "3 金迈斯", "Note 6 - Leases", "Note 6 - Leases 6.1 Rent.", "4.1 DOT",
-        "第十二条 不可抗力 Article 12 Force Majeure", "2.1 Short title", "End"]
+        "第十二条 不可抗力 Article 12 Force Majeure", "2.1 Short title",
+        "2. Do the Right Thing for consumers: The law",
+        "Line of business equity", "Setting a PIN", "Setting a PIN 1 Set a PIN.",
+        "Appendix Proofs", "End"]
 
 
 def test_letter_spaced_duplicate_dissolves():
     entries = [
         {"title": "3 Methodology", "level": 1, "page": 11},
-        {"title": "Conclusion", "level": 1, "page": 12},
-        {"title": "References", "level": 1, "page": 13},
+        {"title": "Hard Heads and Soft Hearts", "level": 1, "page": 12},
+        {"title": "Part I", "level": 1, "page": 13},
+        {"title": "Conclusion", "level": 1, "page": 14},
+        {"title": "References", "level": 1, "page": 15},
     ]
-    detected = [_node("M e tho do logy", 11), _node("R E F E R E N C E S", 13)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=14)
-    assert _titles(merged) == ["3 Methodology", "Conclusion", "References"]
+    detected = [_node("M e tho do logy", 11),
+                _node("Har d hea d an d soft heart s", 12),
+                _node("Part II", 13), _node("R E F E R E N C E S", 15)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=16)
+    assert _titles(merged) == ["3 Methodology", "Hard Heads and Soft Hearts",
+                               "Part I", "Part II", "Conclusion", "References"]
 
 
 def test_similar_title_under_another_number_survives():
