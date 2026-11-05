@@ -205,7 +205,7 @@ def page_index_flash(pdf, summary=True, summary_model=None,
         cfg = ConfigLoader().load()
         summary_model = getattr(cfg, 'summary_model', None) or cfg.model
     if summary:
-        _refuse_effort(summary_model, effort)
+        _refuse_effort(summary_model, effort, wait=False)
     from ..integrations.claude_agent_sdk import claude_code_workflows, is_claude_code
     prewarm = ()
     if summary and is_claude_code(summary_model):
@@ -218,16 +218,20 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                                  summary_max_words, summary_reasoning_effort)
 
 
-def _refuse_effort(model, effort):
-    """Raise when a chosen ``effort`` can't reach ``model`` as chosen."""
+def _refuse_effort(model, effort, wait=True):
+    """Raise when a chosen ``effort`` can't reach ``model`` as chosen. Not
+    ``wait``ing, a verdict LiteLLM's published map may change only starts
+    its download: the summaries' own check judges it, the PDF read by
+    then and before any model call (expand's included)."""
     from ..integrations.claude_agent_sdk import is_claude_code
     if effort == "none" and is_claude_code(model):
         raise ValueError(
             f"{model} takes no summary_reasoning_effort='none'; pass 'low' "
             "or leave it unset.")
     if effort and not is_claude_code(model):
-        from ..utils import chosen_effort
-        chosen_effort(model, effort, name="summary_reasoning_effort")
+        from ..utils import chosen_effort, start_learning_if_effort_dropped
+        if wait or not start_learning_if_effort_dropped(model, effort):
+            chosen_effort(model, effort, name="summary_reasoning_effort")
 
 
 def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
@@ -251,9 +255,9 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
             f"optimize must be 'full', 'merge', or False, got {optimize!r}")
     from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
     effort = summary_reasoning_effort and summary_reasoning_effort.strip()
-    if summary and not is_claude_code(summary_model):
+    if summary and not effort and not is_claude_code(summary_model):
         from ..utils import start_learning_if_effort_dropped
-        start_learning_if_effort_dropped(summary_model, effort)  # downloads while the PDF is read
+        start_learning_if_effort_dropped(summary_model)  # downloads while the PDF is read
     result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
     if not structure:

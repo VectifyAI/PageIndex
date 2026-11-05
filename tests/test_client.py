@@ -4276,22 +4276,24 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
 
     # a model LiteLLM's packaged map lacks is learned before the default
     # reads it, its download started before the PDF is read; both weigh a
-    # chosen effort
+    # chosen effort, judged after the read where the map decides it
+    # (test_flash_reads_the_pdf_while_the_map_decides_a_chosen_effort)
     order, efforts = [], []
     monkeypatch.setattr(pageindex.utils, "start_learning_if_effort_dropped",
-                        lambda model, effort: order.append("start") or efforts.append(effort))
+                        lambda model, effort=None: order.append("start") or efforts.append(effort))
     monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: order.append("read") or {
         "structure": copy.deepcopy(tree), "page_texts": list(pages)})
     monkeypatch.setattr(pageindex.utils, "learn_model_if_effort_dropped",
-                        lambda model, effort: order.append("learn") or efforts.append(effort))
+                        lambda model, effort=None: order.append("learn") or efforts.append(effort))
     monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
                         lambda model: order.append("default"))
     flash_api.page_index_flash(str(pdf), summary_model="m", optimize=False)
     assert order == ["start", "read", "learn", "default"]
+    order.clear()
     efforts.clear()
     flash_api.page_index_flash(str(pdf), summary_model="m", optimize=False,
                                summary_reasoning_effort=" high ")
-    assert efforts == ["high", "high"]
+    assert order == ["start", "read", "learn"] and efforts == ["high", "high"]
 
     order.clear()
     monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
@@ -4582,6 +4584,69 @@ def test_flash_refuses_a_chosen_effort_the_model_cannot_honor(tmp_path, monkeypa
         assert all(params.get("allowed_openai_params") == summary.get("allowed_openai_params")
                    for params in calls if "reasoning_effort" in params), model
         calls.clear()
+
+
+def test_flash_reads_the_pdf_while_the_map_decides_a_chosen_effort(tmp_path, monkeypatch):
+    """A chosen effort LiteLLM refuses for a model its packaged map lacks is
+    judged once the PDF is read, the published map downloading meanwhile:
+    "xhigh" goes to an Azure GPT-6 the map says takes it and raises for one
+    it says doesn't, still before any model call. A model the packaged map
+    knows is judged before the read, downloading nothing."""
+    import copy
+    import threading
+    from conftest import build_pdf
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+    from pageindex import utils
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    reads, fetched, calls = [], [], []
+
+    def read(pdf, **kw):
+        reading.set()
+        reads.append(pdf)
+        return {"structure": copy.deepcopy(tree), "page_texts": list(pages)}
+
+    def get(url, timeout):  # the map arrives only once the PDF is being read
+        fetched.append(url)
+        reading.wait(5)
+        return httpx.Response(200, json=entries, request=httpx.Request("GET", url))
+
+    async def capture(model, prompt, **params):
+        calls.append(params)
+        return '{"subsections": []}' if prompt.startswith("You are splitting") else '{"summary": "ok"}'
+    monkeypatch.setattr(flash_api, "extract_toc", read)
+    monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(utils, "llm_acompletion", capture)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", capture)
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
+    monkeypatch.setattr(utils, "_MAP_WAIT", 1)
+    monkeypatch.setattr(utils, "_retry_published_at", float("inf"))
+    monkeypatch.setattr(utils, "_filled", False)
+
+    with pytest.raises(ValueError, match="'minimal', the least"):
+        flash_api.page_index_flash(str(pdf), summary_model="gpt-5-nano", optimize=False,
+                                   summary_reasoning_effort="none")
+    assert not reads and not fetched
+    for model, takes in (("azure/gpt-6.9-test-flash-takes", True),
+                         ("azure/gpt-6.9-test-flash-refuses", False)):
+        reading, entries = threading.Event(), {model: {
+            "litellm_provider": "azure", "mode": "chat", "supports_reasoning": True,
+            "supports_xhigh_reasoning_effort": takes}}
+        monkeypatch.setattr(utils, "_published", None)
+        reads.clear(), fetched.clear(), calls.clear()
+        if takes:
+            flash_api.page_index_flash(str(pdf), summary_model=model,
+                                       summary_reasoning_effort="xhigh")
+            assert {p.get("reasoning_effort") for p in calls} == {None, "xhigh"}  # expand, summaries
+        else:
+            with pytest.raises(ValueError, match="LiteLLM's model map says"):
+                flash_api.page_index_flash(str(pdf), summary_model=model,
+                                           summary_reasoning_effort="xhigh")
+            assert not calls  # expand's neither
+        assert len(reads) == 1 and len(fetched) == 1, model
 
 
 def test_summary_max_words_reaches_the_local_indexer():

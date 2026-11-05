@@ -259,16 +259,19 @@ def _effort_dropped_unmapped(model, effort=None):
     return bool(effort) and _litellm_refuses(model, {"reasoning_effort": effort}) is not None
 
 
-def start_learning_if_effort_dropped(model, effort=None) -> None:
+def start_learning_if_effort_dropped(model, effort=None) -> bool:
     """Starts the published map's download where
     learn_model_if_effort_dropped will want it, so the document is read
-    meanwhile. The check runs here: a thread importing LiteLLM would leave
-    a child forked meanwhile waiting on its import lock."""
+    meanwhile; True when it did. The check runs here: a thread importing
+    LiteLLM would leave a child forked meanwhile waiting on its import
+    lock."""
     try:
         if not _MAP_SET_BY_USER and _effort_dropped_unmapped(model, effort):
             _published_map()
+            return True
     except Exception:
         pass  # learn_model_if_effort_dropped meets it where it can raise
+    return False
 
 
 def learn_model_if_effort_dropped(model, effort=None) -> None:
