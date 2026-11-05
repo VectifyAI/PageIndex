@@ -106,6 +106,29 @@ print(answer)
 
 ### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
 
+For an explicit in-memory conversation over **local documents**, use
+`pageindex.integrations.memory.MemoryChatSession`. Its async `chat(question)`
+entry returns a Chat Completions envelope and carries the complete tool
+transcript into the next turn. See [the session example](examples/memory_chat_session.py).
+This initial integration uses the existing own-model runner and tool
+executor; it does not add a `session` parameter to the stateless `chat()` API.
+
+Construct a session with a fixed document allowlist, model and optional
+instructions. `session.messages` is a detached history snapshot;
+`session.context` exposes the committed document/system prompt context.
+Turns and `await session.clear()` serialize within that session, and separate
+sessions keep separate histories. Failed, canceled and truncated turns do
+not commit partial history. Changing the source client's chat/storage
+configuration refuses continuation; create a new session to change it.
+Clearing removes history, but keeps that configuration binding.
+
+Use one event loop per session. Only non-streamed own-model Chat Completions
+over local documents is supported initially: no hosted cloud session,
+`claude-code/` resume, other protocol, or disk persistence is added. The
+history is retained in full without automatic truncation; clear it or start
+a new session when appropriate for the model's context limit. Carrying tool
+results does not guarantee that a model will never choose to read them again.
+
 Configure other models, streaming, multi-document search, citations, and more.
 
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)
