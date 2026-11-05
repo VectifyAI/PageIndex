@@ -61,25 +61,23 @@ class LocalAPI:
         tally around one operation — runs inside whatever thread
         run_off_loop picked. A reasoning effort among the overrides goes to
         each of `models`, the ones the operation calls, as chosen_effort
-        carries it, or fails first."""
+        carries it to that one, or fails first."""
         from .integrations.claude_agent_sdk import is_claude_code
-        from .utils import _llm_backend, _llm_usage, chosen_effort
+        from .utils import _llm_backend, _llm_effort, _llm_usage, chosen_effort
         backend = self._index_backend
-        if backend and backend.get("reasoning_effort"):
-            for model in dict.fromkeys(models):
-                if not model or is_claude_code(model):
-                    continue
-                forced = chosen_effort(model, backend["reasoning_effort"],
-                                       name='index_backend["reasoning_effort"]'
-                                       ).get("allowed_openai_params")
-                if forced:
-                    backend = {**backend, "allowed_openai_params": sorted(
-                        {*(backend.get("allowed_openai_params") or ()), *forced})}
-        token = _llm_backend.set(backend)
+        effort = (backend or {}).get("reasoning_effort")
+        token = _llm_backend.set(backend)  # chosen_effort reads it
         usage_token = _llm_usage.set(usage)
+        effort_token = None
         try:
+            effort_token = _llm_effort.set({
+                model: chosen_effort(model, effort, name='index_backend["reasoning_effort"]')
+                for model in dict.fromkeys(models)
+                if effort and model and not is_claude_code(model)})
             return func(*args)
         finally:
+            if effort_token is not None:
+                _llm_effort.reset(effort_token)
             _llm_usage.reset(usage_token)
             _llm_backend.reset(token)
 

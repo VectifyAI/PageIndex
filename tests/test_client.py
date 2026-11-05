@@ -4387,6 +4387,33 @@ def test_summary_effort_ladder_is_what_litellm_would_send():
         pageindex.utils._llm_backend.reset(token)
 
 
+def test_effort_checks_read_the_backend_as_the_call_carries_it():
+    """The index backend's base_model and allowed_openai_params count where
+    the summary ladder and a chosen effort ask LiteLLM: a deployment named
+    for nothing LiteLLM knows takes its base_model's ladder and refusals,
+    and the caller's own allowed_openai_params let a level through."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import _llm_backend, chosen_effort, summary_effort_ladder
+
+    def under(backend, check, *args):
+        token = _llm_backend.set(backend)
+        try:
+            return check(*args)
+        finally:
+            _llm_backend.reset(token)
+    nano = {"base_model": "azure/gpt-5-nano"}
+    assert under(nano, summary_effort_ladder, "azure/my-nano-deploy") == [
+        {"reasoning_effort": "minimal"}, {"reasoning_effort": "low"}]
+    with pytest.raises(ValueError, match="LiteLLM drops it"):
+        under(nano, chosen_effort, "azure/my-nano-deploy", "none")
+    assert under(nano, chosen_effort, "azure/my-nano-deploy", "minimal") == {
+        "reasoning_effort": "minimal"}
+    with pytest.raises(ValueError, match="azure/gpt-4o takes no"):
+        chosen_effort("azure/gpt-4o", "low")
+    assert under({"allowed_openai_params": ["reasoning_effort"]}, chosen_effort,
+                 "azure/gpt-4o", "low") == {"reasoning_effort": "low"}
+
+
 def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monkeypatch):
     """A default effort refused (400 or 422) steps up the ladder, then to
     none sent, once a prompt goes through a step up, calls refused after
@@ -4478,9 +4505,10 @@ def test_flash_refuses_a_chosen_effort_the_model_cannot_honor(tmp_path, monkeypa
     """A chosen effort that can't reach the model as chosen raises before
     any model call: a "none" on a model known not to turn its thinking
     off, a level LiteLLM's map says the model doesn't take (naming the
-    least it takes). The default there runs at what the model takes; a
-    chosen "none" on a model that can, or may, turn it off still runs, and
-    a model LiteLLM doesn't know on an OpenAI-format API gets it as is."""
+    least it takes), one LiteLLM drops even with allowed_openai_params. The
+    default there runs at what the model takes; a chosen "none" on a model
+    that can, or may, turn it off still runs, and a model LiteLLM doesn't
+    know on an OpenAI-format API gets it as is."""
     from conftest import build_pdf
     import copy
     import pageindex.flash.api as flash_api
@@ -4512,7 +4540,8 @@ def test_flash_refuses_a_chosen_effort_the_model_cannot_honor(tmp_path, monkeypa
             ("gpt-6.1-sol", "none", "'low', the least"),
             ("gpt-5-nano", "xhigh", "pass a level it takes"),
             ("gpt-5.5-pro", "none", "pass a level it takes"),
-            ("gpt-4o", "high", "it takes no reasoning effort")):
+            ("gpt-4o", "high", "it takes no reasoning effort"),
+            ("azure/gpt-5-mini-prod", "none", "LiteLLM drops it")):
         with pytest.raises(ValueError, match=match):
             flash_api.page_index_flash(str(pdf), summary_model=model,
                                        summary_reasoning_effort=effort)
@@ -4567,7 +4596,8 @@ def test_an_index_backend_effort_reaches_the_model_as_chosen(tmp_path, sample_pd
     from pageindex import PageIndexLocalClient
     seen = []
     monkeypatch.setattr(pageindex.flash, "page_index_flash",
-                        lambda p, **kw: seen.append(pageindex.utils._llm_backend.get()) or {
+                        lambda p, **kw: seen.append(pageindex.utils._call_kwargs(
+                            kw["summary_model"], {})) or {
                             "structure": [{"title": "T", "start_index": 1,
                                            "end_index": 1, "summary": "s", "nodes": []}]})
     monkeypatch.setattr(pageindex.utils, "llm_completion",
@@ -4580,7 +4610,7 @@ def test_an_index_backend_effort_reaches_the_model_as_chosen(tmp_path, sample_pd
     assert not seen
     for backend, allowed in (({"reasoning_effort": "low"}, ["reasoning_effort"]),
                              ({"reasoning_effort": "low", "allowed_openai_params": ["seed"]},
-                              ["reasoning_effort", "seed"])):
+                              ["seed", "reasoning_effort"])):
         PageIndexLocalClient(index_model="azure/test-prod-deployment",
                              index_backend=backend).submit_document(sample_pdf)
         assert seen.pop() == {**backend, "allowed_openai_params": allowed}
@@ -4593,6 +4623,44 @@ def test_an_index_backend_effort_reaches_the_model_as_chosen(tmp_path, sample_pd
     assert seen.pop() == {"reasoning_effort": "minimal"}
     with pytest.raises(PageIndexAPIError, match="openai/gpt-4o takes no"):
         legacy.submit_document(sample_pdf, mode="standard")
+
+
+def test_index_backend_kwargs_reach_each_model_as_its_own(tmp_path, monkeypatch):
+    """What carries index_backend's reasoning_effort to one model stays off
+    the other model's calls (standard mode calls both), and a call's own
+    allowed_openai_params join the backend's instead of replacing them."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    from pageindex.local_api import LocalAPI
+    from pageindex.utils import llm_acompletion, llm_completion
+
+    captured = {}
+
+    def completion(**kw):
+        captured[kw["model"]] = kw
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content="ok"), finish_reason="stop")])
+
+    async def acompletion(**kw):
+        return completion(**kw)
+    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    azure, claude = "azure/test-prod-deployment", "anthropic/claude-haiku-5-5"
+    api = LocalAPI(storage_path=str(tmp_path / "s"), model=azure, summary_model=claude,
+                   index_backend={"api_key": "k", "reasoning_effort": "low"})
+    api._with_backend(None, (azure, claude),
+                      lambda: [llm_completion(model, "p") for model in (azure, claude)])
+    assert captured[azure]["allowed_openai_params"] == ["reasoning_effort"]
+    assert captured[claude]["reasoning_effort"] == "low"
+    assert "allowed_openai_params" not in captured[claude]
+    api = LocalAPI(storage_path=str(tmp_path / "s"), model=azure, summary_model=azure,
+                   index_backend={"service_tier": "flex",
+                                  "allowed_openai_params": ["service_tier"]})
+    api._with_backend(None, (azure,), lambda: asyncio.run(llm_acompletion(
+        azure, "p", reasoning_effort="none", allowed_openai_params=["reasoning_effort"])))
+    assert captured[azure]["service_tier"] == "flex"
+    assert captured[azure]["allowed_openai_params"] == ["service_tier", "reasoning_effort"]
 
 
 def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):

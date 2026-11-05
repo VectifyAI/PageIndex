@@ -446,7 +446,8 @@ class PageIndexClient:
             a level LiteLLM's model map says the model doesn't take raises
             before any model call, as chat does (``"none"`` on gpt-5-nano
             names ``"minimal"``), a model LiteLLM doesn't know on an
-            OpenAI-format API gets it as is, and one it doesn't know on
+            OpenAI-format API gets it as is (a level LiteLLM drops even
+            then raises too), and one it doesn't know on
             another API goes as LiteLLM takes it, which drops the effort
             unless LiteLLM's published map knows the model. Defaults to the least
             thinking the model takes, trying ``"none"``, ``"minimal"``,
@@ -485,9 +486,10 @@ class PageIndexClient:
             chosen: a level LiteLLM's model map says the indexing model
             doesn't take raises before any model call, as chat does, a
             model LiteLLM doesn't know on an OpenAI-format API gets it as
-            is, and one it doesn't know on another API goes as LiteLLM
-            takes it, which drops the effort unless its map knows the
-            model. Where LiteLLM's own rule says a model takes
+            is (a level LiteLLM drops even then raises too), and one it
+            doesn't know on another API goes as LiteLLM takes it, which
+            drops the effort unless its map knows the model. Where
+            LiteLLM's own rule says a model takes
             ``prompt_cache_options`` (its model map's flag, else its
             GPT-5.6-on name rule) and the route's map entry, where it has
             one, prices a cache write above input, indexing sends

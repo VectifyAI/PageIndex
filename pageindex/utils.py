@@ -37,6 +37,11 @@ import re
 _llm_backend: contextvars.ContextVar = contextvars.ContextVar(
     "pageindex_llm_backend", default=None)
 
+# Same scope: per model the operation calls, the kwargs chosen_effort
+# carries the backend's reasoning_effort to that model with.
+_llm_effort: contextvars.ContextVar = contextvars.ContextVar(
+    "pageindex_llm_effort", default=None)
+
 # Same scope: the dict the token usage of every indexing model call is
 # summed into, which LocalAPI returns from submit_document.
 _llm_usage: contextvars.ContextVar = contextvars.ContextVar(
@@ -336,7 +341,7 @@ def _refusal(error):
     """A refusal (400, or 422 from servers that so reject unknown fields) a
     field the request carries may cause: one LiteLLM puts on no cause, or on
     a param. Never one it names another cause for: a prompt too long for the
-    model, a content filter, a proxy's guardrail, an image it can't fetch."""
+    model, a content filter, an image it can't fetch."""
     from litellm.exceptions import BadRequestError, UnsupportedParamsError
     return (getattr(error, "status_code", None) in (400, 422)
             and (type(error) is BadRequestError or not isinstance(error, BadRequestError)
@@ -516,6 +521,24 @@ def _claude_none_kwargs(model, kwargs):
     return {**{k: v for k, v in kwargs.items() if k != "reasoning_effort"}, **swap}
 
 
+def _joined(*kwargs):
+    """LiteLLM kwargs merged, later ones winning, allowed_openai_params joined."""
+    merged = {key: value for each in kwargs for key, value in each.items()}
+    allowed = [*dict.fromkeys(param for each in kwargs
+                              for param in each.get("allowed_openai_params") or ())]
+    if allowed:
+        merged["allowed_openai_params"] = allowed
+    return merged
+
+
+def _call_kwargs(model, params):
+    """An indexing call's kwargs: the backend's, what carries its
+    reasoning_effort to `model` (_llm_effort) unless `params` set one,
+    then `params`."""
+    carry = {} if "reasoning_effort" in params else (_llm_effort.get() or {}).get(model, {})
+    return _joined(_llm_backend.get() or {}, carry, params)
+
+
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):
     from .integrations.claude_agent_sdk import claude_code_complete, is_claude_code
     if is_claude_code(model):
@@ -524,7 +547,7 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False)
                              "standard mode needs an API model.")
         return run_off_loop(asyncio.run, claude_code_complete(model, prompt))
     messages = list(chat_history) + [{"role": "user", "content": prompt}] if chat_history else [{"role": "user", "content": prompt}]
-    backend = _llm_backend.get() or {}
+    backend = _call_kwargs(model, {})
     model = _litellm_model(model)
     off = _cache_off(model, backend)
     try:
@@ -579,7 +602,7 @@ async def llm_acompletion(model, prompt, **params):
     if is_claude_code(model):
         return await claude_code_complete(model, prompt, **params)
     messages = [{"role": "user", "content": prompt}]
-    sent = {**(_llm_backend.get() or {}), **params}
+    sent = _call_kwargs(model, params)
     model = _litellm_model(model)
     off = _cache_off(model, sent)
     try:
@@ -1273,6 +1296,15 @@ SUMMARY_REASONING_EFFORT = "none"
 SUMMARY_EFFORT_LADDER = (SUMMARY_REASONING_EFFORT, "minimal", "low")
 
 
+def _as_called(params):
+    """`params` with the indexing backend's kwargs that change what LiteLLM
+    makes of them, as the call carries them: its base_model, and its
+    allowed_openai_params joined."""
+    backend = _llm_backend.get() or {}
+    return _joined({key: backend[key] for key in ("base_model", "allowed_openai_params")
+                    if key in backend}, params)
+
+
 def _sends(model, params):
     """What LiteLLM puts on the wire for `model` from `params`: the fields
     of the request it builds that one without them lacks."""
@@ -1280,9 +1312,9 @@ def _sends(model, params):
     provider, name = model.split("/", 1)
     call = {"model": name, "custom_llm_provider": provider, "drop_params": True}
     try:
-        bare = get_optional_params(**call)
-        return {key: value for key, value in get_optional_params(**call, **params).items()
-                if bare.get(key) != value}
+        bare = get_optional_params(**call, **_as_called({}))
+        built = get_optional_params(**call, **_as_called(params))
+        return {key: value for key, value in built.items() if bare.get(key) != value}
     except Exception:
         return {}
 
@@ -1290,10 +1322,12 @@ def _sends(model, params):
 def _effort_flags(model):
     """LiteLLM's map flags for `model`'s effort levels, as LiteLLM reads
     them: the id's own entry, then its bare name's (azure/gpt-5-nano reads
-    as gpt-5-nano)."""
+    as gpt-5-nano), the indexing backend's base_model read that way first."""
     import litellm
     infos = []
-    for key in (model, model.rsplit("/", 1)[-1]):
+    base = (_llm_backend.get() or {}).get("base_model")
+    for key in (key for name in (base, model) if name
+                for key in (name, name.rsplit("/", 1)[-1])):
         try:
             infos.append(litellm.get_model_info(key))
         except Exception:
@@ -1366,7 +1400,7 @@ def _litellm_refuses(model, params):
     from litellm.utils import get_optional_params
     provider, name = model.split("/", 1)
     try:
-        get_optional_params(model=name, custom_llm_provider=provider, **params)
+        get_optional_params(model=name, custom_llm_provider=provider, **_as_called(params))
     except UnsupportedParamsError as refusal:
         return refusal
     except Exception:  # the call itself will say why
@@ -1381,8 +1415,11 @@ def chosen_effort(model, effort, name="reasoning_effort"):
     LiteLLM doesn't know the model on an OpenAI-format API, whose own field
     it is. ValueError, `name` naming the setting, where it can't arrive as
     chosen: a "none" Claude can't turn thinking off for
-    (thinking_stays_on), or a level LiteLLM refuses for a model its map
-    knows (gpt-5-nano takes no "none"), as chat meets it. A model LiteLLM
+    (thinking_stays_on), a level LiteLLM refuses for a model its map
+    knows (gpt-5-nano takes no "none"), as chat meets it, or one it drops
+    even with allowed_openai_params (azure/gpt-5-mini-prod takes no
+    "none"). LiteLLM decides with the indexing backend's base_model and
+    allowed_openai_params, as the call carries them. A model LiteLLM
     doesn't know elsewhere goes as LiteLLM takes it, which drops the effort
     unless the published map, learned first where it can be
     (learn_model_if_effort_dropped), knows the model."""
@@ -1415,6 +1452,9 @@ def chosen_effort(model, effort, name="reasoning_effort"):
         raise ValueError(f"{model} takes no {name}={effort!r}, LiteLLM's model map says; {hint}")
     if _openai_format(model):
         params["allowed_openai_params"] = ["reasoning_effort"]
+        if "reasoning_effort" not in _sends(model, params):
+            raise ValueError(f"{model} takes no {name}={effort!r}: LiteLLM drops it; "
+                             f"pass a level it takes, or leave it unset.")
     return params
 
 
