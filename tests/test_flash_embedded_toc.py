@@ -336,6 +336,23 @@ def test_heading_read_before_a_bookmark_skips_no_section_between():
     assert merged[0]["end_index"] == 12
 
 
+def test_numbered_children_stay_with_a_spanning_detected_parent():
+    entries = [
+        {"title": "9.3 Engagement methods", "level": 1, "page": 170},
+        {"title": "9.4 Results", "level": 1, "page": 178},
+    ]
+    detected = [_node("9.3.2 Qualitative engagement", 174,
+                      [_node("9.3.2.1 Panel", 174),
+                       _node("9.3.2.2 Online community", 176),
+                       _node("9.4 Results", 178)])]
+    merged = merge_bookmark_tree(detected, entries, n_pages=180)
+    section = merged[0]["nodes"][0]
+    assert section["title"] == "9.3.2 Qualitative engagement"
+    assert _titles(section["nodes"]) == ["9.3.2.1 Panel",
+                                         "9.3.2.2 Online community"]
+    assert _titles(merged[1:]) == ["9.4 Results"]
+
+
 def test_subsection_on_the_next_bookmarks_page_joins_its_section():
     entries = [
         {"title": "3 Computing", "level": 1, "page": 4},

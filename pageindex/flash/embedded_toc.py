@@ -295,6 +295,13 @@ def _numeral_child(parent_title: str, child_title: str) -> bool:
     return child.startswith(parent + ".") and len(child) > len(parent)
 
 
+def _numbered_under(parent_title: str, title: str) -> bool:
+    """``title`` is numbered directly under ``parent_title`` ("9.3.2.1", "9.3.2")."""
+    parent, mine = _numeral_prefix(parent_title), _numeral_prefix(title)
+    return (parent is not None and mine is not None
+            and mine.rstrip(".").rpartition(".")[0] == parent.rstrip("."))
+
+
 def _numeral_after(title: str, other: str) -> bool:
     """``title`` is numbered after ``other`` in the same scheme ("4" after "3.1")."""
     def key(numeral: str) -> tuple:
@@ -683,7 +690,9 @@ def merge_bookmark_tree(
     bookmark among its siblings, as an Abstract does before Introduction.
     A detected subtree that fits inside its anchor's range moves under it
     whole; one that spans ranges is dissolved, leaving a leaf, with its
-    children placed individually. A node whose normalized title matches
+    children placed individually -- a child numbered directly under the
+    leaf ("9.3.2.1" under "9.3.2") stays with it while no bookmark starts
+    in between. A node whose normalized title matches
     a frame heading starting on its page -- equal (letter spacing aside),
     apart by a numbering prefix (also when a numbered bookmark prints
     letter-spaced), or apart by character-level garble under the same
@@ -900,7 +909,7 @@ def merge_bookmark_tree(
 
     front: list[dict] = []
 
-    def place(node: dict) -> None:
+    def place(node: dict, holder: Optional[tuple[dict, int]] = None) -> None:
         children = node.get("nodes") or []
         read_at = read_pos[id(node)]
         idx = read_before(node, anchor_index(node["start_index"]))
@@ -921,16 +930,21 @@ def merge_bookmark_tree(
             for child in children:
                 place(child)
             return
-        chosen = boundary_parent(node, idx)
-        if chosen is None:
-            chosen = choose_parent(node, idx)
-        siblings = roots if chosen is None else flat[chosen]["nodes"]
+        if (holder is not None and holder[1] == idx
+                and _numbered_under(holder[0]["title"], node["title"])):
+            siblings = holder[0]["nodes"]
+        else:
+            chosen = boundary_parent(node, idx)
+            if chosen is None:
+                chosen = choose_parent(node, idx)
+            siblings = roots if chosen is None else flat[chosen]["nodes"]
         if _subtree_max_start(node) < range_end[idx]:
             insert_by_page(siblings, node, read_at)
             return
-        insert_by_page(siblings, dict(node, nodes=[]), read_at)
+        leaf = dict(node, nodes=[])
+        insert_by_page(siblings, leaf, read_at)
         for child in children:
-            place(child)
+            place(child, (leaf, idx))
 
     pruned = prune(structure)
     reading: list[dict] = []
