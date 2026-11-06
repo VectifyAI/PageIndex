@@ -315,7 +315,7 @@ def extract_toc(
         from .embedded_toc import apply_embedded_toc
         result["structure"], result["toc_source"] = apply_embedded_toc(
             structure, doc_handle, len(pages), page_texts=page_texts,
-            toc_lines=[_toc_lines(page) for page in pages],
+            toc_lines=[_toc_lines(page) for page in pages], page_boxes=page_meta,
         )
 
     def _drop_signal_keys(nodes: list[dict]) -> None:

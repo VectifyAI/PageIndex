@@ -1,7 +1,9 @@
+from io import BytesIO
+
 import pytest
 
 from pageindex.flash.embedded_toc import (
-    _heading_line_reader, _readings, merge_bookmark_tree, read_printed_toc)
+    _heading_line_reader, _readings, merge_bookmark_tree, read_bookmarks, read_printed_toc)
 
 
 def _node(title, start, children=(), style=None, y=None):
@@ -602,3 +604,28 @@ def test_printed_toc_joins_label_cells_and_wrapped_titles():
 
 def test_page_number_above_a_heading_is_no_section_number():
     assert _heading_line_reader(["17\nBackground\nText"])(1, "Background") is None
+
+
+def test_heading_numbered_in_another_list_style_is_no_peer():
+    entries = [{"title": "三、人工智能应用", "level": 1, "page": 1},
+               {"title": "（二）工程化", "level": 2, "page": 2},
+               {"title": "（三）体系化推动落地", "level": 2, "page": 3},
+               {"title": "四、产业", "level": 1, "page": 6}]
+    detected = [_node(t, p, style="h") for t, p in (
+        ("三、人工智能应用", 1), ("（二）工程化", 2), ("（三）体系化推动落地", 3),
+        ("2. 明确选型方案", 4), ("3. 建设能力平台", 5), ("四、产业", 6))]
+    merged = merge_bookmark_tree(detected, entries, n_pages=7)
+    assert _children(merged, "（三）体系化推动落地") == ["2. 明确选型方案", "3. 建设能力平台"]
+
+
+def test_bookmark_target_on_a_page_whose_box_is_inherited():
+    # A4 MediaBox on /Pages only: pdfium's get_cropbox would fall back to US Letter
+    pdf = (b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >> endobj\n"
+           b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >> endobj\n"
+           b"3 0 obj << /Type /Page /Parent 2 0 R >> endobj\n"
+           b"4 0 obj << /Type /Outlines /First 5 0 R /Last 5 0 R /Count 1 >> endobj\n"
+           b"5 0 obj << /Title (Intro) /Parent 4 0 R /Dest [3 0 R /XYZ 119 421 0] >> endobj\n"
+           b"trailer << /Root 1 0 R >>\n%%EOF\n")
+    want = [{"title": "Intro", "level": 1, "page": 1, "x": pytest.approx(0.2), "y": pytest.approx(0.5)}]
+    assert read_bookmarks(BytesIO(pdf)) == want
+    assert read_bookmarks(BytesIO(pdf), [((0, 0, 595, 842), 0)]) == want

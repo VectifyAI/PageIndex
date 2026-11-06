@@ -143,7 +143,8 @@ def _dest_xy(doc, page_idx: int, view: Callable[[], tuple],
             return None, None
         if page_idx not in boxes:  # loading a page parses it: once per page
             page = doc[page_idx]
-            boxes[page_idx] = None if page.get_rotation() % 360 else page.get_cropbox()
+            # get_bbox inherits the page tree's boxes; get_cropbox does not (pdfium bug 1786)
+            boxes[page_idx] = None if page.get_rotation() % 360 else page.get_bbox()
             page.close()
         box = boxes[page_idx]
         if box is None:
@@ -158,9 +159,13 @@ def _dest_xy(doc, page_idx: int, view: Callable[[], tuple],
     return (x if x is not None and 0 <= x <= 1 else None), y
 
 
-def read_bookmarks(doc_handle: Union[str, Path, BytesIO]) -> list[dict]:
+def read_bookmarks(doc_handle: Union[str, Path, BytesIO],
+                   page_boxes: Optional[list[tuple]] = None) -> list[dict]:
     """Extract raw bookmark entries as {title, level, page, x, y}, level and
     page 1-based, x and y the target's position (None unless /XYZ).
+
+    ``page_boxes`` is flash's per-page (view box, /Rotate), the frame its
+    headings' ``_y`` uses; without it each target page is loaded once.
 
     Returns [] when the document has no outline, the handle is not one
     PDFium can open, or the outline is unreadable; the caller treats all
@@ -173,7 +178,9 @@ def read_bookmarks(doc_handle: Union[str, Path, BytesIO]) -> list[dict]:
         handle = str(doc_handle) if isinstance(doc_handle, Path) else doc_handle
         doc = pdfium.PdfDocument(handle)
         entries = []
-        boxes: dict[int, Optional[tuple]] = {}
+        boxes: dict[int, Optional[tuple]] = {
+            i: None if rot % 360 else tuple(box)
+            for i, (box, rot) in enumerate(page_boxes or ()) if box is not None}
         for item in doc.get_toc():
             if hasattr(item, "get_dest"):
                 dest = item.get_dest()
@@ -855,6 +862,11 @@ def _family(scheme: tuple) -> tuple:
     return scheme if scheme[0] in ("chapter", "label") else scheme[:2]
 
 
+def _list_families(readings: list) -> set:
+    """The list numberings among an address's readings ("2." digit, "（三）" CJK), label words aside."""
+    return {_family(scheme) for scheme, _ in readings if scheme[0] not in ("chapter", "label")}
+
+
 def _relation(sa: tuple, a: tuple, sh: tuple, h: tuple):
     """Heading address h against bookmark address a: "ancestor", ("fork", k) (h is a child of a[:k]), "stop", or None."""
     if _family(sa) != _family(sh):
@@ -966,9 +978,10 @@ def merge_bookmark_tree(
         fingerprint (face, weight and size as one hash; a larger raw size
         in a different face is not seniority) that leaves the candidate
         real content below its heading on a shared page and no
-        same-style detected child enumerated like the heading. A climb
-        must reach a numbering parent or the top level (just below the
-        root when one root bookmark titles the whole document); one
+        same-style detected child enumerated like the heading; never past
+        a candidate numbered in another list style ("2." below "（三）").
+        A climb must reach a numbering parent or the top level (just below
+        the root when one root bookmark titles the whole document); one
         stopped halfway leaves the heading at the deepest open bookmark.
 
     Two noise filters prune the whole detected tree before placement:
@@ -1498,12 +1511,16 @@ def merge_bookmark_tree(
     def attach(node: dict, k: int) -> None:
         (out_roots if k < 0 else stack[k][0]["nodes"]).append(node)
 
-    def evidence(node: dict, cand: dict) -> str:
+    def evidence(node: dict, b: int) -> str:
+        cand = flat[b]
         title, cand_title = node["title"], cand["title"]
         if _numeral_prefix(cand_title) is not None and _numeral_prefix(title) is not None:
             if _numeral_child(cand_title, title):
                 return "parent"
             return "peer" if _numeral_after(title, cand_title) else "stop"
+        mine, theirs = _list_families(_readings(title)), _list_families(addresses[b])
+        if mine and theirs and not mine & theirs:
+            return "stop"  # siblings are numbered alike: "2." is no peer of "（三）"
         if (not _style_climbs(node, cand) or _claims_empty(node, cand)
                 or any(id(child) not in frame_ids and _style_climbs(node, child)
                        and _enumerated_alike(title, child["title"])
@@ -1536,7 +1553,7 @@ def merge_bookmark_tree(
         while True:
             if parent_pos[stack[k][3]] is None and len(roots) == 1:
                 return k
-            verdict = evidence(node, stack[k][0])
+            verdict = evidence(node, stack[k][3])
             if verdict == "parent":
                 return k
             below = k - 1
@@ -1673,6 +1690,7 @@ _LINE_LABEL = re.compile(
     r"|^\s*第\s*[0-9一二三四五六七八九十百]+\s*[章部分篇]\s*$", re.IGNORECASE)
 
 
+@lru_cache(maxsize=1 << 16)
 def _line_key(text: str) -> str:
     return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", text).lower())
 
@@ -1710,6 +1728,7 @@ def apply_embedded_toc(
     structure: list[dict], doc_handle: Union[str, Path, BytesIO], n_pages: int,
     page_texts: Optional[list[str]] = None,
     toc_lines: Optional[list[list[tuple]]] = None,
+    page_boxes: Optional[list[tuple]] = None,
 ) -> tuple[list[dict], str]:
     """Classify the document's bookmarks and apply the matching tier.
 
@@ -1719,9 +1738,10 @@ def apply_embedded_toc(
     untouched). ``page_texts`` (extracted text per page, 0-indexed)
     enables the SKELETON-tier title-repair and verified fill-in passes
     and FULL-tier section numbers read off the page; ``toc_lines`` (see
-    ``read_printed_toc``) adds the printed TOC.
+    ``read_printed_toc``) adds the printed TOC; ``page_boxes`` (see
+    ``read_bookmarks``) places bookmark targets without loading pages.
     """
-    entries = validate_bookmarks(read_bookmarks(doc_handle), n_pages)
+    entries = validate_bookmarks(read_bookmarks(doc_handle, page_boxes), n_pages)
     tier = classify_bookmarks(entries, n_pages)
     if tier == FULL:
         toc = read_printed_toc(toc_lines, entries) if toc_lines else []
