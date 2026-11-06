@@ -290,6 +290,20 @@ def test_tail_section_leaves_a_conclusion_holding_another_tail():
     assert (merged[1]["end_index"], merged[2]["start_index"]) == (17, 17)
 
 
+def test_section_a_heading_climbed_out_of_takes_no_later_heading():
+    entries = [
+        {"title": "Introduction", "level": 1, "page": 1},
+        {"title": "Conclusion", "level": 1, "page": 9},
+    ]
+    detected = [_node("Conclusion", 9, style="S", y=0.1),
+                _node("References", 9, style="S", y=0.5),
+                _node("Prompt for Planning", 11, style="P", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=17)
+    assert _titles(merged) == ["Introduction", "Conclusion", "References",
+                               "Prompt for Planning"]
+    assert merged[1]["end_index"] == 9
+
+
 def test_tail_section_climbs_to_the_children_of_a_lone_root():
     entries = [
         {"title": "Agentic AI: a survey", "level": 1, "page": 1},

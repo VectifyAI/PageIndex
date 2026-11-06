@@ -923,6 +923,13 @@ def merge_bookmark_tree(
         return idx
 
     front: list[dict] = []
+    # Bookmarks a heading climbed out of; later headings stay out
+    closed: set[int] = set()
+
+    def open_anchor(idx: Optional[int]) -> Optional[int]:
+        while idx is not None and idx in closed:
+            idx = parent_pos[idx]
+        return idx
 
     def place(node: dict, holder: Optional[tuple[dict, int]] = None) -> None:
         children = node.get("nodes") or []
@@ -950,8 +957,13 @@ def merge_bookmark_tree(
             siblings = holder[0]["nodes"]
         else:
             chosen = boundary_parent(node, idx)
-            if chosen is None:
-                chosen = choose_parent(node, idx)
+            if chosen is None or chosen in closed:
+                anchor = open_anchor(idx)
+                chosen = None if anchor is None else choose_parent(node, anchor)
+                pos = anchor
+                while pos is not None and pos != chosen:
+                    closed.add(pos)
+                    pos = parent_pos[pos]
             siblings = roots if chosen is None else flat[chosen]["nodes"]
         if _subtree_max_start(node) < range_end[idx]:
             insert_by_page(siblings, node, read_at)
