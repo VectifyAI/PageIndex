@@ -554,3 +554,51 @@ def test_detected_references_before_back_matter_go_to_the_top():
     merged = merge_bookmark_tree([references], entries, n_pages=14)
     assert [n["title"] for n in merged] == [
         "Introduction", "Conclusion", "References", "Appendix A Proofs"]
+
+
+def test_doubled_dot_in_a_section_number_reads_as_no_number():
+    entries = [{"title": "A Appendix", "level": 1, "page": 1},
+               {"title": "A..1 Notation", "level": 2, "page": 2},
+               {"title": "B Data", "level": 1, "page": 5}]
+    merged = merge_bookmark_tree([_node("A.2 Proofs", 2, y=0.1)], entries, n_pages=6)
+    assert "A.2 Proofs" in _titles(merged)
+
+
+def test_bookmark_target_splits_its_page():
+    entries = [{"title": "Method", "level": 1, "page": 3, "x": 0.1, "y": 0.1},
+               {"title": "Results", "level": 1, "page": 4, "x": 0.1, "y": 0.5},
+               {"title": "End", "level": 1, "page": 6}]
+    merged = merge_bookmark_tree([_node("Setup", 4, y=0.2), _node("Accuracy", 4, y=0.7)],
+                                 entries, n_pages=8)
+    assert _children(merged, "Method") == ["Setup"]
+    assert _children(merged, "Results") == ["Accuracy"]
+
+
+def test_bookmark_target_in_the_right_column_follows_the_left_column():
+    entries = [{"title": "Method", "level": 1, "page": 3, "x": 0.1, "y": 0.1},
+               {"title": "Results", "level": 1, "page": 4, "x": 0.55, "y": 0.25},
+               {"title": "End", "level": 1, "page": 6}]
+    detected = [_node("Setup", 4, y=0.2), _node("Training", 4, y=0.8),
+                _node("Accuracy", 4, y=0.3)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=8)
+    assert _children(merged, "Method") == ["Setup", "Training"]
+    assert _children(merged, "Results") == ["Accuracy"]
+
+
+def test_printed_toc_joins_label_cells_and_wrapped_titles():
+    rows = [[("1.", 0.1, 0.13, 0.10, "S"), ("Introduction ........ 1", 0.15, 0.9, 0.10, "S"),
+             ("2.", 0.1, 0.13, 0.15, "S"), ("Related Work on Long", 0.15, 0.6, 0.15, "S"),
+             ("Documents ........ 2", 0.15, 0.9, 0.17, "S"),
+             ("3. Methods ........ 3", 0.1, 0.9, 0.22, "S"),
+             ("4. Results ........ 4", 0.1, 0.9, 0.27, "S"),
+             ("5. Conclusion ........ 5", 0.1, 0.9, 0.32, "S")]]
+    entries = [{"title": t, "level": 1, "page": p} for t, p in [
+        ("Introduction", 3), ("Related Work on Long Documents", 4), ("Methods", 5),
+        ("Results", 6), ("Conclusion", 7)]]
+    assert [(e["title"], e["page"]) for e in read_printed_toc(rows, entries)] == [
+        ("1. Introduction", 3), ("2. Related Work on Long Documents", 4), ("3. Methods", 5),
+        ("4. Results", 6), ("5. Conclusion", 7)]
+
+
+def test_page_number_above_a_heading_is_no_section_number():
+    assert _heading_line_reader(["17\nBackground\nText"])(1, "Background") is None

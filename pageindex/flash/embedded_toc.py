@@ -134,16 +134,21 @@ def _title_template(title: str) -> str:
     )
 
 
-def _dest_xy(doc, page_idx: int, view: Callable[[], tuple]) -> tuple[Optional[float], Optional[float]]:
+def _dest_xy(doc, page_idx: int, view: Callable[[], tuple],
+             boxes: dict[int, Optional[tuple]]) -> tuple[Optional[float], Optional[float]]:
     """(x, y) of an /XYZ target as page fractions from the top-left, None where absent."""
     try:
         mode, pos = view()
         if mode != 1 or len(pos) < 2 or pos[1] in (None, 0):
             return None, None
-        page = doc[page_idx]
-        if page.get_rotation() % 360:
+        if page_idx not in boxes:  # loading a page parses it: once per page
+            page = doc[page_idx]
+            boxes[page_idx] = None if page.get_rotation() % 360 else page.get_cropbox()
+            page.close()
+        box = boxes[page_idx]
+        if box is None:
             return None, None
-        left, bottom, right, top = page.get_cropbox()
+        left, bottom, right, top = box
         y = (top - pos[1]) / ((top - bottom) or 1)
         x = (pos[0] - left) / ((right - left) or 1) if pos[0] not in (None, 0) else None
     except Exception:
@@ -168,6 +173,7 @@ def read_bookmarks(doc_handle: Union[str, Path, BytesIO]) -> list[dict]:
         handle = str(doc_handle) if isinstance(doc_handle, Path) else doc_handle
         doc = pdfium.PdfDocument(handle)
         entries = []
+        boxes: dict[int, Optional[tuple]] = {}
         for item in doc.get_toc():
             if hasattr(item, "get_dest"):
                 dest = item.get_dest()
@@ -182,7 +188,7 @@ def read_bookmarks(doc_handle: Union[str, Path, BytesIO]) -> list[dict]:
             title = (title or "").strip()
             if not title:
                 continue
-            x, y = _dest_xy(doc, page_idx, view)
+            x, y = _dest_xy(doc, page_idx, view, boxes)
             entries.append({"title": title, "level": item.level + 1,
                             "page": page_idx + 1, "x": x, "y": y})
         return entries
@@ -311,7 +317,7 @@ def bookmarks_to_structure(entries: list[dict], n_pages: int) -> list[dict]:
 
 # "3D", "2.5D", "10-K" and "2019 Survey" are words, not section numbers
 _NUMERAL_RE = re.compile(
-    r"^([A-Z]\.\d*(?:\.\d+)*|[A-Z]\.$|\d{1,3}(?:\.\d+)*)(?![\w-]|\.\d)")
+    r"^([A-Z]\.(?:\d+(?:\.\d+)*)?|\d{1,3}(?:\.\d+)*)(?![\w-]|\.\d)")
 
 
 def _numeral_prefix(title: str) -> Optional[str]:
@@ -755,7 +761,7 @@ _ADDR_DIGIT = re.compile(r"(\(?)\s*(?:§\s*)?([0-9]{1,3}(?:\s*\.\s*[0-9]{1,3})*)
 _ADDR_ROMAN = re.compile(r"(\(?)\s*([IVXLCDM]{1,7}|[ivxlcdm]{1,7})(?:\s*([.、):]))?")
 _ADDR_LETTER = re.compile(r"(\(?)\s*([A-Za-z])((?:\s*\.\s*[0-9]{1,3})*)(?:\s*([.、):]))?")
 _ADDR_CJK = re.compile(r"(\(?)\s*([零〇一二三四五六七八九十百]{1,4})(?:\s*([.、):]))?")
-# Label words whose numbers are section numbers ("Section 4" is the prefix of "4.2")
+# Label words whose numbers are section numbers ("Section 4" is address "4")
 _NUMBERED_LABELS = frozenset({("chapter",), ("label", "section"), ("label", "article")})
 
 
@@ -849,26 +855,16 @@ def _family(scheme: tuple) -> tuple:
     return scheme if scheme[0] in ("chapter", "label") else scheme[:2]
 
 
-def _prefix_ok(theirs: tuple, mine: tuple) -> bool:
-    """An address written ``theirs`` way can prefix one written ``mine`` ("Chapter 8" -> "8.3")."""
-    a, b = _family(theirs), _family(mine)
-    if a == b:
-        return True
-    if a in _NUMBERED_LABELS and b[1:] == ("digit",):
-        return True
-    return a == ("label", "appendix") and b[1:] in (("LETTER",), ("digit",))
-
-
 def _relation(sa: tuple, a: tuple, sh: tuple, h: tuple):
     """Heading address h against bookmark address a: "ancestor", ("fork", k) (h is a child of a[:k]), "stop", or None."""
-    if not _prefix_ok(sa, sh):
+    if _family(sa) != _family(sh):
         return None
     if len(a) < len(h) and h[:len(a)] == a:
         return "ancestor"
     k = next((i for i in range(min(len(a), len(h))) if a[i] != h[i]), None)
     if k is None or a[k] > h[k] or len(h) != k + 1:
         return "stop"
-    if k == len(a) - 1 and (_family(sa) != _family(sh) or (len(h) == 1 and sa[-1] != sh[-1])):
+    if k == len(a) - 1 and len(h) == 1 and sa[-1] != sh[-1]:
         return "stop"  # siblings are numbered alike: "1." after "1)" is another list
     return ("fork", k)
 
@@ -938,16 +934,15 @@ def merge_bookmark_tree(
 
       * the top level, for a heading the detector typed References or
         Acknowledgments (or flagged prominent) when only back matter
-        follows and its title does not repeat per chapter;
+        follows;
       * the open bookmark whose address is the heading's minus its last
         part ("5.3" for "5.3.1"), over a box title detected above it;
       * its detected parent, while that is open and spans no later
         bookmark (or numbers the heading directly);
       * the parent its section number names. A number is an address
         ("4.3" is the third child of "4") read within its own family:
-        digits, Roman, letters, CJK, or a label word ("Chapter 8" is
-        the prefix of "8.3", "Appendix A" of "A.1"); a lone "I." reads
-        as Roman and as a letter. Against the nearest open bookmark
+        digits, Roman, letters, CJK, or a label word ("Chapter 8"); a
+        lone "I." reads as Roman and as a letter. Against the nearest open bookmark
         numbered alike, the heading is its descendant (parent: that
         bookmark), forks off after it at some depth (parent: the
         ancestor there, when bookmark levels minus address lengths agree
@@ -1234,16 +1229,11 @@ def merge_bookmark_tree(
     def later_bookmarks(node: dict):
         return (ref for kind, ref in seq[seq_pos[id(node)] + 1:] if kind == "b")
 
-    title_count = Counter(_normalize_title(node["title"]) for node in reading
-                          if id(node) not in copy_of)
-
     def back_matter_parent(node: dict, floor: int) -> Optional[int]:
         """The top level for a detected References/Acknowledgments heading when only back matter follows."""
         if not (node.get("_type") == _REFERENCES_TYPE or node.get("_prominent")
                 or (node.get("_type") == _KEYWORD_TYPE
                     and "acknowledg" in node["title"].lower())):
-            return None
-        if title_count[_normalize_title(node["title"])] > 1:
             return None
         top = max(top_level, floor)
         for ref in later_bookmarks(node):
@@ -1283,7 +1273,7 @@ def merge_bookmark_tree(
         b for b, readings in enumerate(addresses)
         if readings and (others := [scheme for s in siblings[parent_pos[b]] if s != b
                                     for scheme, _ in addresses[s][:1]])
-        and not any(_prefix_ok(scheme, other) or _prefix_ok(other, scheme)
+        and not any(_family(scheme) == _family(other)
                     for scheme, _ in readings for other in others)]
     for b in unlike:
         addresses[b] = []
@@ -1330,7 +1320,7 @@ def merge_bookmark_tree(
             if levels[ref] <= p + 1:
                 return True
             for scheme, n in addresses[ref]:
-                if _prefix_ok(scheme, sh) or _prefix_ok(sh, scheme):
+                if _family(scheme) == _family(sh):
                     return ordered(h, n)
         return True
 
@@ -1341,7 +1331,7 @@ def merge_bookmark_tree(
             if kind != "b":
                 continue
             for scheme, a in addresses[ref]:
-                if _prefix_ok(scheme, sh) or _prefix_ok(sh, scheme):
+                if _family(scheme) == _family(sh):
                     return ordered(a, h)
         return True
 
@@ -1349,8 +1339,7 @@ def merge_bookmark_tree(
                                floor: int) -> Optional[int]:
         """The parent of the next bookmark numbered as h's younger sibling ("2 Related Work" for "1 Introduction")."""
         for ref in later_bookmarks(node):
-            if not any(_prefix_ok(scheme, sh) or _prefix_ok(sh, scheme)
-                       for scheme, _ in addresses[ref]):
+            if not any(_family(scheme) == _family(sh) for scheme, _ in addresses[ref]):
                 continue
             if not any(_family(scheme) == _family(sh)
                        and (len(h) > 1 or scheme[-1] == sh[-1])
@@ -1398,7 +1387,7 @@ def merge_bookmark_tree(
                 for j in range(max(p, 0), kb):
                     if stack[j][2] != "b":
                         continue
-                    xs = [x for sx, x in addresses[stack[j][3]] if _prefix_ok(sx, sa)]
+                    xs = [x for sx, x in addresses[stack[j][3]] if _family(sx) == _family(sa)]
                     if xs and not any(x == a[:len(x)] and kb - j == len(a) - len(x)
                                       for x in xs):
                         return None
@@ -1444,11 +1433,6 @@ def merge_bookmark_tree(
                 or (b in first_copy
                     and _toc_same(toc[i]["title"], reading[first_copy[b]]["title"])))
 
-    toc_top_is_top_level = any(
-        toc[i]["parent"] is None and any(
-            levels[b] == top_level and _toc_same(toc[i]["title"], flat[b]["title"])
-            for b in range(len(flat)) if near(i, flat[b]["start_index"]))
-        for i in listed)
     toc_bookmark: dict[int, int] = {}
     for i in listed:
         b = next((b for b in range(len(flat)) if near(i, flat[b]["start_index"])
@@ -1494,8 +1478,6 @@ def merge_bookmark_tree(
         if not (toc_trusted or group_trusted(p)):
             return None
         if p is None:
-            if not toc_top_is_top_level:
-                return None
             k = 0 if len(roots) == 1 else -1
         else:
             k = next((j for j in range(len(stack) - 1, -1, -1) if stack[j][2] == "b" and (
@@ -1590,28 +1572,6 @@ _TOC_LABEL = re.compile(
     r"^\s*(?:(?:item|part|chapter|section|article|schedule|note|appendix)\s*[\dIVXLC]+[A-Z]?"
     r"|\d{1,3}(?:\.\d{1,3})*|[A-Z]|[IVXLC]{1,6}|第[一二三四五六七八九十\d]+[章节部篇])"
     r"\s*[.:、．]?\s*$", re.IGNORECASE)
-# Numbering schemes, which rank TOC entries sharing one indent
-_TOC_SCHEMES = (
-    ("cn-ch", re.compile(r"^第[一二三四五六七八九十百零〇\d]+[章节部篇]")),
-    ("cn-num", re.compile(r"^[一二三四五六七八九十]+\s*[、.．]")),
-    ("cn-paren", re.compile(r"^[（(][一二三四五六七八九十]+[）)]")),
-    ("num-paren", re.compile(r"^(?:[（(]\d{1,3}[）)]|\d{1,3}[）)])")),
-    ("word", re.compile(r"^(part|chapter|section|item|article|appendix|annex|schedule)\b",
-                        re.IGNORECASE)),
-    ("roman", re.compile(r"^[ivxlc]{1,6}[.)]\s", re.IGNORECASE)),
-    ("alpha", re.compile(r"^[a-z][.)]\s")),
-)
-_TOC_DOTS = re.compile(r"^(\d{1,3}(?:\.\d{1,3})*)(?![\d])")
-
-
-def _toc_scheme(title: str) -> Optional[str]:
-    text = re.sub(r"^[\s⚫•■●◆▪\-–]+", "", title)
-    for name, pattern in _TOC_SCHEMES:
-        m = pattern.match(text)
-        if m:
-            return name + (":" + m[1].lower() if name == "word" else "")
-    m = _TOC_DOTS.match(text)
-    return f"dots{m[1].count('.') + 1}" if m else None
 
 
 def _toc_items(pages: list[list[tuple]]) -> list[dict]:
@@ -1663,32 +1623,13 @@ def _toc_items(pages: list[list[tuple]]) -> list[dict]:
 
 
 def _toc_levels(items: list[dict], gap: float = 0.008) -> list[int]:
-    """Levels by indent (odd and even pages apart when margins differ), then numbering scheme."""
-    def rank(xs: list[float]) -> dict[float, int]:
-        out, prev, level = {}, None, 0
-        for x in sorted(set(xs)):
-            if prev is None or x - prev > gap:
-                level += 1
-            out[x], prev = level, x
-        return out
-
-    sides = [[item["x"] for item in items if item["page"] % 2 == side] for side in (0, 1)]
-    if min(map(len, sides)) >= 5 and abs(min(sides[0]) - min(sides[1])) > 0.015:
-        ranks = [rank(xs) for xs in sides]
-        indents = [ranks[item["page"] % 2][item["x"]] for item in items]
-    else:
-        ranked = rank([item["x"] for item in items])
-        indents = [ranked[item["x"]] for item in items]
-    schemes: dict[int, list[str]] = {}
-    keys = []
-    for item, indent in zip(items, indents):
-        scheme = _toc_scheme(item["title"])
-        seen = schemes.setdefault(indent, [])
-        if scheme is not None and scheme not in seen:
-            seen.append(scheme)
-        keys.append((indent, seen.index(scheme) if scheme is not None else 0))
-    order = {key: level for level, key in enumerate(sorted(set(keys)), 1)}
-    return [order[key] for key in keys]
+    """Levels by indent, indents closer than ``gap`` sharing one."""
+    ranks, prev, level = {}, None, 0
+    for x in sorted({item["x"] for item in items}):
+        if prev is None or x - prev > gap:
+            level += 1
+        ranks[x], prev = level, x
+    return [ranks[item["x"]] for item in items]
 
 
 def read_printed_toc(pages: list[list[tuple]], entries: list[dict]) -> list[dict]:
@@ -1697,8 +1638,16 @@ def read_printed_toc(pages: list[list[tuple]], entries: list[dict]) -> list[dict
     items = _toc_items(pages)
     if len(items) < 5:
         return []
-    offsets = Counter(entry["page"] - item["num"] for item in items if item["num"] is not None
-                      for entry in entries if _toc_same(item["title"], entry["title"]))
+    def ends(title: str) -> set[str]:  # titles _toc_same can match end alike
+        return {_normalize_title(title)[-1:], _normalize_title("".join(title.split()))[-1:]}
+
+    by_end: dict[str, list[int]] = {}
+    for j, entry in enumerate(entries):
+        for end in ends(entry["title"]):
+            by_end.setdefault(end, []).append(j)
+    offsets = Counter(entries[j]["page"] - item["num"] for item in items if item["num"] is not None
+                      for j in sorted({j for end in ends(item["title"]) for j in by_end.get(end, ())})
+                      if _toc_same(item["title"], entries[j]["title"]))
     if not offsets:
         return []
     offset = offsets.most_common(1)[0][0]
@@ -1721,7 +1670,7 @@ _LINE_NUMBER = re.compile(
     r"|[（(]\s*[0-9一二三四五六七八九十]+\s*[)）])\s*[.:：、)）]?\s*(.*)$", re.IGNORECASE)
 _LINE_LABEL = re.compile(
     r"^\s*(?:chapter|part|lecture|unit|appendix)\s+[0-9IVXLC]+\s*$"
-    r"|^\s*第\s*[0-9一二三四五六七八九十百]+\s*[章部分篇]\s*$|^\s*[0-9]{1,2}\s*$", re.IGNORECASE)
+    r"|^\s*第\s*[0-9一二三四五六七八九十百]+\s*[章部分篇]\s*$", re.IGNORECASE)
 
 
 def _line_key(text: str) -> str:
