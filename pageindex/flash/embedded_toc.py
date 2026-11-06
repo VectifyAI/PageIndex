@@ -920,7 +920,11 @@ def merge_bookmark_tree(
     Conclusion"). One that has its heading takes, from the next page, only
     a copy under the same section number (a running header), not "I.
     Findings" after "3 Findings", or its title carried on with a
-    parenthetical ("J15ZJ (15 Ton) (Continued)").
+    parenthetical ("J15ZJ (15 Ton) (Continued)"). A node printed at a
+    bookmark's target that runs on past the bookmark's title into a
+    capitalized heading has that heading glued on ("Item 1C. Cybersecurity
+    Risk management and strategy"): it keeps only the rest, which never
+    dissolves back into that bookmark.
     Dissolving holds fuzzy matches to a higher bar than title repair: at
     the repair bar, wordy-overlapping titles of distinct sections
     false-match, and a false dissolve deletes a real heading, while an
@@ -1030,12 +1034,18 @@ def merge_bookmark_tree(
     def dissolve_target(node: dict, idx: int,
                         matched: dict[int, Optional[str]]) -> Optional[int]:
         numeral = _numeral_prefix(node["title"])
+        same = []
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             if _same_heading(node, flat[pos], _DISSOLVE_SIMILARITY):
-                matched.setdefault(pos, numeral)
-                return pos
+                same.append(pos)
             pos -= 1
+        if same:
+            # "7.1.2" and "7.2.2" print two same-titled bookmarks: each takes the first one free
+            pos = next((p for p in reversed(same) if numeral is not None
+                        and matched.get(p, numeral) == numeral), same[0])
+            matched.setdefault(pos, numeral)
+            return pos
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             frame_title = flat[pos]["title"]
@@ -1117,6 +1127,31 @@ def merge_bookmark_tree(
     read(prune(structure), None)
     read_index = {id(node): pos for pos, node in enumerate(reading)}
 
+    # A print at a bookmark's target that runs on past its title carries the next heading
+    on_page: dict[int, list[int]] = {}
+    for b, frame in enumerate(flat):
+        on_page.setdefault(frame["start_index"], []).append(b)
+    bookmarked = {(frame["start_index"], _normalize_title(frame["title"])) for frame in flat}
+    stripped: dict[int, int] = {}
+    for node in reading:
+        if node.get("_y") is None or (node["start_index"], _normalize_title(node["title"])) in bookmarked:
+            continue
+        title = " ".join(node["title"].split())
+        for b in on_page.get(node["start_index"], ()):
+            head = " ".join(flat[b]["title"].split())
+            if (dest_y[b] is not None and abs(node["_y"] - dest_y[b]) <= _DEST_TOL
+                    and title.startswith(head + " ")):
+                if (_same_heading(node, flat[b], _DISSOLVE_SIMILARITY)
+                        or _printed_as(node["title"], flat[b]["title"])):
+                    break  # the bookmark's print with a remark ("... Not applicable.")
+                rest = title[len(head):].strip()
+                first = rest[:1]
+                if ((first.isupper() or first.isdigit() or not (first.isascii() or first.islower()))
+                        and re.search(r"[^\W\d_]", rest)):
+                    node["title"] = rest
+                    stripped[id(node)] = b
+                break
+
     # A heading's column: reading order jumping back up its page starts the next one
     column: dict[int, int] = {}
     page_column: dict[int, int] = {}
@@ -1158,6 +1193,8 @@ def merge_bookmark_tree(
     for pos, node in enumerate(reading):
         idx = anchor_index(node["start_index"])
         target = None if idx is None else dissolve_target(node, idx, found)
+        if target is not None and stripped.get(id(node)) == target:
+            target = None  # what follows a bookmark's title is not its heading
         if target is not None:
             copy_of[id(node)] = target
             first_copy.setdefault(target, pos)

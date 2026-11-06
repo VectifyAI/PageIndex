@@ -618,6 +618,46 @@ def test_heading_numbered_in_another_list_style_is_no_peer():
     assert _children(merged, "（三）体系化推动落地") == ["2. 明确选型方案", "3. 建设能力平台"]
 
 
+def test_numbered_prints_of_one_title_take_their_bookmarks_in_order():
+    entries = [{"title": "Retrieval", "level": 1, "page": 1},
+               {"title": "Future Perspective", "level": 2, "page": 2},
+               {"title": "Memory Management", "level": 1, "page": 2},
+               {"title": "Future Perspective", "level": 2, "page": 2},
+               {"title": "End", "level": 1, "page": 5}]
+    detected = [_node("1 Retrieval", 1), _node("1.2 Future Perspective", 2, y=0.2),
+                _node("2 Memory Management", 2, y=0.5), _node("Background", 2, y=0.6),
+                _node("2.2 Future Perspective", 2, y=0.8), _node("End", 5)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=6)
+    assert _children(merged, "Memory Management") == ["Background", "Future Perspective"]
+
+
+def test_print_at_a_bookmark_target_keeps_the_heading_glued_after_its_title():
+    title = "Academic Advising and Satisfactory Progress Policies"
+    entries = [{"title": title, "level": 1, "page": 2, "x": 0.1, "y": 0.28},
+               {"title": "Tuition", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+    detected = [_node(title + " Academic Advising", 2, y=0.285), _node("Tuition", 4, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert _children(merged, title) == ["Academic Advising"]
+
+
+def test_remark_after_a_bookmark_title_at_its_target_is_no_heading():
+    title = "Item 4. Mine Safety Disclosures."
+    entries = [{"title": title, "level": 1, "page": 2, "x": 0.1, "y": 0.1},
+               {"title": "Item 5. Market", "level": 1, "page": 3, "x": 0.1, "y": 0.1}]
+    detected = [_node(title + " Not applicable.", 2, y=0.1), _node("Item 5. Market", 3, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=4)
+    assert _children(merged, title) == []
+
+
+def test_heading_below_a_bookmark_target_keeps_the_bookmark_title_it_starts_with():
+    entries = [{"title": "Evaluation", "level": 1, "page": 2, "x": 0.1, "y": 0.1},
+               {"title": "Discussion", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+    detected = [_node("Evaluation", 2, y=0.1), _node("Evaluation Metrics", 2, y=0.4),
+                _node("Discussion", 4, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert _children(merged, "Evaluation") == ["Evaluation Metrics"]
+
+
 def test_bookmark_target_on_a_page_whose_box_is_inherited():
     # A4 MediaBox on /Pages only: pdfium's get_cropbox would fall back to US Letter
     pdf = (b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >> endobj\n"
