@@ -640,6 +640,17 @@ def test_print_at_a_bookmark_target_keeps_the_heading_glued_after_its_title():
     assert _children(merged, title) == ["Academic Advising"]
 
 
+def test_children_printed_like_the_heading_glued_after_a_bookmark_title_are_its_peers():
+    entries = [{"title": "Bottom Duct Application", "level": 1, "page": 2, "x": 0.1, "y": 0.1},
+               {"title": "Side Duct Application", "level": 1, "page": 5, "x": 0.1, "y": 0.1}]
+    glued = _node("Bottom Duct Application J15ZF (15 Ton)", 2, style="b10", y=0.1,
+                  children=[_node("Sizing table", 2, style="r9"), _node("J18ZF (17.5 Ton)", 3, style="b9")])
+    glued["_lines"] = [["Bottom Duct Application", "b10"], ["J15ZF (15 Ton)", "b9"]]
+    merged = merge_bookmark_tree([glued, _node("Side Duct Application", 5, y=0.1)], entries, n_pages=6)
+    assert _children(merged, "Bottom Duct Application") == ["J15ZF (15 Ton)", "J18ZF (17.5 Ton)"]
+    assert _children(merged, "J15ZF (15 Ton)") == ["Sizing table"]
+
+
 def test_remark_after_a_bookmark_title_at_its_target_is_no_heading():
     title = "Item 4. Mine Safety Disclosures."
     entries = [{"title": title, "level": 1, "page": 2, "x": 0.1, "y": 0.1},

@@ -319,6 +319,11 @@ def _heading_appears_at_page_top(heading: HeadingCandidate) -> bool:
     return True
 
 
+def _style_of(block: Block) -> str:
+    """A heading's style fingerprint for the embedded-TOC merge: dominant style, "|C" when caps-heavy."""
+    return dominant_style_of(block) + ("|C" if is_caps_heavy(block) else "")
+
+
 def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int) -> list[dict]:
     """Convert the outline tree directly to PageIndex JSON shape. Preserves the natural outline nesting without font-overlay rewriting. """
     flat_nodes: list[dict] = []
@@ -353,8 +358,9 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                 "_appear_start": _heading_appears_at_page_top(item.heading),
                 # Heading-level signals for the embedded-TOC merge;
                 # extract_toc strips them from the final output.
-                "_style": ((dominant_style_of(heading_block)
-                            + ("|C" if is_caps_heavy(heading_block) else ""))
+                "_style": _style_of(heading_block) if heading_block is not None else None,
+                "_lines": ([[raw_text_of_line(line).strip(), _style_of(Block().add_line(line))]
+                            for line in heading_block.primary_slot]
                            if heading_block is not None else None),
                 "_y": item.heading.auxiliary_slot,
                 "_type": item.heading.type,

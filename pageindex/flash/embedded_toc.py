@@ -862,6 +862,18 @@ def _family(scheme: tuple) -> tuple:
     return scheme if scheme[0] in ("chapter", "label") else scheme[:2]
 
 
+def _style_after(lines: Optional[list], head: str) -> Optional[str]:
+    """Style of the line after the lines printing ``head`` (detection's ``_lines``), None unless head ends a line."""
+    seq, want, got = lines or [], _normalize_title(head), ""
+    for k, (text, _) in enumerate(seq[:-1]):
+        got += _normalize_title(text)
+        if got == want:
+            return seq[k + 1][1]
+        if not want.startswith(got):
+            return None
+    return None
+
+
 def _list_families(readings: list) -> set:
     """The list numberings among an address's readings ("2." digit, "（三）" CJK), label words aside."""
     return {_family(scheme) for scheme, _ in readings if scheme[0] not in ("chapter", "label")}
@@ -924,14 +936,15 @@ def merge_bookmark_tree(
     bookmark's target that runs on past the bookmark's title into a
     capitalized heading has that heading glued on ("Item 1C. Cybersecurity
     Risk management and strategy"): it keeps only the rest, which never
-    dissolves back into that bookmark.
+    dissolves back into that bookmark, and takes the style of its own
+    line; its detected children printed in that style are its peers.
     Dissolving holds fuzzy matches to a higher bar than title repair: at
     the repair bar, wordy-overlapping titles of distinct sections
     false-match, and a false dissolve deletes a real heading, while an
     escaped garbled duplicate only leaves a stray leaf. A bookmark learns
     style and position from its copies; detection exports the ``_style``,
-    ``_y``, ``_type`` and ``_prominent`` keys and ``extract_toc`` strips
-    them after the merge.
+    ``_lines`` (each line's text and style), ``_y``, ``_type`` and
+    ``_prominent`` keys and ``extract_toc`` strips them after the merge.
 
     Slots. Each bookmark takes a place in the detected reading order: at
     its first copy, else after the headings printed above its /XYZ target
@@ -1150,6 +1163,12 @@ def merge_bookmark_tree(
                         and re.search(r"[^\W\d_]", rest)):
                     node["title"] = rest
                     stripped[id(node)] = b
+                    style = _style_after(node.get("_lines"), head)
+                    if style is not None:
+                        node["_style"] = style
+                        for child in node.get("nodes") or []:
+                            if child.get("_style") == style:
+                                det_parent[id(child)] = None  # printed alike: a peer
                 break
 
     # A heading's column: reading order jumping back up its page starts the next one
