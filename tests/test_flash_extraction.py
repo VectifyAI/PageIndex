@@ -23,9 +23,13 @@ def test_read_bookmarks_same_on_pdfium_4_and_5():
     pdf = Path(__file__).parent.parent / "examples" / "documents" / "attention-residuals.pdf"
     bookmarks = read_bookmarks(str(pdf))
     assert len(bookmarks) == 22
-    assert bookmarks[0] == {"title": "Introduction", "level": 1, "page": 2}
+    assert bookmarks[0] == {"title": "Introduction", "level": 1, "page": 2,
+                            "x": pytest.approx(0.1176, abs=1e-4),
+                            "y": pytest.approx(0.0909, abs=1e-4)}
     assert bookmarks[2] == {"title": "Training Deep Networks via Residuals",
-                            "level": 2, "page": 3}
+                            "level": 2, "page": 3,
+                            "x": pytest.approx(0.1176, abs=1e-4),
+                            "y": pytest.approx(0.2003, abs=1e-4)}
 
 
 @pytest.mark.skipif(int(version("pypdfium2").split(".")[0]) < 5,
@@ -1071,18 +1075,25 @@ def test_bookmark_title_printed_a_page_after_its_target_is_no_child():
     """A bookmark can target the page before its title is printed: a detected
     heading with exactly the bookmark's title on the next page is the
     bookmark's own heading, not a child of it, while another title there
-    stays a child, and so does one that only ends with the bookmark's title
-    (that looser match counts on the bookmark's own page only)."""
+    stays a child. The title behind numbering there is the bookmark's
+    heading only while the bookmark has none on its own page, or a running
+    header repeating the section number of the one it has; its title
+    carried on with "(Continued)" is the bookmark's too."""
     from pageindex.flash.embedded_toc import merge_bookmark_tree
 
     entries = [{"title": "Overview", "level": 1, "page": 1}, {"title": "Declarations", "level": 1, "page": 5},
-               {"title": "Appendix", "level": 1, "page": 9}]
+               {"title": "Appendix", "level": 1, "page": 9}, {"title": "Findings", "level": 1, "page": 11}]
     detected = [{"title": "Declarations", "start_index": 6, "end_index": 8, "nodes": []},
                 {"title": "Signatures", "start_index": 7, "end_index": 8, "nodes": []},
-                {"title": "A. Appendix", "start_index": 10, "end_index": 10, "nodes": []}]
-    tree = {node["title"]: node for node in merge_bookmark_tree(detected, entries, 10)}
+                {"title": "A. Appendix", "start_index": 10, "end_index": 10, "nodes": []},
+                {"title": "3 Findings", "start_index": 11, "end_index": 11, "nodes": []},
+                {"title": "3. FINDINGS", "start_index": 12, "end_index": 12, "nodes": []},
+                {"title": "Findings (Continued)", "start_index": 12, "end_index": 12, "nodes": []},
+                {"title": "I. Findings", "start_index": 12, "end_index": 12, "nodes": []}]
+    tree = {node["title"]: node for node in merge_bookmark_tree(detected, entries, 12)}
     assert [child["title"] for child in tree["Declarations"]["nodes"]] == ["Signatures"]
-    assert [child["title"] for child in tree["Appendix"]["nodes"]] == ["A. Appendix"]
+    assert tree["Appendix"].get("nodes", []) == []
+    assert [child["title"] for child in tree["Findings"]["nodes"]] == ["I. Findings"]
 
 
 def test_toc_source_is_always_present(tmp_path):
