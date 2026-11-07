@@ -251,9 +251,37 @@ def test_climb_never_cuts_a_later_bookmark_section_short():
                 _node("Tail", 12, style="F1", y=0.5)]
     merged = merge_bookmark_tree(detected, entries, n_pages=25)
     assert _titles(merged) == ["A", "A1", "Tail", "A2", "B"]
-    assert _titles(merged[0]["nodes"][0]["nodes"]) == ["Tail"]
+    assert _children(merged, "A") == ["A1", "Tail", "A2"]
     a2 = merged[0]["nodes"][-1]
     assert (a2["title"], a2["start_index"], a2["end_index"]) == ("A2", 15, 20)
+
+
+def test_climb_the_next_bookmark_stops_keeps_its_height():
+    entries = [
+        {"title": "Part I", "level": 1, "page": 1},
+        {"title": "First-Order Query Evaluation", "level": 2, "page": 2},
+        {"title": "Homomorphisms", "level": 2, "page": 8},
+        {"title": "Part II", "level": 1, "page": 12},
+    ]
+    detected = [_node("Part I", 1, style="S", y=0.1),
+                _node("First-Order Query Evaluation", 2, style="S", y=0.1),
+                _node("Static Analysis", 5, style="S", y=0.1),
+                _node("Homomorphisms", 8, style="S", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=15)
+    assert _children(merged, "Part I") == ["First-Order Query Evaluation", "Static Analysis", "Homomorphisms"]
+
+
+def test_climb_the_next_bookmark_stops_stays_when_numbered_unlike_it():
+    entries = [
+        {"title": "2.1 Protocol Overview", "level": 1, "page": 10},
+        {"title": "2.1.1 Pool Models", "level": 2, "page": 11},
+        {"title": "1 SLP Model", "level": 3, "page": 11},
+        {"title": "1.1.2 Security Layers", "level": 2, "page": 13},
+        {"title": "Tokenomics", "level": 1, "page": 14},
+    ]
+    detected = [_node("3. Seize Every Airdrop Opportunity", 12, style="S", y=0.5)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=15)
+    assert _children(merged, "1 SLP Model") == ["3. Seize Every Airdrop Opportunity"]
 
 
 def test_climb_without_evidence_to_the_top_stays_at_the_anchor():

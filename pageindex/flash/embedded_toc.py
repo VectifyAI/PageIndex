@@ -953,8 +953,8 @@ def _larger_alike(style: Optional[str], other: Optional[str]) -> bool:
 
 
 def _list_families(readings: list) -> set:
-    """The list numberings among an address's readings ("2." digit, "（三）" CJK), label words aside."""
-    return {_family(scheme) for scheme, _ in readings if scheme[0] not in ("chapter", "label")}
+    """The list numberings and depths among an address's readings ("2." digit, "（三）" CJK, "2.1.2" three deep), label words aside."""
+    return {(_family(scheme), len(values)) for scheme, values in readings if scheme[0] not in ("chapter", "label")}
 
 
 def _relation(sa: tuple, a: tuple, sh: tuple, h: tuple):
@@ -1096,6 +1096,9 @@ def merge_bookmark_tree(
         A climb must reach a numbering parent or the top level (just below
         the root when one root bookmark titles the whole document); one
         stopped halfway leaves the heading at the deepest open bookmark.
+        One the next bookmark's open parent stops keeps its height, beside
+        that bookmark, unless the two are numbered in another list style
+        or depth ("3." is no peer of "1.1.2").
 
     Two noise filters prune the whole detected tree before placement:
     titles recurring across it (running labels, not sections) and
@@ -1712,8 +1715,13 @@ def merge_bookmark_tree(
             if verdict == "parent":
                 return k
             below = k - 1
-            if verdict == "stop" or (stack[below][1] + 1 if below >= 0 else 1) < floor:
+            if verdict == "stop":
                 return anchor
+            if (stack[below][1] + 1 if below >= 0 else 1) < floor:
+                # the next bookmark keeps the section open: the heading stays beside it, if numbered alike
+                mine = _list_families(_readings(node["title"]))
+                kin = _list_families(addresses[next(later_bookmarks(node))])
+                return anchor if mine and kin and not mine & kin else k
             if below < 0:
                 return -1
             k = below
