@@ -59,20 +59,18 @@ NUMBERED_PREFIX_RE = regex_module.compile(r"^([1-9１-９]\p{Number}*)[ .-](?:["
 # numeric text.
 DEAD_DIGIT_RE = re.compile(r"^.p\{Number\}+.$")
 
-# Trie of equation-like keywords ("equation", "eqn", "eq", plus multilingual
-# variants).
-EQUATION_KEYWORDS_TRIE = build_trie(
-    [
-        "equation", "equation.", "eqn", "eqn.", "eq", "eq.",
-        "ecuación", "equação", "gleichung", "equazione", "ekvation",
-        "yhtälö", "ligning", "persamaan", "denklem", "ecuația",
-        "equació", "rovnica", "rovnice", "równanie", "vergelijking",
-        "jednadžba", "jöfnu", "võrrand", "vienādojums", "lygtis",
-        "enačba", "egyenlet", "phương trình", "εξίσωση",
-        "方程", "방정식", "уравнение", "рівняння", "раўнанне", "једначина",
-    ],
-    set_case_fold(TrieConfig(), True),
+# Equation-like keywords ("equation", "eqn", "eq", plus multilingual
+# variants) and their trie.
+EQUATION_KEYWORDS = (
+    "equation", "equation.", "eqn", "eqn.", "eq", "eq.",
+    "ecuación", "equação", "gleichung", "equazione", "ekvation",
+    "yhtälö", "ligning", "persamaan", "denklem", "ecuația",
+    "equació", "rovnica", "rovnice", "równanie", "vergelijking",
+    "jednadžba", "jöfnu", "võrrand", "vienādojums", "lygtis",
+    "enačba", "egyenlet", "phương trình", "εξίσωση",
+    "方程", "방정식", "уравнение", "рівняння", "раўнанне", "једначина",
 )
+EQUATION_KEYWORDS_TRIE = build_trie(list(EQUATION_KEYWORDS), set_case_fold(TrieConfig(), True))
 
 
 # Roman and English number words used by heading numbering detectors.

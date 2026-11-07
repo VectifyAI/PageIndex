@@ -13,6 +13,7 @@ from ..tokens import (
     Token, TokenView, wrap_tokens, enumerate_tokens, last_token, trie_prefix_match, first_token, set_case_fold, TrieConfig, build_trie, tokenize_block, avg_char_width as avg_char_width_fn, trie_full_match, first_anchor_span, is_char_token, is_word_token, token_numeric_value,
 )
 
+from ..stats import column_index_of
 from .candidates import (
     HeadingCandidate,
     OutlineNode,
@@ -24,6 +25,7 @@ from .style_context import (
     compare_heading_depth,
 )
 from .cliques import (
+    block_style_signature,
     find_keyword_clique,
     CliqueFilterContext,
     detect_body_headings,
@@ -39,10 +41,15 @@ from .selection import (
 )
 
 
+# Block types: an outline heading, unnumbered or numbered; text that is no page content
+_UNNUMBERED_HEADING, _NUMBERED_HEADING = 7, 8
+_NOT_CONTENT_TYPES = (1, 2, 12)  # header / footer / watermark
+
+
 def mark_outline_block_types(item_list: list[OutlineNode]) -> None:
     """Mark outline blocks as numbered or unnumbered headings."""
     for block in item_list:
-        block.heading.group_slot.type = 8 if block.heading.has_numbering else 7
+        block.heading.group_slot.type = _NUMBERED_HEADING if block.heading.has_numbering else _UNNUMBERED_HEADING
         mark_outline_block_types(block.child_nodes)
 
 
@@ -313,10 +320,23 @@ def _heading_appears_at_page_top(heading: HeadingCandidate) -> bool:
             continue                     # only blocks before the heading
         if block.char_count() <= 0:
             continue                     # no text
-        if block.type in (1, 2, 12):       # header / footer / watermark
+        if block.type in _NOT_CONTENT_TYPES:
             continue
         return False                     # real content precedes the heading
     return True
+
+
+def _content_follows(heading: HeadingCandidate) -> Optional[bool]:
+    """Whether real content follows a heading on its page before the next heading, in reading order."""
+    block, page = heading.group_slot, heading.page
+    if block is None or page is None:
+        return None
+    after = [later for later in (page.secondary_slot or [])
+             if getattr(later, "reading_order_index", 0) > block.reading_order_index]
+    next_heading = min((later.reading_order_index for later in after
+                        if later.type in (_UNNUMBERED_HEADING, _NUMBERED_HEADING)), default=float("inf"))
+    return any(later.reading_order_index < next_heading and later.char_count() > 0
+               and later.type not in _NOT_CONTENT_TYPES for later in after)
 
 
 def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int) -> list[dict]:
@@ -343,6 +363,7 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                 if item.child_nodes:
                     result.extend(_walk_nodes(item.child_nodes))
                 continue
+            heading_block = item.heading.group_slot
             node = {
                 "title": title,
                 "node_id": "",
@@ -350,6 +371,17 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                 "end_index": item.heading.page.page_index,
                 "nodes": _walk_nodes(item.child_nodes) if item.child_nodes else [],
                 "_appear_start": _heading_appears_at_page_top(item.heading),
+                # Heading-level signals for the embedded-TOC merge;
+                # extract_toc strips them from the final output.
+                "_style": block_style_signature(heading_block) if heading_block is not None else None,
+                "_lines": ([[raw_text_of_line(line).strip(), block_style_signature(Block().add_line(line))]
+                            for line in heading_block.primary_slot]
+                           if heading_block is not None else None),
+                "_y": item.heading.auxiliary_slot,
+                "_content_follows": _content_follows(item.heading),
+                "_col": column_index_of(heading_block) if heading_block is not None else None,
+                "_type": item.heading.type,
+                "_prominent": bool(item.heading.is_prominent),
             }
             flat_nodes.append(node)
             result.append(node)

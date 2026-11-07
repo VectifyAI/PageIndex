@@ -19,7 +19,7 @@ from typing import Optional, Union
 from .blocks import cluster_lines_into_blocks, BlockClusterContext
 from .classification import is_body_paragraph, detect_header_footer, HeaderFooterContext, mark_watermarks, mark_toc_and_boilerplate, mark_build_steps
 from .labels import detect_captions, build_caption_regions, CaptionContext
-from .model import Rect, numbering_kind, block_text, deaccented_text, Block
+from .model import Rect, numbering_kind, block_text, deaccented_text, Block, dominant_style_of, raw_text_of_line
 from .outline_assembly import (
     build_heading_from_block, is_outline_valid, is_chapter_outline_valid, mark_outline_block_types, assemble_outline, compute_max_heading_gap, has_table_or_prominent, OutlineNode, outline_to_dict_tree,
 )
@@ -114,6 +114,32 @@ def page_by_block_lookup(pages, block) -> Optional[PageView]:
         if block in (page.secondary_slot or []):
             return page
     return None
+
+
+def _toc_lines(page: PageView) -> list[tuple]:
+    """The page's printed-TOC lines as (text, x0, x1, y, style), positions as page fractions."""
+    bounds = page.bounds
+    width = (bounds.right_edge() - bounds.left_edge()) or 1.0
+    height = bounds.bbox_height() or 1.0
+    return [(raw_text_of_line(line).strip(),
+             round((line.left_edge() - bounds.left_edge()) / width, 4),
+             round((line.right_edge() - bounds.left_edge()) / width, 4),
+             round((bounds.top_edge() - line.top_edge()) / height, 4),
+             dominant_style_of(block))
+            for block in (page.output_slot or []) if block.type == 9
+            for line in block.primary_slot]
+
+
+def _column_regions(page: PageView) -> list[tuple]:
+    """The page's column regions in reading order as (x0, x1, top, bottom), positions as page fractions."""
+    bounds = page.bounds
+    width = (bounds.right_edge() - bounds.left_edge()) or 1.0
+    height = bounds.bbox_height() or 1.0
+    return [(round((region.left_edge() - bounds.left_edge()) / width, 4),
+             round((region.right_edge() - bounds.left_edge()) / width, 4),
+             round((bounds.top_edge() - region.top_edge()) / height, 4),
+             round((bounds.top_edge() - region.bottom_edge()) / height, 4))
+            for region in (page.tertiary_slot or [])]
 
 
 # --------------------------------------------------------------------------- #
@@ -300,8 +326,18 @@ def extract_toc(
     if use_embedded_toc:
         from .embedded_toc import apply_embedded_toc
         result["structure"], result["toc_source"] = apply_embedded_toc(
-            structure, doc_handle, len(pages), page_texts=page_texts
+            structure, doc_handle, len(pages), page_texts=page_texts,
+            toc_lines=[_toc_lines(page) for page in pages], page_boxes=page_meta,
+            page_columns=[_column_regions(page) for page in pages],
         )
+
+    def _drop_signal_keys(nodes: list[dict]) -> None:
+        for node in nodes:
+            for key in ("_style", "_lines", "_y", "_content_follows", "_col", "_type", "_prominent"):
+                node.pop(key, None)
+            _drop_signal_keys(node.get("nodes") or [])
+
+    _drop_signal_keys(result["structure"])
     return result
 
 
