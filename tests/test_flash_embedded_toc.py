@@ -835,6 +835,17 @@ def test_heading_numbered_unlike_the_level_of_an_unnumbered_bookmark_is_no_peer(
     assert _children(merged, "APPENDIX") == ["3.2. Drug Substance"]
 
 
+def test_bookmark_reading_unlike_its_siblings_is_dropped():
+    # "V." reads as Roman 5 and as the letter V; beside "IV." and "VI." it is Roman, so "C." may follow "B." under it
+    titles = [("IV. Summary", 1, 1), ("V. Manufacturing", 1, 2), ("A. Drug Substance", 2, 2),
+              ("B. Drug Product", 2, 3), ("1. Description", 3, 3), ("2. Development", 3, 4), ("VI. References", 1, 6)]
+    entries = [{"title": t, "level": level, "page": page} for t, level, page in titles]
+    detected = [_node(t, page, y=0.1) for t, _, page in titles[:6]]
+    detected += [_node("C. Appendices", 5, y=0.1), _node("VI. References", 6, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=7)
+    assert _children(merged, "V. Manufacturing") == ["A. Drug Substance", "B. Drug Product", "C. Appendices"]
+
+
 def test_label_words_read_in_any_language_flash_knows():
     assert _readings("Kapitel 3 Methoden") == _readings("Chapter 3 Methods") == [(("chapter",), (3,))]
 

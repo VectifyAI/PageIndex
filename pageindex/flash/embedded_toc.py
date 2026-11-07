@@ -1081,9 +1081,10 @@ def merge_bookmark_tree(
         before bookmark "2 Related Work"). Either way the next numbered
         bookmark in the parent's section must come after the heading. A
         bookmark's address is read from its copy, else its title, else
-        the numbered line printing its title at its target; one unlike
-        all its numbered siblings' is dropped (a table row taken for
-        the heading), and an address a bookmark holds is no evidence for
+        the numbered line printing its title at its target; a reading
+        unlike all its numbered siblings' is dropped (a table row taken
+        for the heading, "V." read as a letter beside "IV." and "VI."),
+        and an address a bookmark holds is no evidence for
         a heading unless the bookmarks themselves repeat it;
       * the parent the printed table of contents lists it under, when
         that contents nests the bookmarks it lists the way they nest
@@ -1441,18 +1442,15 @@ def merge_bookmark_tree(
         return _readings(line) if line else []
 
     addresses = [bookmark_readings(b) for b in range(len(flat))]
-    # An address unlike all its numbered siblings' is misread (a table row taken for the heading)
+    # A reading unlike all its numbered siblings' is misread (a table row taken for the heading, "V." as a letter)
     siblings: dict[Optional[int], list[int]] = {}
     for b in range(len(flat)):
         siblings.setdefault(parent_pos[b], []).append(b)
-    unlike = [
-        b for b, readings in enumerate(addresses)
-        if readings and (others := [scheme for s in siblings[parent_pos[b]] if s != b
-                                    for scheme, _ in addresses[s][:1]])
-        and not any(_family(scheme) == _family(other)
-                    for scheme, _ in readings for other in others)]
-    for b in unlike:
-        addresses[b] = []
+    addresses[:] = [
+        [(scheme, values) for scheme, values in readings if _family(scheme) in others]
+        if (others := {_family(scheme) for s in siblings[parent_pos[b]] if s != b
+                       for scheme, _ in addresses[s][:1]}) else readings
+        for b, readings in enumerate(addresses)]
     # An address is unique unless the bookmarks repeat it (numbering restarting per part)
     key_count = Counter(_unique_key(scheme, values)
                         for readings in addresses for scheme, values in readings)
