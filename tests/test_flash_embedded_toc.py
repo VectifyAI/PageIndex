@@ -284,6 +284,52 @@ def test_climb_the_next_bookmark_stops_stays_when_numbered_unlike_it():
     assert _children(merged, "1 SLP Model") == ["3. Seize Every Airdrop Opportunity"]
 
 
+def _chapters(level_three_printed, exchanges="Feedback Exchanges", printed_page=11, content_follows=None):
+    entries = [{"title": "Chapter 1", "level": 1, "page": 1},
+               {"title": "Implicit Theory", "level": 2, "page": 2},
+               {"title": "Chapter 2", "level": 1, "page": 10},
+               {"title": exchanges, "level": 2, "page": 11},
+               {"title": "Chapter 3", "level": 1, "page": 20}]
+    detected = [_node("Chapter 1", 1, style="C", y=0.1), _node("Implicit Theory", 2, style="S", y=0.1),
+                _node("Chapter 2", 10, style="C", y=0.1), _node(exchanges, printed_page, style="S", y=0.1),
+                _node("Overall Summary", printed_page, style="S", y=0.5), _node("Chapter 3", 20, style="C", y=0.1)]
+    if content_follows is not None:
+        detected[3]["_content_follows"] = content_follows
+    if level_three_printed:
+        entries.insert(2, {"title": "Dyadic Considerations", "level": 3, "page": 3})
+        detected.insert(2, _node("Dyadic Considerations", 3, style="I", y=0.1))
+    return entries, detected
+
+
+@pytest.mark.parametrize("level_three_printed, exchanges, parent, children", [
+    (True, "Feedback Exchanges", "Chapter 2", ["Feedback Exchanges", "Overall Summary"]),
+    (False, "Feedback Exchanges", "Feedback Exchanges", ["Overall Summary"]),
+    (True, "2.3 Feedback Exchanges", "2.3 Feedback Exchanges", ["Overall Summary"]),
+])
+def test_climb_stopped_halfway_keeps_its_height_only_against_how_the_bookmarks_print_the_level_below(
+        level_three_printed, exchanges, parent, children):
+    entries, detected = _chapters(level_three_printed, exchanges)
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert _children(merged, parent) == children
+
+
+def test_bookmark_printed_a_page_after_its_target_holds_nothing_were_the_heading_after_it_its_peer():
+    entries, detected = _chapters(True, printed_page=12, content_follows=False)
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert _children(merged, "Feedback Exchanges") == ["Overall Summary"]
+
+
+def test_detected_nesting_the_numbers_set_apart_is_dropped():
+    entries = [{"title": "Item 8. Financial Statements", "level": 1, "page": 50},
+               {"title": "Item 9. Changes in Accountants", "level": 1, "page": 90}]
+    detected = [_node("Item 8. Financial Statements", 50, style="I", y=0.1, children=[
+                    _node("NOTE 18. SEGMENTS", 80, style="N", y=0.1, children=[
+                        _node("NOTE 19. QUARTERLY DATA", 82, style="N", y=0.1)])]),
+                _node("Item 9. Changes in Accountants", 90, style="I", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=95)
+    assert _children(merged, "Item 8. Financial Statements") == ["NOTE 18. SEGMENTS", "NOTE 19. QUARTERLY DATA"]
+
+
 def test_climb_without_evidence_to_the_top_stays_at_the_anchor():
     entries = [
         {"title": "Part I", "level": 1, "page": 1},
