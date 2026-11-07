@@ -973,8 +973,10 @@ def merge_bookmark_tree(
     and initials are no remark ("Mathematics, B.A." below "Mathematics").
     A bookmark learns style and position from its copies; detection
     exports the ``_style``, ``_lines`` (each line's text and style),
-    ``_y``, ``_type`` and ``_prominent`` keys and ``extract_toc`` strips
-    them after the merge.
+    ``_y``, ``_content_follows`` (real content after the heading on its
+    page before the next heading, in flash's reading order), ``_type``
+    and ``_prominent`` keys and ``extract_toc`` strips them after the
+    merge.
 
     Slots. Each bookmark takes a place in the detected reading order: at
     its first copy, else after the headings printed above its /XYZ target
@@ -1024,11 +1026,14 @@ def merge_bookmark_tree(
         prefix outside the candidate's and after it, or the same style
         fingerprint (face, weight and size as one hash; a larger raw size
         in a different face is not seniority) that leaves the candidate
-        real content below its heading on a shared page and no
+        real content below its heading on a shared page (what flash reads
+        between the two, columns included, else a vertical gap) and no
         same-style detected child enumerated like the heading, or a style
         that differs from the candidate's in size alone and is larger
         ("EXHIBIT B" after a smaller "8. Miscellaneous"); never past a
-        candidate numbered in another list style ("2." below "（三）").
+        candidate numbered in another list style ("2." below "（三）"), or
+        unnumbered among siblings numbered so ("3.2." below an "APPENDIX"
+        that follows "VII. REFERENCES").
         A climb must reach a numbering parent or the top level (just below
         the root when one root bookmark titles the whole document); one
         stopped halfway leaves the heading at the deepest open bookmark.
@@ -1121,9 +1126,17 @@ def merge_bookmark_tree(
         return (node.get("_style") is not None
                 and node["_style"] == cand.get("_style"))
 
-    def _claims_empty(node: dict, cand: dict) -> bool:
+    def _claims_empty(node: dict, b: int) -> bool:
+        """Bookmark b would hold nothing were the heading its peer."""
+        cand = flat[b]
         if cand["start_index"] != node["start_index"]:
             return False
+        printed = reading[first_copy[b]] if b in first_copy else None
+        if (printed is not None and printed["start_index"] == node["start_index"]
+                and printed.get("_content_follows") is not None):
+            # flash read the page: the heading precedes b's print, or follows it with nothing between
+            pos = read_index.get(id(node), -1)
+            return pos < first_copy[b] or (pos == first_copy[b] + 1 and not printed["_content_follows"])
         node_y = node.get("_y")
         cand_y = cand.get("_y")
         if node_y is None or cand_y is None:
@@ -1608,6 +1621,10 @@ def merge_bookmark_tree(
     def attach(node: dict, k: int) -> None:
         (out_roots if k < 0 else stack[k][0]["nodes"]).append(node)
 
+    # The list numberings each bookmark level uses, for an unnumbered member ("APPENDIX" after "VII.")
+    level_families = {parent: set().union(*(_list_families(addresses[s]) for s in kids))
+                      for parent, kids in siblings.items()}
+
     def evidence(node: dict, b: int) -> str:
         cand = flat[b]
         title, cand_title = node["title"], cand["title"]
@@ -1615,12 +1632,13 @@ def merge_bookmark_tree(
             if _numeral_child(cand_title, title):
                 return "parent"
             return "peer" if _numeral_after(title, cand_title) else "stop"
-        mine, theirs = _list_families(_readings(title)), _list_families(addresses[b])
-        if mine and theirs and not mine & theirs:
-            return "stop"  # siblings are numbered alike: "2." is no peer of "（三）"
+        mine = _list_families(_readings(title))
+        kin = _list_families(addresses[b]) or level_families[parent_pos[b]]
+        if mine and kin and not mine & kin:
+            return "stop"  # siblings are numbered alike: "2." is no peer of "（三）", nor "3.2." of "VII."
         if _larger_alike(node.get("_style"), cand.get("_style")):
             return "peer"
-        if (not _style_climbs(node, cand) or _claims_empty(node, cand)
+        if (not _style_climbs(node, cand) or _claims_empty(node, b)
                 or any(id(child) not in frame_ids and _style_climbs(node, child)
                        and _enumerated_alike(title, child["title"])
                        for child in cand["nodes"])):

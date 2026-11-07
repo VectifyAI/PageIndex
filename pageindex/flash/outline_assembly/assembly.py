@@ -319,6 +319,19 @@ def _heading_appears_at_page_top(heading: HeadingCandidate) -> bool:
     return True
 
 
+def _content_follows(heading: HeadingCandidate) -> Optional[bool]:
+    """Whether real content follows a heading on its page before the next heading, in reading order."""
+    block, page = heading.group_slot, heading.page
+    if block is None or page is None:
+        return None
+    after = [later for later in (page.secondary_slot or [])
+             if getattr(later, "reading_order_index", 0) > block.reading_order_index]
+    next_heading = min((later.reading_order_index for later in after if later.type in (7, 8)), default=float("inf"))
+    return any(later.reading_order_index < next_heading and later.char_count() > 0
+               and later.type not in (1, 2, 12)  # header / footer / watermark
+               for later in after)
+
+
 def _style_of(block: Block) -> str:
     """A heading's style fingerprint for the embedded-TOC merge: dominant style, "|C" when caps-heavy."""
     return dominant_style_of(block) + ("|C" if is_caps_heavy(block) else "")
@@ -363,6 +376,7 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                             for line in heading_block.primary_slot]
                            if heading_block is not None else None),
                 "_y": item.heading.auxiliary_slot,
+                "_content_follows": _content_follows(item.heading),
                 "_type": item.heading.type,
                 "_prominent": bool(item.heading.is_prominent),
             }

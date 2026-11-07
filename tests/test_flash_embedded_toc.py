@@ -716,6 +716,47 @@ def test_initials_after_a_bookmark_title_are_no_remark():
     assert _children(merged, "Mathematics") == ["Double Major Options", "Mathematics, B.A."]
 
 
+def test_heading_beside_a_bookmark_print_is_its_peer_only_with_content_between():
+    # "Keywords" opens the next column level with "Abstract": only flash's reading order tells them apart
+    entries = [{"title": "Abstract", "level": 1, "page": 1, "x": 0.1, "y": 0.2},
+               {"title": "1 Introduction", "level": 1, "page": 2, "x": 0.1, "y": 0.1}]
+    for content, children in ((True, []), (False, ["Keywords"])):
+        abstract = _node("Abstract", 1, style="B", y=0.2)
+        abstract["_content_follows"] = content
+        detected = [abstract, _node("Keywords", 1, style="B", y=0.2), _node("1 Introduction", 2, style="B", y=0.1)]
+        merged = merge_bookmark_tree(detected, entries, n_pages=3)
+        assert _children(merged, "Abstract") == children
+    # another heading between them is content of "Abstract" too
+    abstract = _node("Abstract", 1, style="B", y=0.2)
+    abstract["_content_follows"] = False
+    detected = [abstract, _node("Notes", 1, style="C", y=0.3), _node("Keywords", 1, style="B", y=0.5),
+                _node("1 Introduction", 2, style="B", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=3)
+    assert _children(merged, "Abstract") == ["Notes"]
+
+
+def test_label_printed_above_a_bookmark_heading_holding_content_stays_inside_it():
+    entries = [{"title": "Training", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": "Log Analysis", "level": 1, "page": 2, "x": 0.1, "y": 0.09}]
+    label, heading = _node("EIGHTEEN", 2, style="B", y=0.14), _node("LOG ANALYSIS", 2, style="B", y=0.21)
+    label["_content_follows"], heading["_content_follows"] = False, True
+    detected = [_node("Training", 1, style="B", y=0.1), label, heading]
+    merged = merge_bookmark_tree(detected, entries, n_pages=3)
+    assert [node["title"] for node in merged] == ["Training", "Log Analysis"]
+
+
+def test_heading_numbered_unlike_the_level_of_an_unnumbered_bookmark_is_no_peer():
+    entries = [{"title": "I. Introduction", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": "II. References", "level": 1, "page": 2, "x": 0.1, "y": 0.1},
+               {"title": "APPENDIX", "level": 1, "page": 3, "x": 0.1, "y": 0.1}]
+    appendix = _node("APPENDIX", 3, style="B", y=0.1)
+    appendix["_content_follows"] = True
+    detected = [_node("I. Introduction", 1, style="B", y=0.1), _node("II. References", 2, style="B", y=0.1),
+                appendix, _node("3.2. Drug Substance", 3, style="B", y=0.3)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=4)
+    assert _children(merged, "APPENDIX") == ["3.2. Drug Substance"]
+
+
 def test_heading_ending_in_initials_glued_after_a_bookmark_title_is_no_remark():
     entries = [{"title": "Interdisciplinary Programs", "level": 1, "page": 2, "x": 0.1, "y": 0.09},
                {"title": "Economics", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
