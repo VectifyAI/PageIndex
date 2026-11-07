@@ -602,6 +602,31 @@ def test_printed_toc_joins_label_cells_and_wrapped_titles():
         ("4. Results", 6), ("5. Conclusion", 7)]
 
 
+def test_printed_toc_indents_take_the_levels_of_the_bookmarks_listed_at_them():
+    rows = [[("1 Introduction ........ 1", 0.10, 0.9, 0.10, "S"),
+             ("1.1 Background ........ 1", 0.15, 0.9, 0.15, "S"),
+             ("1.2 Scope ........ 2", 0.18, 0.9, 0.20, "S"),
+             ("1.2.1 Details ........ 2", 0.22, 0.9, 0.25, "S"),
+             ("2 Methods ........ 3", 0.10, 0.9, 0.30, "S")]]
+    entries = [{"title": "Introduction", "level": 1, "page": 3}, {"title": "Background", "level": 2, "page": 3},
+               {"title": "Scope", "level": 2, "page": 4}, {"title": "Methods", "level": 1, "page": 5}]
+    assert [e["parent"] for e in read_printed_toc(rows, entries)] == [None, 0, 0, 2, None]
+
+
+def test_heading_printed_larger_in_the_same_face_climbs_out_of_a_bookmark():
+    def merged(small):
+        entries = [{"title": "Terms", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+                   {"title": "Miscellaneous", "level": 2, "page": 2, "x": 0.1, "y": 0.1},
+                   {"title": "Pricing", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+        detected = [_node("Terms", 1, style="Arial-Bold B 14.0", y=0.1),
+                    _node("Miscellaneous", 2, style=small, y=0.1),
+                    _node("Exhibit B", 3, style="Arial-Bold B 14.0", y=0.1),
+                    _node("Pricing", 4, style="Arial-Bold B 14.0", y=0.1)]
+        return [n["title"] for n in merge_bookmark_tree(detected, entries, n_pages=5)]
+    assert merged("Arial-Bold B 11.0") == ["Terms", "Exhibit B", "Pricing"]
+    assert merged("Arial-Bold B 11.0|C") == ["Terms", "Pricing"]  # small caps are set small by design
+
+
 def test_page_number_above_a_heading_is_no_section_number():
     assert _heading_line_reader(["17\nBackground\nText"])(1, "Background") is None
 
@@ -667,6 +692,28 @@ def test_heading_below_a_bookmark_target_keeps_the_bookmark_title_it_starts_with
                 _node("Discussion", 4, y=0.1)]
     merged = merge_bookmark_tree(detected, entries, n_pages=5)
     assert _children(merged, "Evaluation") == ["Evaluation Metrics"]
+
+
+def test_print_adding_words_to_a_bookmark_title_away_from_its_target_is_another_heading():
+    entries = [{"title": "Earth Sciences", "level": 1, "page": 2, "x": 0.1, "y": 0.09},
+               {"title": "Earth Sciences, B.A.", "level": 2, "page": 2, "x": 0.1, "y": 0.66},
+               {"title": "Geology", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+    detected = [_node("Earth Sciences", 2, y=0.09), _node("General Information", 2, y=0.27),
+                _node("Earth Sciences, B.A.", 2, y=0.66), _node("Degree Requirements", 2, y=0.8),
+                _node("Geology", 4, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert _children(merged, "Earth Sciences") == ["General Information", "Earth Sciences, B.A."]
+    assert _children(merged, "Earth Sciences, B.A.") == ["Degree Requirements"]
+
+
+def test_initials_after_a_bookmark_title_are_no_remark():
+    entries = [{"title": "Chemistry", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": "Mathematics", "level": 1, "page": 2, "x": 0.1, "y": 0.09},
+               {"title": "Physics", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+    detected = [_node("Chemistry", 1, y=0.1), _node("Double Major Options", 2, y=0.3),
+                _node("Mathematics, B.A.", 2, y=0.6), _node("Physics", 4, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert _children(merged, "Mathematics") == ["Double Major Options", "Mathematics, B.A."]
 
 
 def test_bookmark_target_on_a_page_whose_box_is_inherited():

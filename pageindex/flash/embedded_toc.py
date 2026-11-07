@@ -478,7 +478,8 @@ def _printed_as(title: str, frame_title: str) -> bool:
             return True
         remark = tokens[tail:]
         return (len(remark) <= 3 and title.rstrip().endswith(".")
-                and not any(token.isdigit() for token in remark))
+                and not any(token.isdigit() for token in remark)
+                and any(len(token) > 1 for token in remark))  # initials ("B.A.") remark nothing
     rest = iter(tokens)
     if (len(tokens) > tail > 1 and tokens[0] == frame_tokens[0]
             and tokens[-1] == frame_tokens[-1]
@@ -486,6 +487,12 @@ def _printed_as(title: str, frame_title: str) -> bool:
         return True
     key = _section_key(title)
     return key is not None and key == _section_key(frame_title)
+
+
+def _extends(title: str, other: str) -> bool:
+    """One title is the other with words added ("Mathematics, B.A." and "Mathematics")."""
+    short, longer = sorted((_title_tokens(title), _title_tokens(other)), key=len)
+    return len(short) < len(longer) and longer[:len(short)] == short
 
 
 def _enumerated_alike(title: str, other: str) -> bool:
@@ -874,6 +881,25 @@ def _style_after(lines: Optional[list], head: str) -> Optional[str]:
     return None
 
 
+def _larger_alike(style: Optional[str], other: Optional[str]) -> bool:
+    """``style`` differs from ``other`` in size alone and is larger by over half a point.
+
+    Fingerprints read "face weight size", "|C" when caps-heavy; small caps are set small by design.
+    """
+    if not style or not other or " " not in style or " " not in other:
+        return False
+    face, size = style.rsplit(" ", 1)
+    other_face, other_size = other.rsplit(" ", 1)
+    size, _, caps = size.partition("|")
+    other_size, _, other_caps = other_size.partition("|")
+    if face != other_face or caps != other_caps:
+        return False
+    try:
+        return float(size) > float(other_size) + 0.5
+    except ValueError:
+        return False
+
+
 def _list_families(readings: list) -> set:
     """The list numberings among an address's readings ("2." digit, "（三）" CJK), label words aside."""
     return {_family(scheme) for scheme, _ in readings if scheme[0] not in ("chapter", "label")}
@@ -941,10 +967,13 @@ def merge_bookmark_tree(
     Dissolving holds fuzzy matches to a higher bar than title repair: at
     the repair bar, wordy-overlapping titles of distinct sections
     false-match, and a false dissolve deletes a real heading, while an
-    escaped garbled duplicate only leaves a stray leaf. A bookmark learns
-    style and position from its copies; detection exports the ``_style``,
-    ``_lines`` (each line's text and style), ``_y``, ``_type`` and
-    ``_prominent`` keys and ``extract_toc`` strips them after the merge.
+    escaped garbled duplicate only leaves a stray leaf. A print that adds
+    words to a bookmark's title away from its target is another heading,
+    and initials are no remark ("Mathematics, B.A." below "Mathematics").
+    A bookmark learns style and position from its copies; detection
+    exports the ``_style``, ``_lines`` (each line's text and style),
+    ``_y``, ``_type`` and ``_prominent`` keys and ``extract_toc`` strips
+    them after the merge.
 
     Slots. Each bookmark takes a place in the detected reading order: at
     its first copy, else after the headings printed above its /XYZ target
@@ -995,8 +1024,10 @@ def merge_bookmark_tree(
         fingerprint (face, weight and size as one hash; a larger raw size
         in a different face is not seniority) that leaves the candidate
         real content below its heading on a shared page and no
-        same-style detected child enumerated like the heading; never past
-        a candidate numbered in another list style ("2." below "（三）").
+        same-style detected child enumerated like the heading, or a style
+        that differs from the candidate's in size alone and is larger
+        ("EXHIBIT B" after a smaller "8. Miscellaneous"); never past a
+        candidate numbered in another list style ("2." below "（三）").
         A climb must reach a numbering parent or the top level (just below
         the root when one root bookmark titles the whole document); one
         stopped halfway leaves the heading at the deepest open bookmark.
@@ -1044,13 +1075,20 @@ def merge_bookmark_tree(
                 break
         return idx
 
+    def off_target(node: dict, b: int) -> bool:
+        """The heading is printed on bookmark b's page, away from b's target."""
+        return (node["start_index"] == flat[b]["start_index"] and dest_y[b] is not None
+                and node.get("_y") is not None and abs(node["_y"] - dest_y[b]) > _DEST_TOL)
+
     def dissolve_target(node: dict, idx: int,
                         matched: dict[int, Optional[str]]) -> Optional[int]:
         numeral = _numeral_prefix(node["title"])
         same = []
         pos = idx
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
-            if _same_heading(node, flat[pos], _DISSOLVE_SIMILARITY):
+            # a print adding words to a bookmark's title away from its target is another heading
+            if _same_heading(node, flat[pos], _DISSOLVE_SIMILARITY) and not (
+                    _extends(node["title"], flat[pos]["title"]) and off_target(node, pos)):
                 same.append(pos)
             pos -= 1
         if same:
@@ -1577,6 +1615,8 @@ def merge_bookmark_tree(
         mine, theirs = _list_families(_readings(title)), _list_families(addresses[b])
         if mine and theirs and not mine & theirs:
             return "stop"  # siblings are numbered alike: "2." is no peer of "（三）"
+        if _larger_alike(node.get("_style"), cand.get("_style")):
+            return "peer"
         if (not _style_climbs(node, cand) or _claims_empty(node, cand)
                 or any(id(child) not in frame_ids and _style_climbs(node, child)
                        and _enumerated_alike(title, child["title"])
@@ -1725,6 +1765,25 @@ def read_printed_toc(pages: list[list[tuple]], entries: list[dict]) -> list[dict
         return []
     offset = offsets.most_common(1)[0][0]
     levels = _toc_levels(items)
+    # An indent takes the level of the bookmarks listed at it; indents no bookmark sits at keep their order
+    known: dict[int, Counter] = {}
+    for item, rank in zip(items, levels):
+        if item["num"] is None:
+            continue
+        page = item["num"] + offset
+        j = next((j for end in ends(item["title"]) for j in by_end.get(end, ())
+                  if abs(entries[j]["page"] - page) <= 1 and _toc_same(item["title"], entries[j]["title"])), None)
+        if j is not None:
+            known.setdefault(rank, Counter())[entries[j]["level"]] += 1
+    if known:
+        level_of = {rank: votes.most_common(1)[0][0] for rank, votes in known.items()}
+        first = min(level_of)
+
+        def calibrated(rank: int) -> int:
+            below = max((r for r in level_of if r <= rank), default=None)
+            return level_of[below] + rank - below if below is not None else level_of[first] - (first - rank)
+
+        levels = [calibrated(rank) for rank in levels]
     toc, open_entries = [], []
     for i, (item, level) in enumerate(zip(items, levels)):
         while open_entries and levels[open_entries[-1]] >= level:
