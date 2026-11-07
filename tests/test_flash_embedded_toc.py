@@ -582,7 +582,11 @@ def test_bookmark_target_in_the_right_column_follows_the_left_column():
                {"title": "End", "level": 1, "page": 6}]
     detected = [_node("Setup", 4, y=0.2), _node("Training", 4, y=0.8),
                 _node("Accuracy", 4, y=0.3)]
-    merged = merge_bookmark_tree(detected, entries, n_pages=8)
+    for node, col in zip(detected, (0, 0, 1)):
+        node["_col"] = col
+    # flash's column regions on page 4, in its reading order: left column, then right
+    columns = [[]] * 3 + [[(0.1, 0.45, 0.1, 0.9), (0.55, 0.9, 0.1, 0.9)]] + [[]] * 4
+    merged = merge_bookmark_tree(detected, entries, n_pages=8, columns=columns)
     assert _children(merged, "Method") == ["Setup", "Training"]
     assert _children(merged, "Results") == ["Accuracy"]
 
@@ -755,6 +759,10 @@ def test_heading_numbered_unlike_the_level_of_an_unnumbered_bookmark_is_no_peer(
                 appendix, _node("3.2. Drug Substance", 3, style="B", y=0.3)]
     merged = merge_bookmark_tree(detected, entries, n_pages=4)
     assert _children(merged, "APPENDIX") == ["3.2. Drug Substance"]
+
+
+def test_label_words_read_in_any_language_flash_knows():
+    assert _readings("Kapitel 3 Methoden") == _readings("Chapter 3 Methods") == [(("chapter",), (3,))]
 
 
 def test_heading_ending_in_initials_glued_after_a_bookmark_title_is_no_remark():

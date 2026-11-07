@@ -52,6 +52,8 @@ from typing import Callable, Optional, Union
 
 import pypdfium2 as pdfium
 
+from .heading_detection.keyword_tables import _DICTS as _FLASH_DICTS
+
 IGNORE, SKELETON, FULL = 1, 2, 3
 
 # Same-page titles at or above this similarity refer to the same section.
@@ -64,8 +66,6 @@ _MIN_SECTION_GAP = 0.15
 
 # A bookmark's /XYZ top sits at most this far below its printed heading's top
 _DEST_TOL = 0.02
-# Reading order jumping this far back up a page has moved to the next column
-_COLUMN_JUMP = 0.05
 
 # Backfill noise filters: a normalized title recurring this often across the
 # detected tree is a running label, not a section (unless printed like a
@@ -731,18 +731,43 @@ def merge_bookmark_skeleton(
     return _finalize(front + chapter_nodes, n_pages)
 
 
+def _flash_words(*keys: str) -> frozenset:
+    """Lowercased entries of flash's multilingual keyword dictionaries."""
+    return frozenset(" ".join(word.lower().split()) for key in keys for word in _FLASH_DICTS.get(key, []))
+
+
+def _wide(word: str) -> bool:
+    return any(unicodedata.east_asian_width(char) in "WF" for char in word)
+
+
+def _any_word(words) -> str:
+    """A regex alternation of ``words``, longest first; CJK may be letter-spaced."""
+    return "|".join((r"\s*".join(map(re.escape, word.replace(" ", ""))) if _wide(word)
+                     else r"\s+".join(map(re.escape, word.split())))
+                    for word in sorted(words, key=len, reverse=True))
+
+
+# Label words: flash's dictionaries, plus the ones they lack
+_CHAPTER_WORDS = _flash_words("chapter_words")
+_APPENDIX_WORDS = _flash_words("appendix_keywords", "appendices_dict")
+_VOLUME_WORDS = _flash_words("volume_words")
+_LABEL_WORDS = _CHAPTER_WORDS | _APPENDIX_WORDS | _VOLUME_WORDS | {
+    "chap", "chap.", "part", "section", "item", "note", "article", "lecture", "unit", "schedule",
+    "exhibit", "book", "module"}
+_BACK_SET = _flash_words("references") | _APPENDIX_WORDS | {
+    "acknowledgment", "acknowledgments", "acknowledgement", "acknowledgements",
+    "index", "glossary", "supplementary", "致谢"}
 _NUMBER_WORD = (r"(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[- ]?)?"
                 r"(?:one|two|three|four|five|six|seven|eight|nine)"
                 r"|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen"
                 r"|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety")
 # A heading's label line printed on its own: "Chapter 4", "TWENTY", "第三章"
 _LABEL_ONLY = re.compile(
-    r"^\s*(?:(?:chapter|chap\.?|part|section|appendix|lecture|unit|book|module)"
-    r"\s+(?:\d+|[ivxlc]+|[a-z])\.?"
+    r"^\s*(?:(?:" + _any_word(_LABEL_WORDS) + r")\s+(?:\d+|[ivxlc]+|[a-z])\.?"
     r"|第[一二三四五六七八九十百零\d]+[章部篇节]|" + _NUMBER_WORD + r")\s*$", re.IGNORECASE)
 _BACK_WORDS = re.compile(
-    r"\b(?:references|bibliography|acknowledge?ments?|appendix|appendices|annex(?:es)?"
-    r"|index|glossary|supplementary)\b|参考文献|致\s*谢|附\s*录", re.IGNORECASE)
+    r"(?<!\w)(?:" + _any_word({word for word in _BACK_SET if not _wide(word)}) + r")(?!\w)|"
+    + _any_word({word for word in _BACK_SET if _wide(word)}), re.IGNORECASE)
 _APPENDIX_LETTER = re.compile(r"^[A-H](?:\.\d+)*[.:]?\s+[A-Z]")
 # Flash heading-candidate types the merge reads
 _KEYWORD_TYPE, _REFERENCES_TYPE = 6, 7
@@ -765,12 +790,11 @@ _CJK_UNIT = {"章": ("chapter",), "部分": ("label", "part"), "篇": ("label", 
 _ADDR_CJK_LABEL = re.compile(
     r"第\s*([0-9]{1,3}|[零〇一二三四五六七八九十百]{1,4})\s*(章|节|節|条|條|部分|篇|部|讲|講|课|課)")
 _ADDR_LABEL = re.compile(
-    r"(?i:(chapter|part|section|item|note|article|appendix|lecture|unit|schedule|exhibit"
-    r"|annex|book|volume))\s+"
+    r"(?i:(" + _any_word(_LABEL_WORDS) + r"))\s+"
     r"([0-9]{1,3}(?:\.[0-9]{1,3})*|[IVXLC]{1,6}|[A-Z])([A-Z])?(?=$|[\s.:,;\-–—)])")
 _ADDR_WORD_LABEL = re.compile(r"([A-Z][a-z]{2,15})\s+([0-9]{1,3})([A-Z])?\s*[:.\-–—](?=\s|$)")
-_CAPTION_WORDS = frozenset({"table", "figure", "fig", "equation", "algorithm", "listing",
-                            "page", "box", "example", "exercise", "problem"})
+_CAPTION_WORDS = _flash_words("table_keywords", "chart_keywords") | {
+    "figure", "fig", "equation", "algorithm", "listing", "page", "box", "example", "exercise", "problem"}
 _ADDR_DIGIT = re.compile(r"(\(?)\s*(?:§\s*)?([0-9]{1,3}(?:\s*\.\s*[0-9]{1,3})*)(?:\s*([.、):]))?")
 _ADDR_ROMAN = re.compile(r"(\(?)\s*([IVXLCDM]{1,7}|[ivxlcdm]{1,7})(?:\s*([.、):]))?")
 _ADDR_LETTER = re.compile(r"(\(?)\s*([A-Za-z])((?:\s*\.\s*[0-9]{1,3})*)(?:\s*([.、):]))?")
@@ -809,11 +833,11 @@ def _readings(text: Optional[str]) -> list[tuple[tuple, tuple]]:
         return [(_CJK_UNIT.get(m.group(2), ("label", m.group(2))), (value,))]
     m = _ADDR_LABEL.match(t)
     if m:
-        word, number, suffix = m.group(1).lower(), m.group(2), m.group(3)
+        word, number, suffix = " ".join(m.group(1).lower().split()), m.group(2), m.group(3)
         parts: list[float]
         if number[0].isdigit():
             parts = [int(x) for x in number.split(".")]
-        elif len(number) > 1 or word in ("part", "book", "volume", "lecture", "unit"):
+        elif len(number) > 1 or word in _VOLUME_WORDS or word in ("part", "book", "lecture", "unit"):
             if (roman := _roman_number(number)) is None:
                 return []
             parts = [roman]
@@ -821,7 +845,7 @@ def _readings(text: Optional[str]) -> list[tuple[tuple, tuple]]:
             parts = [ord(number.upper()) - 64]
         if suffix:
             parts[-1] += (ord(suffix.upper()) - 64) / 100  # Item 1 < 1A < 1B < 2
-        return [(("chapter",) if word == "chapter" else ("label", word), tuple(parts))]
+        return [(("chapter",) if word in _CHAPTER_WORDS else ("label", word), tuple(parts))]
     m = _ADDR_WORD_LABEL.match(t)
     if m and m.group(1).lower() not in _CAPTION_WORDS:
         value = int(m.group(2)) + ((ord(m.group(3)) - 64) / 100 if m.group(3) else 0)
@@ -928,6 +952,7 @@ def merge_bookmark_tree(
     structure: list[dict], entries: list[dict], n_pages: int,
     toc: Optional[list[dict]] = None,
     line_of: Optional[Callable[[int, str], Optional[str]]] = None,
+    columns: Optional[list[list[tuple]]] = None,
 ) -> list[dict]:
     """Graft filtered detected sections into the bookmark tree (FULL tier).
 
@@ -935,7 +960,10 @@ def merge_bookmark_tree(
     placed by one walk in reading order. ``toc`` is the printed table of
     contents (``read_printed_toc``); ``line_of(page, title)`` returns the
     printed line of a bookmark's heading on its target page, for
-    bookmarks whose title carries no section number.
+    bookmarks whose title carries no section number; ``columns`` holds
+    flash's column regions per page as (x0, x1, top, bottom) page
+    fractions in its reading order, the order a heading's ``_col``
+    indexes.
 
     Copies. A detected node whose normalized title matches
     a frame heading starting on its page -- equal (letter spacing aside),
@@ -974,15 +1002,18 @@ def merge_bookmark_tree(
     A bookmark learns style and position from its copies; detection
     exports the ``_style``, ``_lines`` (each line's text and style),
     ``_y``, ``_content_follows`` (real content after the heading on its
-    page before the next heading, in flash's reading order), ``_type``
-    and ``_prominent`` keys and ``extract_toc`` strips them after the
-    merge.
+    page before the next heading, in flash's reading order), ``_col``
+    (its column region), ``_type`` and ``_prominent`` keys and
+    ``extract_toc`` strips them after the merge. Label words (chapter,
+    appendix, volume, references, table) come from flash's multilingual
+    keyword dictionaries, plus the few they lack.
 
     Slots. Each bookmark takes a place in the detected reading order: at
-    its first copy, else after the headings printed above its /XYZ target
-    on its page (column first on a two-column page: a heading's column is
-    where reading order jumps back up the page, a bookmark's is its
-    target's x), else at its page's start -- never between a same-page
+    its first copy, else after the headings flash reads before its /XYZ
+    target on its page (by column region, then height: a target sits in
+    the first region not left of its x nor wholly above it; one without an
+    x is placed by height alone), else at its page's start -- never
+    between a same-page
     detected heading and its children. A same-page heading numbered
     before the bookmark goes ahead of it; a label line ("Chapter 4") or a
     heading numbered inside the bookmark goes with it.
@@ -1225,40 +1256,18 @@ def merge_bookmark_tree(
                                 det_parent[id(child)] = None  # printed alike: a peer
                 break
 
-    # A heading's column: reading order jumping back up its page starts the next one
-    column: dict[int, int] = {}
-    page_column: dict[int, int] = {}
-    multi_column: set[int] = set()
-    last_seen: dict[int, float] = {}
-    for node in reading:
-        page, y = node["start_index"], node.get("_y")
-        col = page_column.get(page, 0)
-        if y is not None and page in last_seen and y < last_seen[page] - _COLUMN_JUMP:
-            col += 1
-            multi_column.add(page)
-        page_column[page] = column[id(node)] = col
-        if y is not None:
-            last_seen[page] = y
-
-    # Without a target x, a bookmark's column comes from its page's bookmarks jumping back up
-    bookmark_column: list[int] = []
-    for b, frame in enumerate(flat):
-        same_page = b > 0 and flat[b - 1]["start_index"] == frame["start_index"]
-        col = bookmark_column[b - 1] if same_page else 0
-        y, above = dest_y[b], dest_y[b - 1] if same_page else None
-        if y is not None and above is not None and y < above - _COLUMN_JUMP:
-            col += 1
-        bookmark_column.append(col)
-
     def before_target(node: dict, b: int) -> bool:
-        """The heading is printed above bookmark b's target on b's page."""
-        y, x = dest_y[b], dest_x[b]
+        """flash reads the heading before bookmark b's target on b's page: by column region, then height,
+        in the first region not left of the target's x nor wholly above it; by height alone without an x."""
+        page, x, y = flat[b]["start_index"], dest_x[b], dest_y[b]
         if y is None or node.get("_y") is None:
             return False
-        if flat[b]["start_index"] not in multi_column:
+        regions = columns[page - 1] if x is not None and columns and 0 < page <= len(columns) else []
+        region = next((i for i, (_, right, _, bottom) in enumerate(regions)
+                       if x <= right and bottom >= y - _DEST_TOL), None)
+        if region is None or node.get("_col") is None:
             return node["_y"] < y - _DEST_TOL
-        col = (1 if x >= 0.45 else 0) if x is not None else bookmark_column[b]
-        return (column[id(node)], node["_y"]) < (col, y - _DEST_TOL)
+        return (node["_col"], node["_y"]) < (region, y - _DEST_TOL)
 
     copy_of: dict[int, int] = {}
     found: dict[int, Optional[str]] = {}
@@ -1703,7 +1712,7 @@ _TOC_ENTRY = re.compile(
 _TOC_PAGE_NUMBER = re.compile(r"^(?:\d{1,4}|[ivxlcdm]{1,7})$", re.IGNORECASE)
 # A label cell printed apart from its title cell: "Item 1A.", "Part II", "2.", "第三节"
 _TOC_LABEL = re.compile(
-    r"^\s*(?:(?:item|part|chapter|section|article|schedule|note|appendix)\s*[\dIVXLC]+[A-Z]?"
+    r"^\s*(?:(?:" + _any_word(_LABEL_WORDS) + r")\s*[\dIVXLC]+[A-Z]?"
     r"|\d{1,3}(?:\.\d{1,3})*|[A-Z]|[IVXLC]{1,6}|第[一二三四五六七八九十\d]+[章节部篇])"
     r"\s*[.:、．]?\s*$", re.IGNORECASE)
 
@@ -1817,13 +1826,10 @@ def read_printed_toc(pages: list[list[tuple]], entries: list[dict]) -> list[dict
 
 # A heading line led by its section number, and a label printed on the line above its title
 _LINE_NUMBER = re.compile(
-    r"^\s*((?:(?:chapter|part|section|appendix|item|note|article|lecture|unit)\s+)?"
+    r"^\s*((?:(?:" + _any_word(_LABEL_WORDS) + r")\s+)?"
     r"(?:[0-9]{1,3}(?:\s*\.\s*[0-9]{1,3})*[A-Z]?|[IVXLC]{1,6}|[A-Za-z](?:\s*\.\s*[0-9]{1,3})*)"
     r"|第\s*[0-9一二三四五六七八九十百]+\s*[章节条部分篇]|[一二三四五六七八九十]+\s*、"
     r"|[（(]\s*[0-9一二三四五六七八九十]+\s*[)）])\s*[.:：、)）]?\s*(.*)$", re.IGNORECASE)
-_LINE_LABEL = re.compile(
-    r"^\s*(?:chapter|part|lecture|unit|appendix)\s+[0-9IVXLC]+\s*$"
-    r"|^\s*第\s*[0-9一二三四五六七八九十百]+\s*[章部分篇]\s*$", re.IGNORECASE)
 
 
 @lru_cache(maxsize=1 << 16)
@@ -1853,7 +1859,7 @@ def _heading_line_reader(page_texts: list[str]) -> Callable[[int, str], Optional
                 m = _LINE_NUMBER.match(line)
                 if m and m.group(2) and m.group(1).strip() and prints(m.group(2), title):
                     found.append((m.group(1).strip(), line))
-                elif prints(line, title) and j > 0 and _LINE_LABEL.match(text[j - 1]):
+                elif prints(line, title) and j > 0 and _LABEL_ONLY.match(text[j - 1]):
                     found.append((text[j - 1].strip(), text[j - 1] + " " + line))
         return found[0][1] if found and len({number for number, _ in found}) == 1 else None
 
@@ -1865,6 +1871,7 @@ def apply_embedded_toc(
     page_texts: Optional[list[str]] = None,
     toc_lines: Optional[list[list[tuple]]] = None,
     page_boxes: Optional[list[tuple]] = None,
+    page_columns: Optional[list[list[tuple]]] = None,
 ) -> tuple[list[dict], str]:
     """Classify the document's bookmarks and apply the matching tier.
 
@@ -1875,15 +1882,17 @@ def apply_embedded_toc(
     enables the SKELETON-tier title-repair and verified fill-in passes
     and FULL-tier section numbers read off the page; ``toc_lines`` (see
     ``read_printed_toc``) adds the printed TOC; ``page_boxes`` (see
-    ``read_bookmarks``) places bookmark targets without loading pages.
+    ``read_bookmarks``) places bookmark targets without loading pages;
+    ``page_columns`` (flash's column regions per page, in reading order)
+    reads them in its reading order.
     """
     entries = validate_bookmarks(read_bookmarks(doc_handle, page_boxes), n_pages)
     tier = classify_bookmarks(entries, n_pages)
     if tier == FULL:
         toc = read_printed_toc(toc_lines, entries) if toc_lines else []
         line_of = _heading_line_reader(page_texts) if page_texts else None
-        return merge_bookmark_tree(structure, entries, n_pages,
-                                   toc=toc, line_of=line_of), "bookmarks"
+        return merge_bookmark_tree(structure, entries, n_pages, toc=toc, line_of=line_of,
+                                   columns=page_columns), "bookmarks"
     if tier == SKELETON:
         return merge_bookmark_skeleton(structure, entries, n_pages,
                                        page_texts=page_texts), "hybrid"

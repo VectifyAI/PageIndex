@@ -13,6 +13,7 @@ from ..tokens import (
     Token, TokenView, wrap_tokens, enumerate_tokens, last_token, trie_prefix_match, first_token, set_case_fold, TrieConfig, build_trie, tokenize_block, avg_char_width as avg_char_width_fn, trie_full_match, first_anchor_span, is_char_token, is_word_token, token_numeric_value,
 )
 
+from ..stats import column_index_of
 from .candidates import (
     HeadingCandidate,
     OutlineNode,
@@ -377,6 +378,7 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                            if heading_block is not None else None),
                 "_y": item.heading.auxiliary_slot,
                 "_content_follows": _content_follows(item.heading),
+                "_col": column_index_of(heading_block) if heading_block is not None else None,
                 "_type": item.heading.type,
                 "_prominent": bool(item.heading.is_prominent),
             }

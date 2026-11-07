@@ -130,6 +130,18 @@ def _toc_lines(page: PageView) -> list[tuple]:
             for line in block.primary_slot]
 
 
+def _column_regions(page: PageView) -> list[tuple]:
+    """The page's column regions in reading order as (x0, x1, top, bottom), positions as page fractions."""
+    bounds = page.bounds
+    width = (bounds.right_edge() - bounds.left_edge()) or 1.0
+    height = bounds.bbox_height() or 1.0
+    return [(round((region.left_edge() - bounds.left_edge()) / width, 4),
+             round((region.right_edge() - bounds.left_edge()) / width, 4),
+             round((bounds.top_edge() - region.top_edge()) / height, 4),
+             round((bounds.top_edge() - region.bottom_edge()) / height, 4))
+            for region in (page.tertiary_slot or [])]
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end entry point #
 # --------------------------------------------------------------------------- #
@@ -316,11 +328,12 @@ def extract_toc(
         result["structure"], result["toc_source"] = apply_embedded_toc(
             structure, doc_handle, len(pages), page_texts=page_texts,
             toc_lines=[_toc_lines(page) for page in pages], page_boxes=page_meta,
+            page_columns=[_column_regions(page) for page in pages],
         )
 
     def _drop_signal_keys(nodes: list[dict]) -> None:
         for node in nodes:
-            for key in ("_style", "_lines", "_y", "_content_follows", "_type", "_prominent"):
+            for key in ("_style", "_lines", "_y", "_content_follows", "_col", "_type", "_prominent"):
                 node.pop(key, None)
             _drop_signal_keys(node.get("nodes") or [])
 
