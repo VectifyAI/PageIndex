@@ -25,6 +25,7 @@ from .style_context import (
     compare_heading_depth,
 )
 from .cliques import (
+    block_style_signature,
     find_keyword_clique,
     CliqueFilterContext,
     detect_body_headings,
@@ -40,10 +41,15 @@ from .selection import (
 )
 
 
+# Block types: an outline heading, unnumbered or numbered; text that is no page content
+_UNNUMBERED_HEADING, _NUMBERED_HEADING = 7, 8
+_NOT_CONTENT_TYPES = (1, 2, 12)  # header / footer / watermark
+
+
 def mark_outline_block_types(item_list: list[OutlineNode]) -> None:
     """Mark outline blocks as numbered or unnumbered headings."""
     for block in item_list:
-        block.heading.group_slot.type = 8 if block.heading.has_numbering else 7
+        block.heading.group_slot.type = _NUMBERED_HEADING if block.heading.has_numbering else _UNNUMBERED_HEADING
         mark_outline_block_types(block.child_nodes)
 
 
@@ -314,7 +320,7 @@ def _heading_appears_at_page_top(heading: HeadingCandidate) -> bool:
             continue                     # only blocks before the heading
         if block.char_count() <= 0:
             continue                     # no text
-        if block.type in (1, 2, 12):       # header / footer / watermark
+        if block.type in _NOT_CONTENT_TYPES:
             continue
         return False                     # real content precedes the heading
     return True
@@ -327,15 +333,10 @@ def _content_follows(heading: HeadingCandidate) -> Optional[bool]:
         return None
     after = [later for later in (page.secondary_slot or [])
              if getattr(later, "reading_order_index", 0) > block.reading_order_index]
-    next_heading = min((later.reading_order_index for later in after if later.type in (7, 8)), default=float("inf"))
+    next_heading = min((later.reading_order_index for later in after
+                        if later.type in (_UNNUMBERED_HEADING, _NUMBERED_HEADING)), default=float("inf"))
     return any(later.reading_order_index < next_heading and later.char_count() > 0
-               and later.type not in (1, 2, 12)  # header / footer / watermark
-               for later in after)
-
-
-def _style_of(block: Block) -> str:
-    """A heading's style fingerprint for the embedded-TOC merge: dominant style, "|C" when caps-heavy."""
-    return dominant_style_of(block) + ("|C" if is_caps_heavy(block) else "")
+               and later.type not in _NOT_CONTENT_TYPES for later in after)
 
 
 def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int) -> list[dict]:
@@ -372,8 +373,8 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                 "_appear_start": _heading_appears_at_page_top(item.heading),
                 # Heading-level signals for the embedded-TOC merge;
                 # extract_toc strips them from the final output.
-                "_style": _style_of(heading_block) if heading_block is not None else None,
-                "_lines": ([[raw_text_of_line(line).strip(), _style_of(Block().add_line(line))]
+                "_style": block_style_signature(heading_block) if heading_block is not None else None,
+                "_lines": ([[raw_text_of_line(line).strip(), block_style_signature(Block().add_line(line))]
                             for line in heading_block.primary_slot]
                            if heading_block is not None else None),
                 "_y": item.heading.auxiliary_slot,

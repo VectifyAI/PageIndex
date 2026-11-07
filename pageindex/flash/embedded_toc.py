@@ -52,7 +52,8 @@ from typing import Callable, Optional, Union
 
 import pypdfium2 as pdfium
 
-from .heading_detection.keyword_tables import _DICTS as _FLASH_DICTS
+from .heading_detection.keyword_tables import _DICTS as _FLASH_DICTS, ENGLISH_WORD_TO_NUMBER, EQUATION_KEYWORDS
+from .outline_assembly.candidates import _viewport_y_fraction
 
 IGNORE, SKELETON, FULL = 1, 2, 3
 
@@ -135,8 +136,9 @@ def _title_template(title: str) -> str:
 
 
 def _dest_xy(doc, page_idx: int, view: Callable[[], tuple],
-             boxes: dict[int, Optional[tuple]]) -> tuple[Optional[float], Optional[float]]:
-    """(x, y) of an /XYZ target as page fractions from the top-left, None where absent."""
+             boxes: dict[int, tuple]) -> tuple[Optional[float], Optional[float]]:
+    """(x, y) of an /XYZ target as page fractions from the top-left, None where absent; y as flash
+    places its headings (rotation included), x on unrotated pages."""
     try:
         mode, pos = view()
         if mode != 1 or len(pos) < 2 or pos[1] in (None, 0):
@@ -144,14 +146,15 @@ def _dest_xy(doc, page_idx: int, view: Callable[[], tuple],
         if page_idx not in boxes:  # loading a page parses it: once per page
             page = doc[page_idx]
             # get_bbox inherits the page tree's boxes; get_cropbox does not (pdfium bug 1786)
-            boxes[page_idx] = None if page.get_rotation() % 360 else page.get_bbox()
+            boxes[page_idx] = (page.get_bbox(), page.get_rotation())
             page.close()
-        box = boxes[page_idx]
-        if box is None:
+        box, rotation = boxes[page_idx]
+        upright = rotation % 360 == 0
+        if not upright and pos[0] in (None, 0):
             return None, None
-        left, bottom, right, top = box
-        y = (top - pos[1]) / ((top - bottom) or 1)
-        x = (pos[0] - left) / ((right - left) or 1) if pos[0] not in (None, 0) else None
+        y = _viewport_y_fraction(box, rotation, pos[0] or 0.0, pos[1])
+        left, _, right, _ = box
+        x = (pos[0] - left) / ((right - left) or 1) if upright and pos[0] not in (None, 0) else None
     except Exception:
         return None, None
     if not -0.05 <= y <= 1.05:
@@ -178,9 +181,7 @@ def read_bookmarks(doc_handle: Union[str, Path, BytesIO],
         handle = str(doc_handle) if isinstance(doc_handle, Path) else doc_handle
         doc = pdfium.PdfDocument(handle)
         entries = []
-        boxes: dict[int, Optional[tuple]] = {
-            i: None if rot % 360 else tuple(box)
-            for i, (box, rot) in enumerate(page_boxes or ()) if box is not None}
+        boxes = {i: (tuple(box), rot) for i, (box, rot) in enumerate(page_boxes or ()) if box is not None}
         for item in doc.get_toc():
             if hasattr(item, "get_dest"):
                 dest = item.get_dest()
@@ -757,10 +758,11 @@ _LABEL_WORDS = _CHAPTER_WORDS | _APPENDIX_WORDS | _VOLUME_WORDS | {
 _BACK_SET = _flash_words("references") | _APPENDIX_WORDS | {
     "acknowledgment", "acknowledgments", "acknowledgement", "acknowledgements",
     "index", "glossary", "supplementary", "致谢"}
-_NUMBER_WORD = (r"(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[- ]?)?"
-                r"(?:one|two|three|four|five|six|seven|eight|nine)"
-                r"|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen"
-                r"|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety")
+# flash's number words (one to twenty), with the tens past twenty it lacks
+_TENS = ("twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+_NUMBER_WORD = ("(?:(?:" + "|".join(_TENS) + ")[- ]?)?(?:"
+                + "|".join(word for word, value in ENGLISH_WORD_TO_NUMBER.items() if value < 10) + ")|"
+                + "|".join([word for word, value in ENGLISH_WORD_TO_NUMBER.items() if value >= 10] + list(_TENS)))
 # A heading's label line printed on its own: "Chapter 4", "TWENTY", "第三章"
 _LABEL_ONLY = re.compile(
     r"^\s*(?:(?:" + _any_word(_LABEL_WORDS) + r")\s+(?:\d+|[ivxlc]+|[a-z])\.?"
@@ -793,8 +795,8 @@ _ADDR_LABEL = re.compile(
     r"(?i:(" + _any_word(_LABEL_WORDS) + r"))\s+"
     r"([0-9]{1,3}(?:\.[0-9]{1,3})*|[IVXLC]{1,6}|[A-Z])([A-Z])?(?=$|[\s.:,;\-–—)])")
 _ADDR_WORD_LABEL = re.compile(r"([A-Z][a-z]{2,15})\s+([0-9]{1,3})([A-Z])?\s*[:.\-–—](?=\s|$)")
-_CAPTION_WORDS = _flash_words("table_keywords", "chart_keywords") | {
-    "figure", "fig", "equation", "algorithm", "listing", "page", "box", "example", "exercise", "problem"}
+_CAPTION_WORDS = _flash_words("ai_section_keywords", "table_keywords", "chart_keywords") | frozenset(
+    EQUATION_KEYWORDS) | {"algorithm", "listing", "page", "box", "example", "exercise", "problem"}
 _ADDR_DIGIT = re.compile(r"(\(?)\s*(?:§\s*)?([0-9]{1,3}(?:\s*\.\s*[0-9]{1,3})*)(?:\s*([.、):]))?")
 _ADDR_ROMAN = re.compile(r"(\(?)\s*([IVXLCDM]{1,7}|[ivxlcdm]{1,7})(?:\s*([.、):]))?")
 _ADDR_LETTER = re.compile(r"(\(?)\s*([A-Za-z])((?:\s*\.\s*[0-9]{1,3})*)(?:\s*([.、):]))?")
@@ -908,19 +910,13 @@ def _style_after(lines: Optional[list], head: str) -> Optional[str]:
 def _larger_alike(style: Optional[str], other: Optional[str]) -> bool:
     """``style`` differs from ``other`` in size alone and is larger by over half a point.
 
-    Fingerprints read "face weight size", "|C" when caps-heavy; small caps are set small by design.
+    Fingerprints are flash's ``block_style_signature``, "face weight size caps-heavy"; small caps
+    are set small by design.
     """
-    if not style or not other or " " not in style or " " not in other:
-        return False
-    face, size = style.rsplit(" ", 1)
-    other_face, other_size = other.rsplit(" ", 1)
-    size, _, caps = size.partition("|")
-    other_size, _, other_caps = other_size.partition("|")
-    if face != other_face or caps != other_caps:
-        return False
     try:
-        return float(size) > float(other_size) + 0.5
-    except ValueError:
+        (face, size, caps), (other_face, other_size, other_caps) = (s.rsplit(" ", 2) for s in (style, other))
+        return face == other_face and caps == other_caps and float(size) > float(other_size) + 0.5
+    except (AttributeError, ValueError):
         return False
 
 

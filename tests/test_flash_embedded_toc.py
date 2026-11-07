@@ -622,13 +622,13 @@ def test_heading_printed_larger_in_the_same_face_climbs_out_of_a_bookmark():
         entries = [{"title": "Terms", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
                    {"title": "Miscellaneous", "level": 2, "page": 2, "x": 0.1, "y": 0.1},
                    {"title": "Pricing", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
-        detected = [_node("Terms", 1, style="Arial-Bold B 14.0", y=0.1),
+        detected = [_node("Terms", 1, style="Arial-Bold B 14.0 false", y=0.1),
                     _node("Miscellaneous", 2, style=small, y=0.1),
-                    _node("Exhibit B", 3, style="Arial-Bold B 14.0", y=0.1),
-                    _node("Pricing", 4, style="Arial-Bold B 14.0", y=0.1)]
+                    _node("Exhibit B", 3, style="Arial-Bold B 14.0 false", y=0.1),
+                    _node("Pricing", 4, style="Arial-Bold B 14.0 false", y=0.1)]
         return [n["title"] for n in merge_bookmark_tree(detected, entries, n_pages=5)]
-    assert merged("Arial-Bold B 11.0") == ["Terms", "Exhibit B", "Pricing"]
-    assert merged("Arial-Bold B 11.0|C") == ["Terms", "Pricing"]  # small caps are set small by design
+    assert merged("Arial-Bold B 11.0 false") == ["Terms", "Exhibit B", "Pricing"]
+    assert merged("Arial-Bold B 11.0 true") == ["Terms", "Pricing"]  # small caps are set small by design
 
 
 def test_page_number_above_a_heading_is_no_section_number():
@@ -795,3 +795,16 @@ def test_bookmark_target_on_a_page_whose_box_is_inherited():
     want = [{"title": "Intro", "level": 1, "page": 1, "x": pytest.approx(0.2), "y": pytest.approx(0.5)}]
     assert read_bookmarks(BytesIO(pdf)) == want
     assert read_bookmarks(BytesIO(pdf), [((0, 0, 595, 842), 0)]) == want
+
+
+def test_bookmark_target_on_a_rotated_page_reads_as_flash_places_headings():
+    pdf = (b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >> endobj\n"
+           b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >> endobj\n"
+           b"3 0 obj << /Type /Page /Parent 2 0 R /Rotate 90 >> endobj\n"
+           b"4 0 obj << /Type /Outlines /First 5 0 R /Last 5 0 R /Count 1 >> endobj\n"
+           b"5 0 obj << /Title (Intro) /Parent 4 0 R /Dest [3 0 R /XYZ 119 421 0] >> endobj\n"
+           b"trailer << /Root 1 0 R >>\n%%EOF\n")
+    # turned a quarter, the page reads down its user-space x: 119 of 595
+    want = [{"title": "Intro", "level": 1, "page": 1, "x": None, "y": pytest.approx(0.2)}]
+    assert read_bookmarks(BytesIO(pdf)) == want
+    assert read_bookmarks(BytesIO(pdf), [((0, 0, 595, 842), 90)]) == want
