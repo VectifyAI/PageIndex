@@ -934,6 +934,13 @@ def _family(scheme: tuple) -> tuple:
     return scheme if scheme[0] in ("chapter", "label") else scheme[:2]
 
 
+def _marks(node: dict) -> tuple[bool, bool]:
+    """Whether a heading's print opens like a list item ("• iPhones") and closes like a run-in lead ("Model.", "Subsidiary banks:")."""
+    lines = node.get("_lines") or [[node["title"]]]
+    return (lines[0][0].strip().startswith(tuple("•·▪●◦■□➢►-–—*")),
+            lines[-1][0].strip().endswith((".", ":", "：", "。")))
+
+
 def _style_after(lines: Optional[list], head: str) -> Optional[str]:
     """Style of the line after the lines printing ``head`` (detection's ``_lines``), None unless head ends a line."""
     seq, want, got = lines or [], _normalize_title(head), ""
@@ -1108,7 +1115,12 @@ def merge_bookmark_tree(
         one level below it, unless the bookmarks print that level and
         never like the heading, numbered like the level it climbed to
         ("Overall Summary" in bold beside a bookmark whose children print
-        in bold italic). An empty section is read at the bookmark's print,
+        in bold italic), or the heading is a peer the bookmarks skipped:
+        printed in a style the bookmarks print that level in alone and
+        mostly bookmark, under a title that does not recur, numbered and
+        punctuated like its peer ("Engage Phase" after a bookmarked
+        "Prepare Phase"; not "Model" beside "5.1 Main Results", nor
+        "Subsidiary banks:"). An empty section is read at the bookmark's print,
         not its target page.
         One the next bookmark's open parent stops keeps its height, beside
         that bookmark, unless the two are numbered in another list style
@@ -1676,11 +1688,15 @@ def merge_bookmark_tree(
     # The list numberings each bookmark level uses, for an unnumbered member ("APPENDIX" after "VII.")
     level_families = {parent: set().union(*(_list_families(addresses[s]) for s in kids))
                       for parent, kids in siblings.items()}
-    # How each bookmark level is printed, from the bookmarks' own copies
+    # How each bookmark level is printed, from the bookmarks' own copies, and the levels each style prints
     level_styles: dict[int, set] = {}
+    style_levels: dict[str, set] = {}
     for b, frame in enumerate(flat):
         if frame.get("_style") is not None:
             level_styles.setdefault(levels[b], set()).add(frame["_style"])
+            style_levels.setdefault(frame["_style"], set()).add(levels[b])
+    bookmarked = Counter(frame.get("_style") for frame in flat)
+    unbookmarked = Counter(ref.get("_style") for kind, ref in seq if kind == "d")
 
     def printed_unlike_below(node: dict, deepest: int, peer: int) -> bool:
         """The bookmarks print the level below ``deepest``, never like the heading, which is numbered like ``peer``'s level."""
@@ -1688,6 +1704,18 @@ def merge_bookmark_tree(
         kin = _list_families(addresses[peer]) or level_families[parent_pos[peer]]
         return (bool(below) and node.get("_style") not in below
                 and (not kin or bool(_list_families(_readings(node["title"])) & kin)))
+
+    def skipped_peer(node: dict, peer: int) -> bool:
+        """The heading is a peer of ``peer`` the bookmarks skipped: printed in a style they print that level in
+        alone and mostly bookmark, under a title that does not recur, numbered or not like ``peer``, and no
+        list item or run-in lead unless ``peer`` prints as one."""
+        style = node.get("_style")
+        printed = reading[first_copy[peer]] if peer in first_copy else flat[peer]
+        return (style is not None and style_levels.get(style) == {levels[peer]}
+                and bookmarked[style] > unbookmarked[style]
+                and len(title_pages.get(_normalize_title(node["title"]), ())) <= 1
+                and bool(_readings(node["title"])) == bool(addresses[peer])
+                and not any(mine and not theirs for mine, theirs in zip(_marks(node), _marks(printed))))
 
     def evidence(node: dict, b: int) -> str:
         cand = flat[b]
@@ -1739,7 +1767,10 @@ def merge_bookmark_tree(
                 return k
             below = k - 1
             if verdict == "stop":
-                return k if k != anchor and printed_unlike_below(node, stack[anchor][3], stack[k + 1][3]) else anchor
+                if k == anchor:
+                    return anchor
+                peer = stack[k + 1][3]
+                return k if printed_unlike_below(node, stack[anchor][3], peer) or skipped_peer(node, peer) else anchor
             if (stack[below][1] + 1 if below >= 0 else 1) < floor:
                 # the next bookmark keeps the section open: the heading stays beside it, if numbered alike
                 mine = _list_families(_readings(node["title"]))

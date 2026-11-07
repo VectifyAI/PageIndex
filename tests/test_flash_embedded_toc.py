@@ -303,7 +303,6 @@ def _chapters(level_three_printed, exchanges="Feedback Exchanges", printed_page=
 
 @pytest.mark.parametrize("level_three_printed, exchanges, parent, children", [
     (True, "Feedback Exchanges", "Chapter 2", ["Feedback Exchanges", "Overall Summary"]),
-    (False, "Feedback Exchanges", "Feedback Exchanges", ["Overall Summary"]),
     (True, "2.3 Feedback Exchanges", "2.3 Feedback Exchanges", ["Overall Summary"]),
 ])
 def test_climb_stopped_halfway_keeps_its_height_only_against_how_the_bookmarks_print_the_level_below(
@@ -311,6 +310,26 @@ def test_climb_stopped_halfway_keeps_its_height_only_against_how_the_bookmarks_p
     entries, detected = _chapters(level_three_printed, exchanges)
     merged = merge_bookmark_tree(detected, entries, n_pages=25)
     assert _children(merged, parent) == children
+
+
+@pytest.mark.parametrize("summary, extra, chapter_style, parent", [
+    ("Overall Summary", [], "C", "Chapter 2"),
+    ("Overall Summary:", [], "C", "Feedback Exchanges"),  # a run-in lead
+    ("• Overall Summary", [], "C", "Feedback Exchanges"),  # a list item
+    ("1. Overall Summary", [], "C", "Feedback Exchanges"),  # numbered beside unnumbered bookmarks
+    ("Overall Summary", [_node("Overall Summary", 5, style="X", y=0.5)], "C", "Feedback Exchanges"),  # recurs
+    ("Overall Summary", [_node("Aside", 3, style="S", y=0.5), _node("Remark", 4, style="S", y=0.5)],
+     "C", "Feedback Exchanges"),  # the bookmarks leave most of this print out
+    ("Overall Summary", [], "S", "Feedback Exchanges"),  # the bookmarks print two levels alike
+])
+def test_heading_stopped_halfway_is_a_peer_the_bookmarks_skipped_only_as_their_prints_vouch(
+        summary, extra, chapter_style, parent):
+    entries, detected = _chapters(False)
+    detected[4]["title"] = summary
+    detected[5]["_style"] = chapter_style
+    detected[2:2] = extra
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert summary in _children(merged, parent)
 
 
 def test_bookmark_printed_a_page_after_its_target_holds_nothing_were_the_heading_after_it_its_peer():
