@@ -479,7 +479,7 @@ def _printed_as(title: str, frame_title: str) -> bool:
         remark = tokens[tail:]
         return (len(remark) <= 3 and title.rstrip().endswith(".")
                 and not any(token.isdigit() for token in remark)
-                and any(len(token) > 1 for token in remark))  # initials ("B.A.") remark nothing
+                and len(remark[-1]) > 1)  # a remark's period ends a word, not initials ("B.S.")
     rest = iter(tokens)
     if (len(tokens) > tail > 1 and tokens[0] == frame_tokens[0]
             and tokens[-1] == frame_tokens[-1]
@@ -967,7 +967,8 @@ def merge_bookmark_tree(
     Dissolving holds fuzzy matches to a higher bar than title repair: at
     the repair bar, wordy-overlapping titles of distinct sections
     false-match, and a false dissolve deletes a real heading, while an
-    escaped garbled duplicate only leaves a stray leaf. A print that adds
+    escaped garbled duplicate only leaves a stray leaf; a print takes a
+    bookmark it prints exactly over one it only resembles. A print that adds
     words to a bookmark's title away from its target is another heading,
     and initials are no remark ("Mathematics, B.A." below "Mathematics").
     A bookmark learns style and position from its copies; detection
@@ -1092,9 +1093,11 @@ def merge_bookmark_tree(
                 same.append(pos)
             pos -= 1
         if same:
-            # "7.1.2" and "7.2.2" print two same-titled bookmarks: each takes the first one free
+            # "7.1.2" and "7.2.2" print two same-titled bookmarks: each takes the first one free;
+            # else the one printed exactly ("Sociology, B.A." over a similar "Sociology, B.S.")
+            exact = next((p for p in same if _same_text(node["title"], flat[p]["title"])), same[0])
             pos = next((p for p in reversed(same) if numeral is not None
-                        and matched.get(p, numeral) == numeral), same[0])
+                        and matched.get(p, numeral) == numeral), exact)
             matched.setdefault(pos, numeral)
             return pos
         pos = idx

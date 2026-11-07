@@ -716,6 +716,25 @@ def test_initials_after_a_bookmark_title_are_no_remark():
     assert _children(merged, "Mathematics") == ["Double Major Options", "Mathematics, B.A."]
 
 
+def test_heading_ending_in_initials_glued_after_a_bookmark_title_is_no_remark():
+    entries = [{"title": "Interdisciplinary Programs", "level": 1, "page": 2, "x": 0.1, "y": 0.09},
+               {"title": "Economics", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+    detected = [_node("Interdisciplinary Programs Biochemistry, B.S.", 2, y=0.09),
+                _node("Economics", 4, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert _children(merged, "Interdisciplinary Programs") == ["Biochemistry, B.S."]
+
+
+def test_print_takes_the_bookmark_it_prints_exactly_over_a_similar_one():
+    entries = [{"title": "Sociology, B.A.", "level": 1, "page": 2, "x": 0.1, "y": 0.17},
+               {"title": "Sociology, B.S.", "level": 1, "page": 2, "x": 0.1, "y": 0.65}]
+    detected = [_node("Sociology, B.A.", 2, y=0.17), _node("Core Courses", 2, y=0.39),
+                _node("Sociology, B.S.", 2, y=0.65), _node("Electives", 2, y=0.8)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=3)
+    assert _children(merged, "Sociology, B.A.") == ["Core Courses"]
+    assert _children(merged, "Sociology, B.S.") == ["Electives"]
+
+
 def test_bookmark_target_on_a_page_whose_box_is_inherited():
     # A4 MediaBox on /Pages only: pdfium's get_cropbox would fall back to US Letter
     pdf = (b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >> endobj\n"
