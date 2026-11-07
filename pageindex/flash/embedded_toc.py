@@ -80,11 +80,6 @@ _GENERIC_TITLE = re.compile(
 )
 _LATEX_SPAN = re.compile(r"\$.*?\$")
 _PAREN_TAIL = re.compile(r"\s*\([^()]*\)\s*$")
-_CJK_ENUMERATOR = re.compile(r"^\s*[（(]?[一二三四五六七八九十百]+[、)）]")
-_SECTION_KEY = re.compile(
-    r"^\s*(?:([A-Za-z]+)\.?\s+(\d{1,3}[A-Z]?(?:\.\d+)*)(?![\w-]|\.\d)"
-    r"|(\d{1,3}(?:\.\d+)*)\.\s|(\d{1,3}(?:\.\d+)+)(?![\w-]|\.\d)"
-    r"|(第[一二三四五六七八九十百\d]+[章节条]|[一二三四五六七八九十百]+、))")
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _ROMAN = re.compile(r"m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -323,14 +318,16 @@ def bookmarks_to_structure(entries: list[dict], n_pages: int) -> list[dict]:
     return _finalize(_build_bookmark_nodes(entries), n_pages)
 
 
-# "3D", "2.5D", "10-K" and "2019 Survey" are words, not section numbers
-_NUMERAL_RE = re.compile(
-    r"^([A-Z]\.(?:\d+(?:\.\d+)*)?|\d{1,3}(?:\.\d+)*)(?![\w-]|\.\d)")
-
-
 def _numeral_prefix(title: str) -> Optional[str]:
-    match = _NUMERAL_RE.match(title.strip())
-    return match.group(1) if match else None
+    """A title's dotted section number, "3.2.1", "A." or "A.1", as its reading gives it ("3D", "2019 Survey" are words)."""
+    for scheme, values in _readings(title):
+        if len(scheme) < 3 or scheme[0]:
+            continue
+        if scheme[1] == "digit":
+            return ".".join(map(str, values))
+        if scheme[1] == "LETTER" and (len(values) > 1 or scheme[2] == "."):
+            return ".".join([chr(64 + values[0])] + [str(value) for value in values[1:]]) + ("." * (len(values) == 1))
+    return None
 
 
 def _numeral_child(parent_title: str, child_title: str) -> bool:
@@ -418,12 +415,13 @@ def _same_text(title: str, other: str) -> bool:
             == _normalize_title("".join(other.split())))
 
 
-def _section_key(title: str) -> Optional[tuple[str, str]]:
-    match = _SECTION_KEY.match(title)
-    if not match:
-        return None
-    label, *numbers = match.groups()
-    return (label or "").lower(), next(number for number in numbers if number)
+def _section_key(title: str) -> Optional[tuple]:
+    """The section a title's number names ("Item 7", "4.2", "4.", "第三章", "一、"); a bare "4" is too weak."""
+    for scheme, values in _readings(title)[:1]:
+        if (scheme[0] in ("chapter", "label") or scheme[1] == "cjk" or len(values) > 1
+                or (scheme[1] == "digit" and scheme[2] == ".")):
+            return _family(scheme), values
+    return None
 
 
 def _shared_head(tokens: list[str], other: list[str]) -> int:
@@ -498,9 +496,12 @@ def _extends(title: str, other: str) -> bool:
 
 def _enumerated_alike(title: str, other: str) -> bool:
     """Both titles open with a section number, or both with "一、"-style ones."""
+    def cjk(text: str) -> bool:
+        return any(scheme[1:2] == ("cjk",) for scheme, _ in _readings(text))
+
     return ((_numeral_prefix(title) is not None
              and _numeral_prefix(other) is not None)
-            or bool(_CJK_ENUMERATOR.match(title) and _CJK_ENUMERATOR.match(other)))
+            or (cjk(title) and cjk(other)))
 
 
 def _same_heading(node: dict, chapter: dict,
@@ -763,10 +764,7 @@ _TENS = ("twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ni
 _NUMBER_WORD = ("(?:(?:" + "|".join(_TENS) + ")[- ]?)?(?:"
                 + "|".join(word for word, value in ENGLISH_WORD_TO_NUMBER.items() if value < 10) + ")|"
                 + "|".join([word for word, value in ENGLISH_WORD_TO_NUMBER.items() if value >= 10] + list(_TENS)))
-# A heading's label line printed on its own: "Chapter 4", "TWENTY", "第三章"
-_LABEL_ONLY = re.compile(
-    r"^\s*(?:(?:" + _any_word(_LABEL_WORDS) + r")\s+(?:\d+|[ivxlc]+|[a-z])\.?"
-    r"|第[一二三四五六七八九十百零\d]+[章部篇节]|" + _NUMBER_WORD + r")\s*$", re.IGNORECASE)
+_NUMBER_WORD_LINE = re.compile(r"^\s*(?:" + _NUMBER_WORD + r")\s*$", re.IGNORECASE)
 _BACK_WORDS = re.compile(
     r"(?<!\w)(?:" + _any_word({word for word in _BACK_SET if not _wide(word)}) + r")(?!\w)|"
     + _any_word({word for word in _BACK_SET if _wide(word)}), re.IGNORECASE)
@@ -827,12 +825,41 @@ def _cjk_number(text: str) -> Optional[int]:
 
 def _readings(text: Optional[str]) -> list[tuple[tuple, tuple]]:
     """The addresses a heading line can mean, as [(scheme, numbers)]; a lone "I." reads as Roman and as a letter."""
+    return _lead(text)[0]
+
+
+def _label_only(text: Optional[str], bare: bool = False) -> bool:
+    """A label printed on its own: "Chapter 4", "第三章", "TWENTY"; ``bare``, also an unbracketed number
+    ("2.", "IV"), which above a heading may be a folio."""
+    for scheme, _ in _lead(text, alone=True)[0]:
+        if scheme[0] == "chapter" or (scheme[0] == "label" and (scheme[1] in _LABEL_WORDS or _wide(scheme[1]))):
+            return True
+        if bare and scheme[0] is False:
+            return True
+    return bool(_NUMBER_WORD_LINE.match(text or ""))
+
+
+def _lead(text: Optional[str], alone: bool = False) -> tuple[list[tuple[tuple, tuple]], str]:
+    """The addresses a line's leading number or label can mean, and the text after it; ``alone``,
+    the number or label is all the line holds."""
     if not text:
-        return []
-    t = unicodedata.normalize("NFKC", text).lstrip(" \t​﻿")
+        return [], ""
+    raw = text.lstrip(" \t​﻿")
+    t = unicodedata.normalize("NFKC", raw)
+
+    def read(readings: list, end: int) -> tuple[list, str]:
+        rest = t[end:].lstrip(" .:：、．)）")
+        return (readings, rest) if not alone or not rest.strip() else ([], t)
+
+    # "②", "⑵", "❷": an enclosed number is a list style of its own, not the digit NFKC makes of it
+    if raw[:1] and unicodedata.category(raw[0]) == "No":
+        rest = unicodedata.normalize("NFKC", raw[1:]).lstrip(" .:：、．)）")
+        if alone or rest:
+            return read([((False, "enclosed", ""), (int(unicodedata.numeric(raw[0])),))], len(t) - len(rest))
+
     m = _ADDR_CJK_LABEL.match(t)
     if m and (value := _cjk_number(m.group(1))) is not None:
-        return [(_CJK_UNIT.get(m.group(2), ("label", m.group(2))), (value,))]
+        return read([(_CJK_UNIT.get(m.group(2), ("label", m.group(2))), (value,))], m.end())
     m = _ADDR_LABEL.match(t)
     if m:
         word, number, suffix = " ".join(m.group(1).lower().split()), m.group(2), m.group(3)
@@ -841,32 +868,37 @@ def _readings(text: Optional[str]) -> list[tuple[tuple, tuple]]:
             parts = [int(x) for x in number.split(".")]
         elif len(number) > 1 or word in _VOLUME_WORDS or word in ("part", "book", "lecture", "unit"):
             if (roman := _roman_number(number)) is None:
-                return []
+                return [], t
             parts = [roman]
         else:
             parts = [ord(number.upper()) - 64]
         if suffix:
             parts[-1] += (ord(suffix.upper()) - 64) / 100  # Item 1 < 1A < 1B < 2
-        return [(("chapter",) if word in _CHAPTER_WORDS else ("label", word), tuple(parts))]
+        return read([(("chapter",) if word in _CHAPTER_WORDS else ("label", word), tuple(parts))], m.end())
     m = _ADDR_WORD_LABEL.match(t)
     if m and m.group(1).lower() not in _CAPTION_WORDS:
         value = int(m.group(2)) + ((ord(m.group(3)) - 64) / 100 if m.group(3) else 0)
-        return [(("label", m.group(1).lower()), (value,))]
+        return read([(("label", m.group(1).lower()), (value,))], m.end())
 
     def tail_ok(m, need_close: bool) -> bool:
         rest = t[m.end():]
-        if not rest.strip() or (rest[0].isascii() and (rest[0].isalnum() or rest[0] in "-/%,+*=<>$&")):
-            return False
         bracket, close = m.group(1), m.groups()[-1] or ""
         if bracket and close != ")":
             return False
-        return not need_close or bool(close and rest[0].isspace())
+        if alone:
+            return not rest.strip(" .:：、．")
+        if not rest.strip():
+            return False
+        if need_close:  # a lone letter or numeral: "A. Proofs", not "A Proofs" or "U.S."
+            return bool(close and rest[0].isspace())
+        # "3D", "2019 Survey", "10-K" are words; after "5.1、" or "1." the title may start anyhow
+        return bool(close) or not (rest[0].isascii() and (rest[0].isalnum() or rest[0] in "-/%,+*=<>$&"))
 
     m = _ADDR_DIGIT.match(t)
     if m and tail_ok(m, False):
         values = tuple(int(x) for x in re.split(r"\s*\.\s*", m.group(2)))
         close = (m.group(3) or "") if len(values) == 1 else ""
-        return [((bool(m.group(1)), "digit", close), values)]
+        return read([((bool(m.group(1)), "digit", close), values)], m.end())
     m = _ADDR_ROMAN.match(t)
     if m and (roman := _roman_number(m.group(2))) is not None:
         numeral, close = m.group(2), m.group(3) or ""
@@ -874,21 +906,21 @@ def _readings(text: Optional[str]) -> list[tuple[tuple, tuple]]:
         if len(numeral) > 1 and (tail_ok(m, True) or (
                 numeral.isupper() and tail_ok(m, False) and roman <= 39
                 and t[m.end():][:1].isspace())):
-            return [((bool(m.group(1)), kind, close), (roman,))]
+            return read([((bool(m.group(1)), kind, close), (roman,))], m.end())
         if len(numeral) == 1 and numeral.upper() in "IVX" and tail_ok(m, True):
             letter = "LETTER" if numeral.isupper() else "letter"
-            return [((bool(m.group(1)), kind, close), (roman,)),
-                    ((bool(m.group(1)), letter, close), (ord(numeral.upper()) - 64,))]
+            return read([((bool(m.group(1)), kind, close), (roman,)),
+                         ((bool(m.group(1)), letter, close), (ord(numeral.upper()) - 64,))], m.end())
     m = _ADDR_LETTER.match(t)
     if m and tail_ok(m, not m.group(3)):
         values = (ord(m.group(2).upper()) - 64, *(int(x) for x in re.findall(r"[0-9]+", m.group(3))))
         kind = "LETTER" if m.group(2).isupper() else "letter"
         close = (m.group(4) or "") if len(values) == 1 else ""
-        return [((bool(m.group(1)), kind, close), values)]
+        return read([((bool(m.group(1)), kind, close), values)], m.end())
     m = _ADDR_CJK.match(t)
     if m and (value := _cjk_number(m.group(2))) is not None and m.group(3) and tail_ok(m, False):
-        return [((bool(m.group(1)), "cjk", m.group(3)), (value,))]
-    return []
+        return read([((bool(m.group(1)), "cjk", m.group(3)), (value,))], m.end())
+    return [], t
 
 
 def _family(scheme: tuple) -> tuple:
@@ -1329,7 +1361,7 @@ def merge_bookmark_tree(
                and id(reading[slot - 1]) not in copy_of
                and not (slot - 1 == prev and b > 0
                         and flat[b - 1]["start_index"] == page)
-               and (_LABEL_ONLY.match(reading[slot - 1]["title"])
+               and (_label_only(reading[slot - 1]["title"])
                     or numbered_inside(reading[slot - 1]["title"], b))):
             slot -= 1
         slots.append(slot)
@@ -1511,7 +1543,8 @@ def merge_bookmark_tree(
             else:
                 p = kb - (len(a) - rel[1])
                 if p < -1 or not depth_agrees(sa, a, ref):
-                    return None
+                    # this numbering's depth is no evidence here; its next number still is
+                    return younger_sibling_parent(node, sh, h, floor)
                 for j in range(max(p, 0), kb):
                     if stack[j][2] != "b":
                         continue
@@ -1706,13 +1739,6 @@ def merge_bookmark_tree(
 _TOC_ENTRY = re.compile(
     r"^(?P<title>.*?\S)(?:\s*[.·•…_]{2,}\s*|\s+)(?P<num>\d{1,4}|[ivxlcdm]{1,7})$", re.IGNORECASE)
 _TOC_PAGE_NUMBER = re.compile(r"^(?:\d{1,4}|[ivxlcdm]{1,7})$", re.IGNORECASE)
-# A label cell printed apart from its title cell: "Item 1A.", "Part II", "2.", "第三节"
-_TOC_LABEL = re.compile(
-    r"^\s*(?:(?:" + _any_word(_LABEL_WORDS) + r")\s*[\dIVXLC]+[A-Z]?"
-    r"|\d{1,3}(?:\.\d{1,3})*|[A-Z]|[IVXLC]{1,6}|第[一二三四五六七八九十\d]+[章节部篇])"
-    r"\s*[.:、．]?\s*$", re.IGNORECASE)
-
-
 def _toc_items(pages: list[list[tuple]]) -> list[dict]:
     """Printed TOC entries as {page, title, x, num}, label cells and wrapped titles joined."""
     items = []
@@ -1720,12 +1746,12 @@ def _toc_items(pages: list[list[tuple]]) -> list[dict]:
         rows = [list(row) for row in rows]  # [text, x0, x1, y, style]
         joined: set[int] = set()
         for i, row in enumerate(rows):
-            if not _TOC_LABEL.match(row[0]):
+            if not _label_only(row[0], bare=True):  # a label cell printed apart: "Item 1A.", "2.", "第三节"
                 continue
             cells = [j for j, cell in enumerate(rows) if j != i and j not in joined
                      and abs(cell[3] - row[3]) < 0.004 and cell[1] > row[2] - 0.01
                      and not _TOC_PAGE_NUMBER.match(cell[0].strip())
-                     and not _TOC_LABEL.match(cell[0])]
+                     and not _label_only(cell[0], bare=True)]
             if cells:
                 j = min(cells, key=lambda j: rows[j][1])
                 row[0], row[2] = row[0].strip() + " " + rows[j][0].strip(), rows[j][2]
@@ -1820,14 +1846,6 @@ def read_printed_toc(pages: list[list[tuple]], entries: list[dict]) -> list[dict
     return toc
 
 
-# A heading line led by its section number, and a label printed on the line above its title
-_LINE_NUMBER = re.compile(
-    r"^\s*((?:(?:" + _any_word(_LABEL_WORDS) + r")\s+)?"
-    r"(?:[0-9]{1,3}(?:\s*\.\s*[0-9]{1,3})*[A-Z]?|[IVXLC]{1,6}|[A-Za-z](?:\s*\.\s*[0-9]{1,3})*)"
-    r"|第\s*[0-9一二三四五六七八九十百]+\s*[章节条部分篇]|[一二三四五六七八九十]+\s*、"
-    r"|[（(]\s*[0-9一二三四五六七八九十]+\s*[)）])\s*[.:：、)）]?\s*(.*)$", re.IGNORECASE)
-
-
 @lru_cache(maxsize=1 << 16)
 def _line_key(text: str) -> str:
     return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", text).lower())
@@ -1852,11 +1870,11 @@ def _heading_line_reader(page_texts: list[str]) -> Callable[[int, str], Optional
         for at in (page, page + 1):
             text = lines(at)
             for j, line in enumerate(text):
-                m = _LINE_NUMBER.match(line)
-                if m and m.group(2) and m.group(1).strip() and prints(m.group(2), title):
-                    found.append((m.group(1).strip(), line))
-                elif prints(line, title) and j > 0 and _LABEL_ONLY.match(text[j - 1]):
-                    found.append((text[j - 1].strip(), text[j - 1] + " " + line))
+                readings, rest = _lead(line)
+                if readings and rest and prints(rest, title):
+                    found.append((tuple(readings), line))
+                elif prints(line, title) and j > 0 and _label_only(text[j - 1]):
+                    found.append((tuple(_readings(text[j - 1] + " " + line)), text[j - 1] + " " + line))
         return found[0][1] if found and len({number for number, _ in found}) == 1 else None
 
     return line_of

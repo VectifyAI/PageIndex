@@ -765,6 +765,26 @@ def test_label_words_read_in_any_language_flash_knows():
     assert _readings("Kapitel 3 Methoden") == _readings("Chapter 3 Methods") == [(("chapter",), (3,))]
 
 
+def test_number_whose_depth_the_bookmarks_disagree_on_falls_back_to_its_younger_sibling():
+    # "1.1" and "1、" both sit at level 2, so digit numbers say nothing about depth here
+    titles = [("一、概述", 1, 1), ("1.1 背景", 2, 1), ("1.2 目标", 2, 2), ("1.3 范围", 2, 2),
+              ("七、产业全景图", 1, 3), ("1、AIGC：生成内容", 2, 3), ("4、行业进程", 2, 5)]
+    entries = [{"title": t, "level": level, "page": page} for t, level, page in titles]
+    detected = [_node(t, page, y=0.1) for t, _, page in titles[:6]]
+    detected += [_node("2、当下为何关注", 4, y=0.1), _node("4、行业进程", 5, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=6)
+    assert _children(merged, "七、产业全景图") == ["1、AIGC：生成内容", "2、当下为何关注", "4、行业进程"]
+
+
+def test_one_reading_of_a_leading_number_serves_every_rule():
+    digit = (False, "digit", "")
+    assert _readings("1.3.4商业模式") == [(digit, (1, 3, 4))]  # glued to the title it numbers
+    assert _readings("5.1、AI超算中心") == [(digit, (5, 1))]  # after "、" the title may start anyhow
+    assert _readings("3D Printing") == _readings("2019 Survey") == []
+    assert _readings("② 报告期内") == [((False, "enclosed", ""), (2,))]  # its own list style, not "2"
+    assert _readings("２．方法") == [((False, "digit", "."), (2,))]  # a fullwidth digit is a digit
+
+
 def test_heading_ending_in_initials_glued_after_a_bookmark_title_is_no_remark():
     entries = [{"title": "Interdisciplinary Programs", "level": 1, "page": 2, "x": 0.1, "y": 0.09},
                {"title": "Economics", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
