@@ -339,6 +339,22 @@ def _content_follows(heading: HeadingCandidate) -> Optional[bool]:
                and later.type not in _NOT_CONTENT_TYPES for later in after)
 
 
+def _prose_follows(heading: HeadingCandidate) -> Optional[bool]:
+    """Whether the first content after a heading on its page is a body paragraph; None when a heading or nothing comes first."""
+    block, page = heading.group_slot, heading.page
+    if block is None or page is None:
+        return None
+    after = sorted((later for later in (page.secondary_slot or [])
+                    if getattr(later, "reading_order_index", 0) > block.reading_order_index),
+                   key=lambda later: later.reading_order_index)
+    for later in after:
+        if later.type in (_UNNUMBERED_HEADING, _NUMBERED_HEADING):
+            return None
+        if later.char_count() > 0 and later.type not in _NOT_CONTENT_TYPES:
+            return bool(getattr(later, "is_body_paragraph", False))
+    return None
+
+
 def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int) -> list[dict]:
     """Convert the outline tree directly to PageIndex JSON shape. Preserves the natural outline nesting without font-overlay rewriting. """
     flat_nodes: list[dict] = []
@@ -379,6 +395,7 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
                            if heading_block is not None else None),
                 "_y": item.heading.auxiliary_slot,
                 "_content_follows": _content_follows(item.heading),
+                "_prose_follows": _prose_follows(item.heading),
                 "_col": column_index_of(heading_block) if heading_block is not None else None,
                 "_type": item.heading.type,
                 "_prominent": bool(item.heading.is_prominent),

@@ -333,7 +333,7 @@ def extract_toc(
 
     def _drop_signal_keys(nodes: list[dict]) -> None:
         for node in nodes:
-            for key in ("_style", "_lines", "_y", "_content_follows", "_col", "_type", "_prominent"):
+            for key in ("_style", "_lines", "_y", "_content_follows", "_prose_follows", "_col", "_type", "_prominent"):
                 node.pop(key, None)
             _drop_signal_keys(node.get("nodes") or [])
 

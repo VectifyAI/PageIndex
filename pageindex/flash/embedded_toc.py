@@ -966,6 +966,16 @@ def _larger_alike(style: Optional[str], other: Optional[str]) -> bool:
         return False
 
 
+_CODE = re.compile(r"([A-Z][0-9][0-9A-Z])(?:\.[0-9A-Z]{1,4})?\s")
+_CODE_RANGE = re.compile(r"\(([A-Z][0-9][0-9A-Z])-([A-Z][0-9][0-9A-Z])\)\s*$")
+
+
+def _code_within(title: str, frame_title: str) -> bool:
+    """``title`` opens with a classification code ("I60", "S03.0") inside the range ``frame_title`` ends with ("(I60-I69)")."""
+    code, span = _CODE.match(title.strip() + " "), _CODE_RANGE.search(frame_title)
+    return code is not None and span is not None and span.group(1) <= code.group(1) <= span.group(2)
+
+
 def _list_families(readings: list) -> set:
     """The list numberings and depths among an address's readings ("2." digit, "（三）" CJK, "2.1.2" three deep), label words aside."""
     return {(_family(scheme), len(values)) for scheme, values in readings if scheme[0] not in ("chapter", "label")}
@@ -995,6 +1005,7 @@ def merge_bookmark_tree(
     toc: Optional[list[dict]] = None,
     line_of: Optional[Callable[[int, str], Optional[str]]] = None,
     columns: Optional[list[list[tuple]]] = None,
+    page_lines: Optional[Callable[[int], list[str]]] = None,
 ) -> list[dict]:
     """Graft filtered detected sections into the bookmark tree (FULL tier).
 
@@ -1005,7 +1016,7 @@ def merge_bookmark_tree(
     bookmarks whose title carries no section number; ``columns`` holds
     flash's column regions per page as (x0, x1, top, bottom) page
     fractions in its reading order, the order a heading's ``_col``
-    indexes.
+    indexes; ``page_lines(page)`` returns a page's text lines.
 
     Copies. A detected node whose normalized title matches
     a frame heading starting on its page -- equal (letter spacing aside),
@@ -1044,7 +1055,9 @@ def merge_bookmark_tree(
     A bookmark learns style and position from its copies; detection
     exports the ``_style``, ``_lines`` (each line's text and style),
     ``_y``, ``_content_follows`` (real content after the heading on its
-    page before the next heading, in flash's reading order), ``_col``
+    page before the next heading, in flash's reading order),
+    ``_prose_follows`` (whether that content opens with a body
+    paragraph), ``_col``
     (its column region), ``_type`` and ``_prominent`` keys and
     ``extract_toc`` strips them after the merge. Label words (chapter,
     appendix, volume, references, table) come from flash's multilingual
@@ -1111,16 +1124,23 @@ def merge_bookmark_tree(
         that follows "VII. REFERENCES").
         A climb must reach a numbering parent or the top level (just below
         the root when one root bookmark titles the whole document); one
-        stopped halfway leaves the heading at the deepest open bookmark,
-        one level below it, unless the bookmarks print that level and
+        stopped halfway sets the heading beside the bookmark it climbed
+        past, unless it reads as a part of the deepest open section:
+        numbered where that bookmark is not (or not where it is), a
+        run-in lead or list item beside one that is
+        neither ("Subsidiary banks:"), heading a table or list rather than
+        text, coded inside the range the deepest bookmark's title names
+        ("I60" under "(I60-I69)"), under a title the document repeats,
+        beside another heading printed alike in that section (a layer the
+        bookmarks leave out), or followed in the page text, before the next
+        bookmark at that level, by a line each section of that level
+        prints ("Requirements for the Minor" after "Eligibility"). It stays
+        beside that bookmark when the bookmarks print the level below and
         never like the heading, numbered like the level it climbed to
         ("Overall Summary" in bold beside a bookmark whose children print
-        in bold italic), or the heading is a peer the bookmarks skipped:
-        printed in a style the bookmarks print that level in alone and
-        mostly bookmark, under a title that does not recur, numbered and
-        punctuated like its peer ("Engage Phase" after a bookmarked
-        "Prepare Phase"; not "Model" beside "5.1 Main Results", nor
-        "Subsidiary banks:"). An empty section is read at the bookmark's print,
+        in bold italic). Where the bookmarks mostly keep the heading's
+        print, the level model built from their own prints sets the level
+        they skipped it at. An empty section is read at the bookmark's print,
         not its target page.
         One the next bookmark's open parent stops keeps its height, beside
         that bookmark, unless the two are numbered in another list style
@@ -1761,12 +1781,105 @@ def merge_bookmark_tree(
             return True
         return None if mine.rsplit(" ", 1)[0] == theirs.rsplit(" ", 1)[0] else False
 
+    def owners_at(bookmarks: list) -> Optional[tuple[int, list[int]]]:
+        """The shallowest bookmark level whose sections hold the given bookmarks' places one apiece, and those sections."""
+        chains = []
+        for b in bookmarks:
+            if b is None or b < 0:
+                return None
+            chain = {}
+            while b is not None:
+                chain[levels[b]] = b
+                b = parent_pos[b]
+            chains.append(chain)
+        for level in sorted(set(levels)):
+            owners = [chain.get(level) for chain in chains]
+            if None in owners:
+                return None
+            if len(set(owners)) == len(owners):
+                return level, owners
+        return None
+
+    text_owners: Optional[dict[str, list[Optional[int]]]] = None
+
+    def owners_of_text(page_lines: Callable[[int], list[str]]) -> dict[str, list[Optional[int]]]:
+        """Each heading title's lines in the page text, owned by the bookmark whose title line comes before them; read once."""
+        nonlocal text_owners
+        if text_owners is None:
+            text_owners = {}
+            owner: Optional[int] = None
+            for p in range(1, n_pages + 1):
+                starting = list(on_page.get(p, ()))
+                for line in page_lines(p):
+                    norm = _normalize_title(line)
+                    while starting and norm and norm == _normalize_title(flat[starting[0]]["title"]):
+                        owner = starting.pop(0)
+                    if norm in title_pages:
+                        text_owners.setdefault(norm, []).append(None if starting else owner)  # None: a start unseen
+                if starting:
+                    owner = starting[-1]
+        return text_owners
+    text_levels: dict[str, Optional[int]] = {}
+
+    def text_part_level(norm: str, page_lines: Callable[[int], list[str]]) -> Optional[int]:
+        """The bookmark level whose sections each print this heading line once, three times or more."""
+        if norm not in text_levels:
+            owners = [b for b in owners_of_text(page_lines).get(norm, ()) if b is not None]
+            got = owners_at(owners) if len(owners) >= 3 else None
+            text_levels[norm] = got[0] if got else None
+        return text_levels[norm]
+
+    seq_at = {id(ref): i for i, (kind, ref) in enumerate(seq) if kind == "d"}
+
+    def text_continues(node: dict, peer: int) -> bool:
+        """The page text after the heading, before the next bookmark at peer's level, prints a part each section of that level prints."""
+        if page_lines is None:
+            return False
+        level = levels[peer]
+        stop = next((ref for kind, ref in seq[seq_at[id(node)] + 1:] if kind == "b" and levels[ref] <= level), None)
+        last_page = flat[stop]["start_index"] if stop is not None else n_pages
+        stop_norm = _normalize_title(flat[stop]["title"]) if stop is not None else None
+        mine, started = _normalize_title(node["title"]), False
+        for p in range(node["start_index"], last_page + 1):
+            for line in page_lines(p):
+                norm = _normalize_title(line)
+                if not started:
+                    started = bool(norm) and (norm == mine or (len(norm) >= 8 and mine.startswith(norm)))
+                elif norm and norm == stop_norm:
+                    return False
+                elif text_part_level(norm, page_lines) == level:
+                    return True
+        return False
+
+    def son(node: dict, a: int, peer: int) -> bool:
+        """Evidence that a heading the climb would set beside bookmark ``peer`` is a part of bookmark ``a``'s section."""
+        if bool(_readings(node["title"])) != bool(addresses[peer]):
+            return True  # numbered one way, the sibling the other
+        printed = reading[first_copy[peer]] if peer in first_copy else flat[peer]
+        if any(mark and not theirs for mark, theirs in zip(_marks(node), _marks(printed))):
+            return True  # a run-in lead or a list item beside a bookmark that is neither
+        if node.get("_prose_follows") is False:
+            return True  # it heads a table or a list, not text
+        if _code_within(node["title"], flat[a]["title"]):
+            return True  # coded inside the range a's title names ("I60" under "(I60-I69)")
+        if len(copies_of.get(_normalize_title(node["title"]), ())) > 1:
+            return True  # a title the document repeats
+        style = node.get("_style")
+        for kind, ref in seq[bookmark_seq_pos[a] + 1:]:
+            if kind == "b" and levels[ref] <= levels[a]:
+                break
+            if style is not None and ref is not node and (flat[ref] if kind == "b" else ref).get("_style") == style:
+                return True  # another heading printed alike in a's section: a layer the bookmarks leave out
+        return text_continues(node, peer)
+
     def modeled_stop(node: dict, floor: int, anchor: int, k: int) -> int:
         """A stopped climb's parent: the level the heading's look ranks first, up to the nearest bookmark printed alike."""
         top = next((j for j in range(anchor, -1, -1)
                     if _same_text(node["title"], flat[stack[j][3]]["title"])
                     or _numbered_print(node["title"], flat[stack[j][3]]["title"])), -1)
-        halfway = k != anchor and k >= top and printed_unlike_below(node, stack[anchor][3], stack[k + 1][3])
+        # beside the bookmark it climbed past, unless the bookmarks print the level below unlike it or it reads as a part
+        halfway = k != anchor and k >= top and (printed_unlike_below(node, stack[anchor][3], stack[k + 1][3])
+                                                or not son(node, stack[anchor][3], stack[k + 1][3]))
         best = k if halfway else anchor
         post = level_posterior(node)
         if 2 * post["minor"] >= 1:
@@ -1798,24 +1911,10 @@ def merge_bookmark_tree(
         copies = copies_of.get(_normalize_title(node["title"]), ())
         if len(copies) < 3:
             return None
-        chains = []
-        for pos in copies:
-            b = bisect_right(slots, pos) - 1  # the bookmark read last before the copy
-            if b < 0:
-                return None
-            chain = {}
-            while b is not None:
-                chain[levels[b]] = b
-                b = parent_pos[b]
-            chains.append(chain)
-        for level in sorted(set(levels)):
-            owners = [chain.get(level) for chain in chains]
-            if None in owners:
-                return None
-            if len(set(owners)) == len(owners):
-                break
-        else:
+        got = owners_at([bisect_right(slots, pos) - 1 for pos in copies])  # the bookmark read last before each copy
+        if got is None:
             return None
+        level, owners = got
         sections = [b for b in range(min(owners), max(owners) + 1) if levels[b] == level]
         if 2 * len(owners) <= len(sections):
             return None  # most sections of that level go without it: not a part each repeats
@@ -2020,8 +2119,8 @@ def _line_key(text: str) -> str:
     return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", text).lower())
 
 
-def _heading_line_reader(page_texts: list[str]) -> Callable[[int, str], Optional[str]]:
-    """line_of(page, title): the numbered line printing title on page or the next, None if numbers disagree."""
+def _page_line_reader(page_texts: list[str]) -> Callable[[int], list[str]]:
+    """lines(page): the page's text lines, stripped."""
     cache: dict[int, list[str]] = {}
 
     def lines(page: int) -> list[str]:
@@ -2029,6 +2128,13 @@ def _heading_line_reader(page_texts: list[str]) -> Callable[[int, str], Optional
             text = page_texts[page - 1] if 1 <= page <= len(page_texts) else ""
             cache[page] = [line.strip() for line in (text or "").splitlines()]
         return cache[page]
+
+    return lines
+
+
+def _heading_line_reader(page_texts: list[str]) -> Callable[[int, str], Optional[str]]:
+    """line_of(page, title): the numbered line printing title on page or the next, None if numbers disagree."""
+    lines = _page_line_reader(page_texts)
 
     def prints(rest: str, title: str) -> bool:
         a, b = _line_key(rest), _line_key(title)
@@ -2074,8 +2180,8 @@ def apply_embedded_toc(
     if tier == FULL:
         toc = read_printed_toc(toc_lines, entries) if toc_lines else []
         line_of = _heading_line_reader(page_texts) if page_texts else None
-        return merge_bookmark_tree(structure, entries, n_pages, toc=toc, line_of=line_of,
-                                   columns=page_columns), "bookmarks"
+        return merge_bookmark_tree(structure, entries, n_pages, toc=toc, line_of=line_of, columns=page_columns,
+                                   page_lines=_page_line_reader(page_texts) if page_texts else None), "bookmarks"
     if tier == SKELETON:
         return merge_bookmark_skeleton(structure, entries, n_pages,
                                        page_texts=page_texts), "hybrid"

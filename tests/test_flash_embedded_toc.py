@@ -1,9 +1,10 @@
+import copy
 from io import BytesIO
 
 import pytest
 
 from pageindex.flash.embedded_toc import (
-    _heading_line_reader, _readings, merge_bookmark_tree, read_bookmarks, read_printed_toc)
+    _heading_line_reader, _page_line_reader, _readings, merge_bookmark_tree, read_bookmarks, read_printed_toc)
 
 
 def _node(title, start, children=(), style=None, y=None):
@@ -320,8 +321,8 @@ def test_climb_stopped_halfway_keeps_its_height_only_against_how_the_bookmarks_p
     ("• Overall Summary", [], "C", "Feedback Exchanges"),  # a list item
     ("1. Overall Summary", [], "C", "Feedback Exchanges"),  # numbered beside unnumbered bookmarks
     ("Overall Summary", [_node("Overall Summary", 5, style="X", y=0.5)], "C", "Feedback Exchanges"),  # recurs
-    ("Overall Summary", [_node("Aside", 3, style="S", y=0.5), _node("Remark", 4, style="S", y=0.5)],
-     "C", "Feedback Exchanges"),  # the bookmarks leave most of this print out
+    # printed alike, a peer, though the bookmarks leave this print out in another chapter
+    ("Overall Summary", [_node("Aside", 3, style="S", y=0.5), _node("Remark", 4, style="S", y=0.5)], "C", "Chapter 2"),
     ("Overall Summary", [], "S", "Chapter 2"),  # the other level printed alike is numbered unlike it
 ])
 def test_heading_stopped_halfway_is_a_peer_the_bookmarks_skipped_only_as_their_prints_vouch(
@@ -332,6 +333,51 @@ def test_heading_stopped_halfway_is_a_peer_the_bookmarks_skipped_only_as_their_p
     detected[2:2] = extra
     merged = merge_bookmark_tree(detected, entries, n_pages=25)
     assert summary in _children(merged, parent)
+
+
+@pytest.mark.parametrize("change, parent", [
+    ({}, "Chapter 2"),
+    ({"_style": "B"}, "Feedback Exchanges"),  # printed unlike the bookmark it would sit beside
+    ({"_prose_follows": False}, "Feedback Exchanges"),  # it heads a table, not text
+    ({"title": "I60 Overall Summary"}, "Feedback Exchanges (I60-I69)"),  # coded inside the bookmark's range
+])
+def test_heading_stopped_halfway_is_a_peer_unless_it_reads_as_a_part(change, parent):
+    entries, detected = _chapters(False, exchanges="Feedback Exchanges (I60-I69)" if "title" in change else "Feedback Exchanges")
+    detected[5]["_style"] = "C"
+    detected[4].update(change)
+    # the bookmarks leave most of this print out elsewhere, so the level model does not move it
+    detected[2:2] = [_node("Aside", 3, style="S", y=0.5), _node("Remark", 4, style="S", y=0.5)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert detected[6]["title"] in _children(merged, parent)
+
+
+def test_heading_stopped_halfway_in_a_layer_the_bookmarks_leave_out_is_a_part():
+    entries, detected = _chapters(False)
+    detected[5]["_style"] = "C"
+    detected[5:5] = [_node("Remark", 12, style="S", y=0.5)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert _children(merged, "Feedback Exchanges") == ["Overall Summary", "Remark"]
+
+
+def test_heading_stopped_halfway_before_a_part_each_section_prints_is_a_part():
+    entries = [{"title": "Studies", "level": 1, "page": 1}]
+    # the bookmarks leave most of the minors' print out, so the level model does not move it
+    detected = [_node("Studies", 1, style="D", y=0.1)] + [_node(t, 1, style="M", y=y) for t, y in (
+        ("Overview", 0.3), ("Advising", 0.5), ("Contacts", 0.7))]
+    pages = [""] * 9
+    for n, page in enumerate((2, 4, 6, 8)):
+        entries.append({"title": f"Minor {n}", "level": 2, "page": page})
+        detected.append(_node(f"Minor {n}", page, style="M", y=0.1))
+        pages[page - 1] = f"Minor {n}\nAbout it.\nRequirements\nCourses."
+    detected.append(_node("Requirements", 8, style="R", y=0.5))  # read as a heading once, printed in every minor
+    detected.insert(5, _node("Eligibility", 2, style="M", y=0.3))  # right after "Minor 0"
+    pages[1] = "Minor 0\nAbout it.\nEligibility\nWho may apply.\nRequirements\nCourses."
+    entries.append({"title": "Chapter 2", "level": 1, "page": 9})
+    detected.append(_node("Chapter 2", 9, style="D", y=0.1))
+    lines = _page_line_reader(pages)
+    for page_lines, parent in ((None, "Studies"), (lines, "Minor 0")):
+        merged = merge_bookmark_tree(copy.deepcopy(detected), copy.deepcopy(entries), n_pages=9, page_lines=page_lines)
+        assert "Eligibility" in _children(merged, parent)
 
 
 def test_bookmark_printed_a_page_after_its_target_holds_nothing_were_the_heading_after_it_its_peer():
