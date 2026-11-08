@@ -1688,15 +1688,35 @@ def merge_bookmark_tree(
     # The list numberings each bookmark level uses, for an unnumbered member ("APPENDIX" after "VII.")
     level_families = {parent: set().union(*(_list_families(addresses[s]) for s in kids))
                       for parent, kids in siblings.items()}
-    # How each bookmark level is printed, from the bookmarks' own copies, and the levels each style prints
+    # How each bookmark level is printed and written, from the bookmarks' own copies, and the levels each style prints
     level_styles: dict[int, set] = {}
-    style_levels: dict[str, set] = {}
+    style_levels: dict[str, Counter] = {}
+    level_traits: dict[int, list] = {}
     for b, frame in enumerate(flat):
+        printed = reading[first_copy[b]] if b in first_copy else frame
+        level_traits.setdefault(levels[b], []).append((bool(addresses[b]), _marks(printed)))
         if frame.get("_style") is not None:
             level_styles.setdefault(levels[b], set()).add(frame["_style"])
-            style_levels.setdefault(frame["_style"], set()).add(levels[b])
-    bookmarked = Counter(frame.get("_style") for frame in flat)
+            style_levels.setdefault(frame["_style"], Counter())[levels[b]] += 1
+    level_list = sorted(level_traits)
     unbookmarked = Counter(ref.get("_style") for kind, ref in seq if kind == "d")
+
+    def schemes(readings: list) -> set:
+        """How a title is numbered: each reading's family (label words included) and depth."""
+        return {(_family(scheme), len(values)) for scheme, values in readings}
+
+    level_schemes: dict[int, set] = {}
+    scheme_levels: dict[tuple, set] = {}
+    for b in range(len(flat)):
+        for key in schemes(addresses[b]):
+            level_schemes.setdefault(levels[b], set()).add(key)
+            scheme_levels.setdefault(key, set()).add(levels[b])
+    bookmarked_titles = {_normalize_title(title) for b, frame in enumerate(flat) for title in (
+        frame["title"], (reading[first_copy[b]] if b in first_copy else frame)["title"])}
+    unbookmarked_titles = Counter(_normalize_title(ref["title"]) for ref in reading if id(ref) not in copy_of)
+    copies_of: dict[str, list[int]] = {}
+    for pos, ref in enumerate(reading):
+        copies_of.setdefault(_normalize_title(ref["title"]), []).append(pos)
 
     def printed_unlike_below(node: dict, deepest: int, peer: int) -> bool:
         """The bookmarks print the level below ``deepest``, never like the heading, which is numbered like ``peer``'s level."""
@@ -1705,17 +1725,107 @@ def merge_bookmark_tree(
         return (bool(below) and node.get("_style") not in below
                 and (not kin or bool(_list_families(_readings(node["title"])) & kin)))
 
-    def skipped_peer(node: dict, peer: int) -> bool:
-        """The heading is a peer of ``peer`` the bookmarks skipped: printed in a style they print that level in
-        alone and mostly bookmark, under a title that does not recur, numbered or not like ``peer``, and no
-        list item or run-in lead unless ``peer`` prints as one."""
+    def no_skip(node: dict) -> bool:
+        """A never-bookmarked title recurring in the document: left out on purpose, not skipped."""
+        norm = _normalize_title(node["title"])
+        return unbookmarked_titles[norm] > 1 and norm not in bookmarked_titles
+
+    def level_posterior(node: dict) -> dict:
+        """Odds of each level the bookmarks skipped the heading at, from where they keep its style, or "minor"."""
         style = node.get("_style")
-        printed = reading[first_copy[peer]] if peer in first_copy else flat[peer]
-        return (style is not None and style_levels.get(style) == {levels[peer]}
-                and bookmarked[style] > unbookmarked[style]
-                and len(title_pages.get(_normalize_title(node["title"]), ())) <= 1
-                and bool(_readings(node["title"])) == bool(addresses[peer])
-                and not any(mine and not theirs for mine, theirs in zip(_marks(node), _marks(printed))))
+        seen = style_levels.get(style) if style is not None else None
+        if not seen or no_skip(node):
+            return {"minor": 1.0}
+        kept = sum(seen.values())
+        skip = (kept + 1) / (kept + unbookmarked[style] + 2)
+        readings = _readings(node["title"])
+        numbered, mine, marks = bool(readings), schemes(readings), _marks(node)
+        score = {}
+        for level in level_list:
+            written = level_traits[level]
+            out = (all(theirs != numbered for theirs, _ in written)  # a level is out when written unlike the heading
+                   or any(m and not any(t[i] for _, t in written) for i, m in enumerate(marks))
+                   or (mine and level_schemes.get(level) and not mine & level_schemes[level])
+                   or (mine and all(key in scheme_levels and level not in scheme_levels[key] for key in mine)))
+            score[level] = 0.0 if out else skip * (seen[level] + 1) / (kept + len(level_list))
+        score["minor"] = 1 - skip
+        total = sum(score.values())
+        return {h: p / total for h, p in score.items()}
+
+    def looks(node: dict, b: int) -> Optional[bool]:
+        """Whether bookmark b prints like the heading; None when either has no print or only caps differ."""
+        mine, theirs = node.get("_style"), flat[b].get("_style")
+        if mine is None or theirs is None:
+            return None
+        if mine == theirs:
+            return True
+        return None if mine.rsplit(" ", 1)[0] == theirs.rsplit(" ", 1)[0] else False
+
+    def modeled_stop(node: dict, floor: int, anchor: int, k: int) -> int:
+        """A stopped climb's parent: the level the heading's look ranks first, up to the nearest bookmark printed alike."""
+        top = next((j for j in range(anchor, -1, -1)
+                    if _same_text(node["title"], flat[stack[j][3]]["title"])
+                    or _numbered_print(node["title"], flat[stack[j][3]]["title"])), -1)
+        halfway = k != anchor and k >= top and printed_unlike_below(node, stack[anchor][3], stack[k + 1][3])
+        best = k if halfway else anchor
+        post = level_posterior(node)
+        if 2 * post["minor"] >= 1:
+            return best
+        best_score = post.get(levels[stack[anchor][3]] + 1, 0.0)  # a child of the deepest sits one level below it
+        if halfway:
+            best_score = max(best_score, post.get(levels[stack[k + 1][3]], 0.0))
+        mine = _list_families(_readings(node["title"]))
+        for j in range(anchor, top, -1):
+            b = stack[j][3]
+            if parent_pos[b] is None and len(roots) == 1:
+                break
+            kin = _list_families(addresses[b]) or level_families[parent_pos[b]]
+            if j <= k and ((mine and kin and not mine & kin) or _claims_empty(node, b)):
+                break
+            p = j - 1
+            if (stack[p][1] + 1 if p >= 0 else 1) < floor:
+                break
+            score = post.get(levels[b], 0.0)
+            alike = looks(node, b)
+            if alike:
+                return p if score and score >= best_score else best  # a tie goes to the look nearby
+            if alike is None and score > best_score:
+                best, best_score = p, score
+        return best
+
+    def periodic_parent(node: dict, floor: int) -> Optional[int]:
+        """A title in most sections of a bookmark level, sitting alike in each, is a part of that level's section."""
+        copies = copies_of.get(_normalize_title(node["title"]), ())
+        if len(copies) < 3:
+            return None
+        chains = []
+        for pos in copies:
+            b = bisect_right(slots, pos) - 1  # the bookmark read last before the copy
+            if b < 0:
+                return None
+            chain = {}
+            while b is not None:
+                chain[levels[b]] = b
+                b = parent_pos[b]
+            chains.append(chain)
+        for level in sorted(set(levels)):
+            owners = [chain.get(level) for chain in chains]
+            if None in owners:
+                return None
+            if len(set(owners)) == len(owners):
+                break
+        else:
+            return None
+        sections = [b for b in range(min(owners), max(owners) + 1) if levels[b] == level]
+        if 2 * len(owners) <= len(sections):
+            return None  # most sections of that level go without it: not a part each repeats
+        if len({bisect_right(slots, pos) - 1 == o for pos, o in zip(copies, owners)}) > 1:
+            return None  # some copies open their section, others follow a part of it: they sit unalike
+        k = next((j for j in range(len(stack) - 1, -1, -1)
+                  if stack[j][2] == "b" and levels[stack[j][3]] == level), None)
+        if k is None or (stack[k][1] + 1) < floor:
+            return None
+        return k
 
     def evidence(node: dict, b: int) -> str:
         cand = flat[b]
@@ -1754,7 +1864,7 @@ def merge_bookmark_tree(
             k -= 1
         if k < 0:
             return -1
-        for named in (numbered_parent, toc_parent):
+        for named in (numbered_parent, toc_parent, periodic_parent):
             got = named(node, floor)
             if got is not None:
                 return got
@@ -1767,10 +1877,7 @@ def merge_bookmark_tree(
                 return k
             below = k - 1
             if verdict == "stop":
-                if k == anchor:
-                    return anchor
-                peer = stack[k + 1][3]
-                return k if printed_unlike_below(node, stack[anchor][3], peer) or skipped_peer(node, peer) else anchor
+                return modeled_stop(node, floor, anchor, k)
             if (stack[below][1] + 1 if below >= 0 else 1) < floor:
                 # the next bookmark keeps the section open: the heading stays beside it, if numbered alike
                 mine = _list_families(_readings(node["title"]))

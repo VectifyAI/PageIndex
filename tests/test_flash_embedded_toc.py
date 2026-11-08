@@ -308,6 +308,8 @@ def _chapters(level_three_printed, exchanges="Feedback Exchanges", printed_page=
 def test_climb_stopped_halfway_keeps_its_height_only_against_how_the_bookmarks_print_the_level_below(
         level_three_printed, exchanges, parent, children):
     entries, detected = _chapters(level_three_printed, exchanges)
+    # the bookmarks leave most of its print out, so only the halfway rule moves it
+    detected[3:3] = [_node("Aside", 4, style="S", y=0.5), _node("Remark", 5, style="S", y=0.5)]
     merged = merge_bookmark_tree(detected, entries, n_pages=25)
     assert _children(merged, parent) == children
 
@@ -320,7 +322,7 @@ def test_climb_stopped_halfway_keeps_its_height_only_against_how_the_bookmarks_p
     ("Overall Summary", [_node("Overall Summary", 5, style="X", y=0.5)], "C", "Feedback Exchanges"),  # recurs
     ("Overall Summary", [_node("Aside", 3, style="S", y=0.5), _node("Remark", 4, style="S", y=0.5)],
      "C", "Feedback Exchanges"),  # the bookmarks leave most of this print out
-    ("Overall Summary", [], "S", "Feedback Exchanges"),  # the bookmarks print two levels alike
+    ("Overall Summary", [], "S", "Chapter 2"),  # the other level printed alike is numbered unlike it
 ])
 def test_heading_stopped_halfway_is_a_peer_the_bookmarks_skipped_only_as_their_prints_vouch(
         summary, extra, chapter_style, parent):
@@ -336,6 +338,35 @@ def test_bookmark_printed_a_page_after_its_target_holds_nothing_were_the_heading
     entries, detected = _chapters(True, printed_page=12, content_follows=False)
     merged = merge_bookmark_tree(detected, entries, n_pages=25)
     assert _children(merged, "Feedback Exchanges") == ["Overall Summary"]
+
+
+@pytest.mark.parametrize("chapters, closed, parent", [
+    (3, (1, 2, 3), "{} Topic"),
+    (7, (1, 4, 7), "{}.1 Part"),  # most chapters go without it
+])
+def test_title_closing_most_sections_of_a_level_alike_is_a_part_of_each(chapters, closed, parent):
+    entries, detected = [], []
+    for n in range(1, chapters + 1):
+        entries += [{"title": f"{n} Topic", "level": 1, "page": 10 * n},
+                    {"title": f"{n}.1 Part", "level": 2, "page": 10 * n + 1}]
+        detected += [_node(f"{n} Topic", 10 * n, style="C", y=0.1), _node(f"{n}.1 Part", 10 * n + 1, style="S", y=0.1)]
+        if n in closed:
+            detected.append(_node("Exercises", 10 * n + 4, style="S", y=0.5))
+    merged = merge_bookmark_tree(detected, entries, n_pages=10 * chapters + 10)
+    assert all("Exercises" in _children(merged, parent.format(n)) for n in closed)
+
+
+def test_title_sitting_unalike_in_its_sections_stays_where_it_reads():
+    entries = [{"title": "Credit", "level": 1, "page": 1}, {"title": "Market", "level": 1, "page": 10},
+               {"title": "Reputation", "level": 2, "page": 11}, {"title": "Country", "level": 1, "page": 20},
+               {"title": "Climate", "level": 1, "page": 30}]
+    detected = [_node("Credit", 1, style="H", y=0.1), _node("Organization", 1, style="O", y=0.5),
+                _node("Market", 10, style="H", y=0.1), _node("Reputation", 11, style="O", y=0.1),
+                _node("Organization", 11, style="O", y=0.5), _node("Country", 20, style="H", y=0.1),
+                _node("Organization", 20, style="O", y=0.5), _node("Climate", 30, style="H", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=32)
+    assert [_children(merged, title) for title in ("Credit", "Market", "Reputation", "Country")] == [
+        ["Organization"], ["Reputation"], ["Organization"], ["Organization"]]
 
 
 def test_detected_nesting_the_numbers_set_apart_is_dropped():
