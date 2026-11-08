@@ -351,12 +351,46 @@ def test_heading_stopped_halfway_is_a_peer_unless_it_reads_as_a_part(change, par
     assert detected[6]["title"] in _children(merged, parent)
 
 
-def test_heading_stopped_halfway_in_a_layer_the_bookmarks_leave_out_is_a_part():
+@pytest.mark.parametrize("left_out_at, printed, parent, children", [
+    (None, "Feedback Exchanges", "Feedback Exchanges", ["Overall Summary", "Remark"]),
+    # the bookmarks leave this print out before the first child of the same parent: no layer
+    (3, "Feedback Exchanges", "Chapter 2", ["Preface", "Feedback Exchanges", "Overall Summary", "Remark"]),
+    (1, "Feedback Exchanges", "Feedback Exchanges", ["Overall Summary", "Remark"]),  # under another parent
+    (3, "Feedback Exchanges in teams", "Feedback Exchanges", ["Overall Summary", "Remark"]),  # a looser print
+])
+def test_heading_stopped_halfway_in_a_layer_the_bookmarks_leave_out_is_a_part(left_out_at, printed, parent, children):
     entries, detected = _chapters(False)
+    detected[3]["title"] = printed
     detected[5]["_style"] = "C"
     detected[5:5] = [_node("Remark", 12, style="S", y=0.5)]
+    if left_out_at is not None:
+        detected.insert(left_out_at, _node("Preface", detected[left_out_at - 1]["start_index"], style="S", y=0.5))
     merged = merge_bookmark_tree(detected, entries, n_pages=25)
-    assert _children(merged, "Feedback Exchanges") == ["Overall Summary", "Remark"]
+    assert _children(merged, parent) == children
+
+
+@pytest.mark.parametrize("size, parent", [("9.9", "Chapter 2"), ("9.8", "Feedback Exchanges")])
+def test_sizes_a_tenth_of_a_point_apart_are_one_print(size, parent):
+    entries, detected = _chapters(False)
+    for node in detected:
+        node["_style"] = "Sans B 14.0 false" if node["_style"] == "C" else "Sans B 10.0 false"
+    detected[4]["_style"] = f"Sans B {size} false"
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert "Overall Summary" in _children(merged, parent)
+
+
+@pytest.mark.parametrize("printed, kept, parent", [
+    ("Exchanges of feedback", False, "Chapter 2"),  # its print, worded otherwise: a peer prints like it
+    ("Feedback – Exchanges Peer Review", True, "Feedback Exchanges"),  # a heading glued on stays, a part
+    ("Methods", True, "Feedback Exchanges"),  # another heading at its target
+])
+def test_heading_at_a_bookmark_target_saying_its_words_is_its_print(printed, kept, parent):
+    entries, detected = _chapters(False)
+    entries[3]["y"] = 0.1
+    detected[3]["title"] = printed
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert (printed in _titles(merged)) == kept
+    assert "Overall Summary" in _children(merged, parent)
 
 
 def test_heading_stopped_halfway_before_a_part_each_section_prints_is_a_part():

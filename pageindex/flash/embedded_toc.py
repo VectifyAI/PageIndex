@@ -501,6 +501,12 @@ def _extends(title: str, other: str) -> bool:
     return len(short) < len(longer) and longer[:len(short)] == short
 
 
+def _says_same(title: str, other: str) -> bool:
+    """Half the words of the title with fewer share their first five letters with the other's ("FX Risk", "foreign exchange risk")."""
+    mine, theirs = ({token[:5] for token in _title_tokens(text) if len(token) >= 4} for text in (title, other))
+    return bool(mine and theirs) and 2 * len(mine & theirs) >= min(len(mine), len(theirs))
+
+
 def _enumerated_alike(title: str, other: str) -> bool:
     """Both titles open with a section number, or both with "一、"-style ones."""
     def cjk(text: str) -> bool:
@@ -966,6 +972,12 @@ def _larger_alike(style: Optional[str], other: Optional[str]) -> bool:
         return False
 
 
+def _style_size(style: Optional[str]) -> Optional[tuple[str, str, str]]:
+    """A style fingerprint's face, size and caps flag; None without a size."""
+    parts = style.rsplit(" ", 2) if style else []
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 and parts[1].replace(".", "", 1).isdigit() else None
+
+
 _CODE = re.compile(r"([A-Z][0-9][0-9A-Z])(?:\.[0-9A-Z]{1,4})?\s")
 _CODE_RANGE = re.compile(r"\(([A-Z][0-9][0-9A-Z])-([A-Z][0-9][0-9A-Z])\)\s*$")
 
@@ -1052,14 +1064,18 @@ def merge_bookmark_tree(
     bookmark it prints exactly over one it only resembles. A print that adds
     words to a bookmark's title away from its target is another heading,
     and initials are no remark ("Mathematics, B.A." below "Mathematics").
-    A bookmark learns style and position from its copies; detection
+    A bookmark still without a print takes the first free node at its
+    target sharing half the four-letter-plus words of the title with fewer ("Non-U.S. dollar foreign exchange
+    risk" for "Non-U.S. Dollar FX Risk"); one with a heading glued on only
+    lends its style. A bookmark learns style and position from its copies; detection
     exports the ``_style``, ``_lines`` (each line's text and style),
     ``_y``, ``_content_follows`` (real content after the heading on its
     page before the next heading, in flash's reading order),
     ``_prose_follows`` (whether that content opens with a body
     paragraph), ``_col``
     (its column region), ``_type`` and ``_prominent`` keys and
-    ``extract_toc`` strips them after the merge. Label words (chapter,
+    ``extract_toc`` strips them after the merge; sizes a tenth of a point
+    apart in one face are one size ("9.9", "10.0"). Label words (chapter,
     appendix, volume, references, table) come from flash's multilingual
     keyword dictionaries, plus the few they lack.
 
@@ -1132,7 +1148,8 @@ def merge_bookmark_tree(
         text, coded inside the range the deepest bookmark's title names
         ("I60" under "(I60-I69)"), under a title the document repeats,
         beside another heading printed alike in that section (a layer the
-        bookmarks leave out), or followed in the page text, before the next
+        bookmarks leave out, unless under the same parent they leave out a
+        heading printed so before its first child), or followed in the page text, before the next
         bookmark at that level, by a line each section of that level
         prints ("Requirements for the Minor" after "Eligibility"). It stays
         beside that bookmark when the bookmarks print the level below and
@@ -1172,6 +1189,31 @@ def merge_bookmark_tree(
     collect(roots, None)
     if not flat:
         return structure
+
+    def walk(nodes: list[dict]):
+        for node in nodes:
+            yield node
+            yield from walk(node.get("nodes") or [])
+
+    # Sizes a tenth of a point apart in one face are one size set two ways ("9.9", "10.0"): each run takes its most used
+    used: dict[tuple, Counter] = {}
+    for node in walk(structure):
+        parts = _style_size(node.get("_style"))
+        if parts:
+            used.setdefault((parts[0], parts[2]), Counter())[parts[1]] += 1
+    resized: dict[str, str] = {}
+    for (face, caps), counts in used.items():
+        run: list[str] = []
+        for size in sorted(counts, key=float) + [None]:
+            if run and (size is None or float(size) - float(run[-1]) > 0.15):
+                top = max(run, key=counts.__getitem__)
+                resized.update({f"{face} {s} {caps}": f"{face} {top} {caps}" for s in run})
+                run = []
+            if size is not None:
+                run.append(size)
+    for node in walk(structure):
+        if node.get("_style") in resized:
+            node["_style"] = resized[node["_style"]]
     toc = toc or []
     levels = [entry["level"] for entry in entries]
     dest_y = [entry.get("y") for entry in entries]
@@ -1327,6 +1369,7 @@ def merge_bookmark_tree(
                     stripped[id(node)] = b
                     style = _style_after(node.get("_lines"), head)
                     if style is not None:
+                        style = resized.get(style, style)
                         node["_style"] = style
                         for child in node.get("nodes") or []:
                             if child.get("_style") == style:
@@ -1361,6 +1404,29 @@ def merge_bookmark_tree(
             for key in ("_style", "_y"):
                 if frame.get(key) is None and node.get(key) is not None:
                     frame[key] = node[key]
+    # A bookmark worded unlike its print: the heading at its target saying mostly its words is the print,
+    # one with a heading glued on only lends its look
+    at_target: dict[int, list[int]] = {}
+    for pos, node in enumerate(reading):
+        if id(node) not in copy_of and id(node) not in stripped and node.get("_y") is not None:
+            at_target.setdefault(node["start_index"], []).append(pos)
+    for b, frame in enumerate(flat):
+        if b in first_copy or dest_y[b] is None or frame.get("_style") is not None:
+            continue
+        pos = next((p for p in at_target.get(frame["start_index"], ())
+                    if id(reading[p]) not in copy_of and abs(reading[p]["_y"] - dest_y[b]) <= _DEST_TOL), None)
+        if pos is None:
+            continue
+        node = reading[pos]
+        glued = _extends(node["title"], frame["title"])
+        if not glued and not _says_same(node["title"], frame["title"]):
+            continue
+        if not glued:
+            copy_of[id(node)] = b
+            first_copy[b] = pos
+        for key in ("_style", "_y"):
+            if frame.get(key) is None and node.get(key) is not None:
+                frame[key] = node[key]
 
     def numbered_inside(title: str, b: int) -> bool:
         """Numbered under bookmark b or beside a numbered bookmark below it ("6.2" beside "6.1")."""
@@ -1829,14 +1895,12 @@ def merge_bookmark_tree(
             text_levels[norm] = got[0] if got else None
         return text_levels[norm]
 
-    seq_at = {id(ref): i for i, (kind, ref) in enumerate(seq) if kind == "d"}
-
     def text_continues(node: dict, peer: int) -> bool:
         """The page text after the heading, before the next bookmark at peer's level, prints a part each section of that level prints."""
         if page_lines is None:
             return False
         level = levels[peer]
-        stop = next((ref for kind, ref in seq[seq_at[id(node)] + 1:] if kind == "b" and levels[ref] <= level), None)
+        stop = next((ref for kind, ref in seq[seq_pos[id(node)] + 1:] if kind == "b" and levels[ref] <= level), None)
         last_page = flat[stop]["start_index"] if stop is not None else n_pages
         stop_norm = _normalize_title(flat[stop]["title"]) if stop is not None else None
         mine, started = _normalize_title(node["title"]), False
@@ -1850,6 +1914,19 @@ def merge_bookmark_tree(
                 elif text_part_level(norm, page_lines) == level:
                     return True
         return False
+
+    # Prints the bookmarks leave out under a parent: a heading between it and its first child, printed exactly like that child
+    skipped_under: set[tuple[str, int]] = set()
+    last, between = None, []
+    for kind, ref in seq:
+        if kind == "d":
+            between.append(ref)
+            continue
+        style = flat[ref].get("_style")
+        if (style is not None and last is not None and parent_pos[ref] == last and ref in first_copy
+                and _same_text(reading[first_copy[ref]]["title"], flat[ref]["title"])):
+            skipped_under.update((style, last) for d in between if d.get("_style") == style)
+        last, between = ref, []
 
     def son(node: dict, a: int, peer: int) -> bool:
         """Evidence that a heading the climb would set beside bookmark ``peer`` is a part of bookmark ``a``'s section."""
@@ -1865,11 +1942,12 @@ def merge_bookmark_tree(
         if len(copies_of.get(_normalize_title(node["title"]), ())) > 1:
             return True  # a title the document repeats
         style = node.get("_style")
-        for kind, ref in seq[bookmark_seq_pos[a] + 1:]:
+        # another heading printed alike in a's section: a layer the bookmarks leave out, unless they leave that print out beside peer
+        for kind, ref in ([] if (style, parent_pos[peer]) in skipped_under else seq[bookmark_seq_pos[a] + 1:]):
             if kind == "b" and levels[ref] <= levels[a]:
                 break
             if style is not None and ref is not node and (flat[ref] if kind == "b" else ref).get("_style") == style:
-                return True  # another heading printed alike in a's section: a layer the bookmarks leave out
+                return True
         return text_continues(node, peer)
 
     def modeled_stop(node: dict, floor: int, anchor: int, k: int) -> int:
