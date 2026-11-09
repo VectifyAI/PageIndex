@@ -1182,8 +1182,9 @@ def merge_bookmark_tree(
         the root when one root bookmark titles the whole document); one
         stopped halfway sets the heading beside the bookmark it climbed
         past, unless it reads as a part of the deepest open section:
-        numbered where that bookmark is not (or not where it is), a
-        run-in lead or list item beside one that is
+        numbered where that bookmark is not (or not where it is), unless
+        printed only like siblings numbered otherwise ("SIGNATURES" like
+        "PART IV", beside "Item 15"), a run-in lead or list item beside one that is
         neither ("Subsidiary banks:"), heading a table or list rather than
         text beside one heading text, coded inside the range the deepest bookmark's title names
         ("I60" under "(I60-I69)"), under a title the document repeats,
@@ -2093,10 +2094,17 @@ def merge_bookmark_tree(
         kin = siblings[parent_pos[a]]
         return 2 * sum(holds_print(b, style) for b in kin) > len(kin)
 
+    def in_numbering_of(node: dict, peer: int) -> bool:
+        """The heading prints like a sibling of bookmark peer numbered peer's way, or like none of them."""
+        way = {_family(scheme) for scheme, _ in addresses[peer]}
+        alike = [s for s in siblings[parent_pos[peer]]
+                 if node.get("_style") is not None and flat[s].get("_style") == node["_style"]]
+        return not alike or any({_family(scheme) for scheme, _ in addresses[s]} == way for s in alike)
+
     def son(node: dict, a: int, peer: int) -> bool:
         """Evidence that a heading the climb would set beside bookmark ``peer`` is a part of bookmark ``a``'s section."""
-        if bool(_readings(node["title"])) != bool(addresses[peer]):
-            return True  # numbered one way, the sibling the other
+        if bool(_readings(node["title"])) != bool(addresses[peer]) and in_numbering_of(node, peer):
+            return True  # numbered one way, the sibling the other, in the numbering it prints like
         printed = reading[first_copy[peer]] if peer in first_copy else flat[peer]
         if any(mark and not theirs for mark, theirs in zip(_marks(node), _marks(printed))):
             return True  # a run-in lead or a list item beside a bookmark that is neither

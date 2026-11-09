@@ -1212,6 +1212,35 @@ def test_heading_numbered_unlike_the_level_of_an_unnumbered_bookmark_is_no_peer(
     assert _children(merged, "APPENDIX") == ["3.2. Drug Substance"]
 
 
+@pytest.mark.parametrize("item_style, parent", [
+    ("I", "Contents"),  # printed like the parts, not the items: beside "Item 15"
+    ("P", "Item 15. Exhibits"),  # the items print so too: a part of "Item 15"
+])
+def test_unnumbered_heading_is_a_part_of_a_numbered_bookmark_only_in_the_numbering_it_prints_like(item_style, parent):
+    titles = [("Cover", 1, 1, "K"), ("Contents", 1, 2, "C"), ("Part I", 2, 3, "P"), ("Item 1. Business", 2, 3, item_style),
+              ("Item 2. Properties", 2, 5, item_style), ("Part IV", 2, 7, "P"), ("Item 15. Exhibits", 2, 8, None)]
+    entries = [{"title": t, "level": level, "page": page} for t, level, page, _ in titles]
+    detected = [_node(t, page, style=style, y=0.3 if t.startswith("Item 1.") else 0.1)
+                for t, _, page, style in titles if style]
+    # bold capitals the bookmarks leave out, statements under an item, so the level model does not move it
+    detected[4:4] = [_node(t, 4, style="P", y=y) for t, y in (("BALANCE SHEETS", 0.1), ("CASH FLOWS", 0.5))]
+    detected.append(_node("SIGNATURES", 9, style="P", y=0.1))
+    merged = merge_bookmark_tree(detected, entries, n_pages=10)
+    assert "SIGNATURES" in _children(merged, parent)
+
+
+def test_unnumbered_heading_printed_like_no_sibling_is_a_part_of_a_numbered_bookmark():
+    # larger than the bookmarks it climbs past and printed like none of them, so their numbering still speaks
+    titles = [("3 Operation", 1, 1, 16), ("3.14 Drip tray", 2, 2, 12), ("3.14.1 Drip tray sensor", 3, 2, 11),
+              ("4 Cleaning", 1, 4, 16)]
+    entries = [{"title": t, "level": level, "page": page} for t, level, page, _ in titles]
+    detected = [_node(t, page, style=f"Sans B {size}.0 false", y=0.3 if level == 3 else 0.1)
+                for t, level, page, size in titles]
+    detected.insert(3, _node("NOTE", 3, style="Sans B 13.0 false", y=0.1))
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert _children(merged, "3.14.1 Drip tray sensor") == ["NOTE"]
+
+
 def test_bookmark_reading_unlike_its_siblings_is_dropped():
     # "V." reads as Roman 5 and as the letter V; beside "IV." and "VI." it is Roman, so "C." may follow "B." under it
     titles = [("IV. Summary", 1, 1), ("V. Manufacturing", 1, 2), ("A. Drug Substance", 2, 2),
