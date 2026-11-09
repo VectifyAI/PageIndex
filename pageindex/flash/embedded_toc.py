@@ -989,6 +989,11 @@ def _larger_alike(style: Optional[str], other: Optional[str]) -> bool:
         return False
 
 
+def _caps_apart(style: str, other: str) -> bool:
+    """Two style fingerprints alike but for the caps flag."""
+    return style.rsplit(" ", 1)[0] == other.rsplit(" ", 1)[0]
+
+
 def _style_size(style: Optional[str]) -> Optional[tuple[str, str, str]]:
     """A style fingerprint's face, size and caps flag; None without a size."""
     parts = style.rsplit(" ", 2) if style else []
@@ -1586,6 +1591,10 @@ def merge_bookmark_tree(
         if seq[k][0] == "b":
             upcoming = levels[seq[k][1]]
 
+    def fits(p: int, floor: int) -> bool:
+        """A heading under stack index p (-1: the root) sits no higher than the next bookmark's level allows."""
+        return (p + 2 if p >= 0 else 1) >= floor
+
     def later_bookmarks(node: dict):
         return (ref for kind, ref in seq[seq_pos[id(node)] + 1:] if kind == "b")
 
@@ -1717,8 +1726,7 @@ def merge_bookmark_tree(
             p = -1 if parent is None else next(
                 (k for k in range(len(stack))
                  if stack[k][2] == "b" and stack[k][3] == parent), None)
-            if (p is None or not after_previous(node, sh, h, p)
-                    or (p + 2 if p >= 0 else 1) < floor):
+            if p is None or not after_previous(node, sh, h, p) or not fits(p, floor):
                 return None
             return p
         return None
@@ -1759,7 +1767,7 @@ def merge_bookmark_tree(
                     if xs and not any(x == a[:len(x)] and kb - j == len(a) - len(x)
                                       for x in xs):
                         return None
-            if not follows_in_scope(node, sh, h, p) or (p + 2 if p >= 0 else 1) < floor:
+            if not follows_in_scope(node, sh, h, p) or not fits(p, floor):
                 return None
             return p
         return younger_sibling_parent(node, sh, h, floor)
@@ -1785,7 +1793,7 @@ def merge_bookmark_tree(
                 if not rels:
                     continue
                 if (all(rel == "ancestor" and len(a) == len(h) - 1 for rel, a in rels)
-                        and follows_in_scope(node, sh, h, kb) and kb + 2 >= floor):
+                        and follows_in_scope(node, sh, h, kb) and fits(kb, floor)):
                     return kb
                 break
         return None
@@ -1854,7 +1862,7 @@ def merge_bookmark_tree(
                     toc[p]["title"], reading[first_copy[stack[j][3]]]["title"])))), None)
             if k is None:
                 return None
-        if (stack[k][1] + 1 if k >= 0 else 1) < floor:
+        if not fits(k, floor):
             return None
         return k
 
@@ -1869,13 +1877,16 @@ def merge_bookmark_tree(
     # The list numberings each bookmark level uses, for an unnumbered member ("APPENDIX" after "VII.")
     level_families = {parent: set().union(*(_list_families(addresses[s]) for s in kids))
                       for parent, kids in siblings.items()}
+    def print_of(b: int) -> dict:
+        """Bookmark b's printed heading, else the bookmark itself."""
+        return reading[first_copy[b]] if b in first_copy else flat[b]
+
     # How each bookmark level is printed and written, from the bookmarks' own copies, and the levels each style prints
     level_styles: dict[int, set] = {}
     style_levels: dict[str, Counter] = {}
     level_traits: dict[int, list] = {}
     for b, frame in enumerate(flat):
-        printed = reading[first_copy[b]] if b in first_copy else frame
-        level_traits.setdefault(levels[b], []).append((bool(addresses[b]), _marks(printed)))
+        level_traits.setdefault(levels[b], []).append((bool(addresses[b]), _marks(print_of(b))))
         if frame.get("_style") is not None:
             level_styles.setdefault(levels[b], set()).add(frame["_style"])
             style_levels.setdefault(frame["_style"], Counter())[levels[b]] += 1
@@ -1892,8 +1903,8 @@ def merge_bookmark_tree(
         for key in schemes(addresses[b]):
             level_schemes.setdefault(levels[b], set()).add(key)
             scheme_levels.setdefault(key, set()).add(levels[b])
-    bookmarked_titles = {_normalize_title(title) for b, frame in enumerate(flat) for title in (
-        frame["title"], (reading[first_copy[b]] if b in first_copy else frame)["title"])}
+    bookmarked_titles = {_normalize_title(title) for b, frame in enumerate(flat)
+                         for title in (frame["title"], print_of(b)["title"])}
     unbookmarked_titles = Counter(_normalize_title(ref["title"]) for ref in reading if id(ref) not in copy_of)
     copies_of: dict[str, list[int]] = {}
     for pos, ref in enumerate(reading):
@@ -1952,7 +1963,7 @@ def merge_bookmark_tree(
             return None
         if mine == theirs:
             return True
-        return None if mine.rsplit(" ", 1)[0] == theirs.rsplit(" ", 1)[0] else False
+        return None if _caps_apart(mine, theirs) else False
 
     # Content: what a heading's section holds, and the parts each section of a level prints
 
@@ -2105,7 +2116,7 @@ def merge_bookmark_tree(
         """A heading the climb would set beside bookmark ``peer`` reads as a part of bookmark ``a``'s section."""
         if bool(_readings(node["title"])) != bool(addresses[peer]) and in_numbering_of(node, peer):
             return True  # numbered one way, the sibling the other, in the numbering it prints like
-        printed = reading[first_copy[peer]] if peer in first_copy else flat[peer]
+        printed = print_of(peer)
         if any(mark and not theirs for mark, theirs in zip(_marks(node), _marks(printed))):
             return True  # a run-in lead or a list item beside a bookmark that is neither
         if node.get("_prose_follows") is False and printed.get("_prose_follows") is not False:
@@ -2140,7 +2151,7 @@ def merge_bookmark_tree(
             return None  # some copies open their section, others follow a part of it: they sit unalike
         k = next((j for j in range(len(stack) - 1, -1, -1)
                   if stack[j][2] == "b" and levels[stack[j][3]] == level), None)
-        if k is None or (stack[k][1] + 1) < floor:
+        if k is None or not fits(k, floor):
             return None
         return k
 
@@ -2168,16 +2179,14 @@ def merge_bookmark_tree(
         best_score = post.get(levels[stack[anchor][3]] + 1, 0.0)  # a child of the deepest sits one level below it
         if halfway:
             best_score = max(best_score, post.get(levels[stack[k + 1][3]], 0.0))
-        mine = _list_families(_readings(node["title"]))
         for j in range(anchor, top, -1):
             b = stack[j][3]
             if parent_pos[b] is None and len(roots) == 1:
                 break
-            kin = _list_families(addresses[b]) or level_families[parent_pos[b]]
-            if j <= k and ((mine and kin and not mine & kin) or leaves_empty(node, b)):
+            if j <= k and (numbered_unlike(node, b) or leaves_empty(node, b)):
                 break
             p = j - 1
-            if (stack[p][1] + 1 if p >= 0 else 1) < floor:
+            if not fits(p, floor):
                 break
             score = post.get(levels[b], 0.0)
             alike = looks(node, b)
@@ -2186,6 +2195,13 @@ def merge_bookmark_tree(
             if alike is None and score > best_score:
                 best, best_score = p, score
         return best
+
+    def numbered_unlike(node: dict, b: int) -> bool:
+        """The heading is list-numbered unlike bookmark b's level: "2." is no peer of "（三）", "3.2." of "VII.", nor
+        "二、" of "第一节" when b's siblings all go by label words."""
+        mine = _list_families(_readings(node["title"]))
+        kin = _list_families(addresses[b]) or level_families[parent_pos[b]]
+        return bool(mine) and (not mine & kin if kin else all(addresses[s] for s in siblings[parent_pos[b]]))
 
     def numbers_say(node: dict, b: int) -> Optional[str]:
         """What the heading's and bookmark b's numbers say of the climb: "parent", "peer", "stop", or None."""
@@ -2197,11 +2213,7 @@ def merge_bookmark_tree(
         rels = {_relation(sa, a, sh, h) for sa, a in addresses[b] for sh, h in _readings(title)} - {None}
         if rels and all(isinstance(rel, tuple) for rel in rels):
             return "peer"  # numbered after the candidate, outside it, in its own numbering ("Item 7A" after "Item 6")
-        mine = _list_families(_readings(title))
-        kin = _list_families(addresses[b]) or level_families[parent_pos[b]]
-        if mine and (not mine & kin if kin else all(addresses[s] for s in siblings[parent_pos[b]])):
-            return "stop"  # siblings are numbered alike: "2." is no peer of "（三）", "3.2." of "VII.", nor "二、" of "第一节"
-        return None
+        return "stop" if numbered_unlike(node, b) else None
 
     def prints_larger(node: dict, b: int) -> bool:
         """The heading prints larger than bookmark b, or, when b has no print, than every print of b's level."""
@@ -2231,7 +2243,7 @@ def merge_bookmark_tree(
         mine, theirs = node.get("_style"), parent.get("_style")
         return (len(parent["title"].split()) == 1 and parent["title"] == parent["title"].upper()
                 and re.search(r"[^\W\d_]", parent["title"]) is not None and mine is not None and theirs is not None
-                and mine != theirs and mine.rsplit(" ", 1)[0] == theirs.rsplit(" ", 1)[0])
+                and mine != theirs and _caps_apart(mine, theirs))
 
     def climb(node: dict, floor: int, anchor: int) -> int:
         """Up the open bookmarks from the deepest, ``anchor``, while the evidence passes each; the parent where it stops."""
@@ -2245,7 +2257,7 @@ def merge_bookmark_tree(
             below = k - 1
             if verdict == "stop":
                 return stop_parent(node, floor, anchor, k)
-            if (stack[below][1] + 1 if below >= 0 else 1) < floor:
+            if not fits(below, floor):
                 # the next bookmark keeps the section open: the heading stays beside it, if numbered alike
                 mine = _list_families(_readings(node["title"]))
                 kin = _list_families(addresses[next(later_bookmarks(node))])
@@ -2288,7 +2300,7 @@ def merge_bookmark_tree(
             if (parent is not None and det_parent[id(ref)] is parent and node.get("_style") is not None
                     and ref.get("_style") == node["_style"] and j is not None and flat[stack[j][3]].get("_style") is None):
                 p = j - 1 if _exact_print(ref, flat[stack[j][3]]) else k - 1
-                if (stack[p][1] + 1 if p >= 0 else 1) >= floor:
+                if fits(p, floor):
                     return p
         return None
 
