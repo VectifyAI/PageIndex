@@ -1071,6 +1071,11 @@ def test_page_number_above_a_heading_is_no_section_number():
     assert _heading_line_reader(["17\nBackground\nText"])(1, "Background") is None
 
 
+def test_section_number_read_off_a_page_line_running_on_past_the_title():
+    line = "C.3.1 Do-Calculus Do-Operator as a Notation As mentioned in Rung 2"
+    assert _heading_line_reader(["C.3 Causal Inference Methods\n" + line])(1, "Do-Calculus") == line
+
+
 def test_heading_numbered_in_another_list_style_is_no_peer():
     entries = [{"title": "三、人工智能应用", "level": 1, "page": 1},
                {"title": "（二）工程化", "level": 2, "page": 2},

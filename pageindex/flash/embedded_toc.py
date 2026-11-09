@@ -1144,7 +1144,8 @@ def merge_bookmark_tree(
         before bookmark "2 Related Work"). Either way the next numbered
         bookmark in the parent's section must come after the heading. A
         bookmark's address is read from its copy, else its title, else
-        the numbered line printing its title at its target, else a dotted
+        the numbered line printing its title at its target (or running on
+        past it: "C.3.1 Do-Calculus Do-Operator as a ..."), else a dotted
         number glued to its words that a sibling's numbers run through
         ("3.3Transformer" beside "3.2" or "3.4"); a reading
         unlike all its numbered siblings' is dropped (a table row taken
@@ -2408,7 +2409,7 @@ def _heading_line_reader(page_texts: list[str]) -> Callable[[int, str], Optional
 
     def prints(rest: str, title: str) -> bool:
         a, b = _line_key(rest), _line_key(title)
-        return bool(a) and bool(b) and (a == b or (len(a) >= 8 and b.startswith(a)))
+        return bool(a) and bool(b) and (a == b or (len(a) >= 8 and b.startswith(a)) or (len(b) >= 8 and a.startswith(b)))
 
     def line_of(page: int, title: str) -> Optional[str]:
         found = []
