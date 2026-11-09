@@ -987,6 +987,30 @@ def test_numbering_continues_only_up_to_the_next_section(tmp_path):
     assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == [*notes, "Exhibits"]
 
 
+def test_subsections_numbered_20_and_on_stay_in_their_chapter(tmp_path):
+    """Subsections numbered 1.20 and on are numbered headings like 1.1 to
+    1.19: each is a child of its chapter, and 1.19 ends where 1.20 starts."""
+    from pageindex.flash.main import extract_toc
+
+    topics = ["Market Overview", "Revenue Recognition", "Credit Risk", "Liquidity Planning", "Capital Structure",
+              "Tax Matters", "Legal Proceedings", "Employee Benefits", "Supply Chain", "Cyber Security",
+              "Climate Strategy", "Product Pipeline", "Segment Results", "Foreign Exchange", "Lease Accounting",
+              "Goodwill Testing", "Debt Covenants", "Share Repurchases", "Dividend Policy", "Executive Pay",
+              "Audit Committee", "Internal Controls", "Related Parties"]
+    chapters = ["1 Business Review", "2 Financial Review"]
+    pages = [("Annual Report", ["Fiscal year ended December 31, 2022"])]
+    for chapter, name in enumerate(chapters, 1):
+        for n, topic in enumerate(topics, 1):
+            pages.append((name if n == 1 else "", [("bold", f"{chapter}.{n} {topic}"), *_body(topic)[:4]]))
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    structure = extract_toc(str(pdf))["structure"]
+    assert [node["title"] for node in structure] == chapters
+    for chapter, node in enumerate(structure, 1):
+        assert [child["title"] for child in node["nodes"]] == [f"{chapter}.{n} {topic}" for n, topic in enumerate(topics, 1)]
+    nineteen = structure[0]["nodes"][18]
+    assert nineteen["start_index"] == nineteen["end_index"]
+
 def test_slide_built_up_step_by_step_is_one_section(tmp_path):
     """A slide built up over pages repeats the page before and adds to it: a
     heading it repeats continues its section, so each heading is one node, on

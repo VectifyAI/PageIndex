@@ -60,7 +60,9 @@ def detect_numbered_heading(page_scan: PageScanState, block: Block, tokens: Toke
             if len(item_list) >= 4:
                 break
             val = token_numeric_value(token)
-            if math.isnan(val) or val <= 0 or val >= limit:
+            # ``limit`` bounds the leading number only; a sub-number such as
+            # the 20 in "1.20" is bounded by the two-digit check below.
+            if math.isnan(val) or val <= 0 or (not item_list and val >= limit):
                 break
             if len(token.str) >= 3:
                 break
