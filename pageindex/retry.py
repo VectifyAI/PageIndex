@@ -1,5 +1,7 @@
 """One retry rule for every model and cloud call the SDK sends itself, after the official OpenAI and Anthropic SDKs."""
+import email.utils
 import random
+import time
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -38,12 +40,19 @@ def should_retry(exc):
 
 
 def retry_after(headers):
-    """The server's Retry-After in seconds (retry-after-ms first) when it names 0-60, else None."""
+    """The server's Retry-After in seconds (retry-after-ms first, then seconds or an HTTP-date) when it names
+    0-60, else None."""
     for key, per_second in (("retry-after-ms", 1000), ("retry-after", 1)):
+        value = (headers or {}).get(key, "")
         try:
-            seconds = float((headers or {}).get(key, "")) / per_second
+            seconds = float(value) / per_second
         except (TypeError, ValueError):
-            continue
+            if key != "retry-after" or not value:
+                continue
+            try:  # RFC 9110 also allows an HTTP-date, which the official SDKs read too
+                seconds = email.utils.mktime_tz(email.utils.parsedate_tz(value)) - time.time()
+            except (TypeError, ValueError, OverflowError):
+                return None
         return seconds if 0 < seconds <= 60 else None
     return None
 
