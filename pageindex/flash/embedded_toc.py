@@ -2073,19 +2073,6 @@ def merge_bookmark_tree(
                     return True
         return False
 
-    # Prints the bookmarks leave out under a parent: a heading between it and its first child, printed exactly like that child
-    skipped_under: set[tuple[str, int]] = set()
-    last, between = None, []
-    for kind, ref in seq:
-        if kind == "d":
-            between.append(ref)
-            continue
-        style = flat[ref].get("_style")
-        if (style is not None and last is not None and parent_pos[ref] == last and ref in first_copy
-                and _same_text(reading[first_copy[ref]]["title"], flat[ref]["title"])):
-            skipped_under.update((style, last) for d in between if d.get("_style") == style)
-        last, between = ref, []
-
     def holds_print(b: int, style: str) -> bool:
         """Bookmark b's own section, before its first child bookmark, holds a detected heading printed in style."""
         for kind, ref in seq[bookmark_seq_pos[b] + 1:]:
@@ -2095,12 +2082,22 @@ def merge_bookmark_tree(
                 return True
         return False
 
+    def prints_own(b: int, style: Optional[str]) -> bool:
+        """Bookmark b prints its own title exactly, in style."""
+        return (style is not None and flat[b].get("_style") == style and b in first_copy
+                and _exact_print(reading[first_copy[b]], flat[b]))
+
+    def skipped_at(style: Optional[str], x: Optional[int]) -> bool:
+        """Bookmark x's section holds a heading printed like its first child's own title, before that child."""
+        if x is None or style is None:
+            return False
+        c = next((ref for kind, ref in seq[bookmark_seq_pos[x] + 1:] if kind == "b"), None)
+        return c is not None and parent_pos[c] == x and prints_own(c, style) and holds_print(x, style)
+
     def own_print_layer(style: Optional[str], a: int) -> bool:
         """Bookmark a prints its own title exactly in style; headings alike in its section are a layer below it only
         when one already sits under it or most of its siblings hold one ("Capital actions" beside "Other capital requirements")."""
-        if style is None or style != flat[a].get("_style") or a not in first_copy:
-            return True
-        if not _exact_print(reading[first_copy[a]], flat[a]) or any(c.get("_style") == style for c in flat[a]["nodes"]):
+        if not prints_own(a, style) or any(c.get("_style") == style for c in flat[a]["nodes"]):
             return True
         kin = siblings[parent_pos[a]]
         return 2 * sum(holds_print(b, style) for b in kin) > len(kin)
@@ -2127,7 +2124,7 @@ def merge_bookmark_tree(
             return True  # a title the document repeats
         style = node.get("_style")
         # another heading printed alike in a's section: a layer the bookmarks leave out, unless they leave that print out beside peer
-        for kind, ref in ([] if (style, parent_pos[peer]) in skipped_under or not own_print_layer(style, a)
+        for kind, ref in ([] if skipped_at(style, parent_pos[peer]) or not own_print_layer(style, a)
                           else seq[bookmark_seq_pos[a] + 1:]):
             if kind == "b" and levels[ref] <= levels[a]:
                 break
