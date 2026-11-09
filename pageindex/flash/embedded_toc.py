@@ -1778,6 +1778,21 @@ def merge_bookmark_tree(
                for p in [address_parent(node, sh, h, floor)] if p is not None}
         return got.pop() if len(got) == 1 else None
 
+    def range_parent(node: dict, floor: int) -> Optional[int]:
+        """The nearest open bookmark whose code range holds the heading's ("(I60-I69)" in "(I00-I99)", not in "(I20-I25)")."""
+        mine = _CODE_RANGE.search(node["title"])
+        if mine is None:
+            return None
+        for k in range(len(stack) - 1, -1, -1):
+            if stack[k][2] != "b":
+                continue
+            span = _CODE_RANGE.search(flat[stack[k][3]]["title"])
+            if span is None:
+                return None
+            if span.group(1) <= mine.group(1) and mine.group(2) <= span.group(2):
+                return k if fits(k, floor) else None
+        return None
+
     def direct_parent(node: dict, floor: int) -> Optional[int]:
         """The open bookmark addressed as the heading minus its last part ("5.3" for "5.3.1")."""
         for sh, h in _readings(node["title"]):
@@ -2123,12 +2138,15 @@ def merge_bookmark_tree(
         if len(copies_of.get(_normalize_title(node["title"]), ())) > 1:
             return True  # a title the document repeats
         style = node.get("_style")
-        # another heading printed alike in a's section: a layer the bookmarks leave out, unless they leave that print out beside peer
+        # another heading printed alike in a's section, over text or a table as this one is: a layer the bookmarks
+        # leave out, unless they leave that print out beside peer
         for kind, ref in ([] if skipped_at(style, parent_pos[peer]) or not own_print_layer(style, a)
                           else seq[bookmark_seq_pos[a] + 1:]):
             if kind == "b" and levels[ref] <= levels[a]:
                 break
-            if style is not None and ref is not node and (flat[ref] if kind == "b" else ref).get("_style") == style:
+            alike = flat[ref] if kind == "b" else ref
+            if (style is not None and ref is not node and alike.get("_style") == style
+                    and (alike.get("_prose_follows") is False) == (node.get("_prose_follows") is False)):
                 return True
         return text_continues(node, peer)
 
@@ -2316,7 +2334,7 @@ def merge_bookmark_tree(
         anchor = next((k for k in range(len(stack) - 1, -1, -1) if stack[k][2] == "b"), -1)
         if anchor < 0:
             return -1
-        for named in (numbered_parent, toc_parent, periodic_parent):
+        for named in (numbered_parent, range_parent, toc_parent, periodic_parent):
             got = named(node, floor)
             if got is not None:
                 return got

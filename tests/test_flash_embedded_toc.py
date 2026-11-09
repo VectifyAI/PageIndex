@@ -371,6 +371,41 @@ def test_heading_stopped_halfway_in_a_layer_the_bookmarks_leave_out_is_a_part(le
     assert _children(merged, parent) == children
 
 
+@pytest.mark.parametrize("exchanges_heads, summary_heads, remark_heads, parent, children", [
+    (None, None, None, "Feedback Exchanges", ["Overall Summary", "Remark"]),
+    (None, False, None, "Chapter 2", ["Feedback Exchanges", "Remark"]),  # a table title is no layer for a heading over text
+    (False, False, None, "Chapter 2", ["Feedback Exchanges", "Overall Summary", "Remark"]),  # nor text for one over a table
+])
+def test_a_layer_the_bookmarks_leave_out_heads_text_or_a_table_as_the_heading_does(
+        exchanges_heads, summary_heads, remark_heads, parent, children):
+    entries, detected = _chapters(False)
+    detected[5:5] = [_node("Remark", 12, style="S", y=0.5)]
+    for node, heads in zip(detected[3:6], (exchanges_heads, summary_heads, remark_heads)):
+        node["_prose_follows"] = heads
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert _children(merged, parent) == children
+
+
+@pytest.mark.parametrize("block, open_block, parent", [
+    ("Cerebrovascular diseases (I60-I69)", "Ischemic heart diseases (I20-I25)", "Chapter 9 (I00-I99)"),
+    ("Acute myocardial infarction (I21-I22)", "Ischemic heart diseases (I20-I25)", "Ischemic heart diseases (I20-I25)"),
+    # a bookmark naming no range says nothing of what it holds
+    ("Cerebrovascular diseases (I60-I69)", "Ischemic heart diseases", "Ischemic heart diseases"),
+])
+def test_a_code_range_heading_goes_under_the_nearest_open_bookmark_whose_range_holds_it(block, open_block, parent):
+    """A code range is an address: "(I60-I69)" sits in "(I00-I99)", not in "(I20-I25)"."""
+    entries = [{"title": "Chapter 9 (I00-I99)", "level": 1, "page": 1},
+               {"title": open_block, "level": 2, "page": 2},
+               {"title": "Chapter 10 (J00-J99)", "level": 1, "page": 10}]
+    detected = [_node("Chapter 9 (I00-I99)", 1, style="C", y=0.1),
+                _node(open_block, 2, style="S", y=0.1),
+                _node("I25.1 Atherosclerotic heart disease", 3, style="S", y=0.1),
+                _node(block, 5, style="S", y=0.1),
+                _node("Chapter 10 (J00-J99)", 10, style="C", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=12)
+    assert block in _children(merged, parent)
+
+
 @pytest.mark.parametrize("size, parent", [("9.9", "Chapter 2"), ("9.8", "Feedback Exchanges")])
 def test_sizes_a_tenth_of_a_point_apart_are_one_print(size, parent):
     entries, detected = _chapters(False)
