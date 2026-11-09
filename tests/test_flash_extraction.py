@@ -153,6 +153,18 @@ def test_rtl_chars_ignore_code_widths(tmp_path):
     assert extract_toc(str(pdf))["page_texts"] == ["xy \u05d0\u05d1 z"]
 
 
+def test_text_above_letter_height_on_an_inherited_a4_page_is_kept(tmp_path):
+    """A page without a CropBox shows its whole MediaBox, inherited A4 included,
+    so a header above US-Letter's 792 pt stays on the page."""
+    from conftest import build_pdf
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf([[(72, 815, 10, "Running header"), (72, 700, 12, "Body")]],
+                              inherited_box="[0 0 595 842]"))
+    assert extract_toc(str(pdf))["page_texts"] == ["Running header\nBody"]
+
+
 def test_composite_font_widths_read_both_w_forms():
     """/W holds `c [w1 w2 ...]` and `c_first c_last w` entries, /DW covers
     the rest, and a range is bounded to two-byte codes."""
