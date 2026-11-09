@@ -69,9 +69,9 @@ _MIN_SECTION_GAP = 0.15
 _DEST_TOL = 0.02
 
 # Backfill noise filters: a normalized title recurring this often across the
-# detected tree is a running label, not a section (unless printed like a
-# bookmark's heading and never on adjacent pages: a chapter's "Notes"); a
-# title longer than this is a paragraph lead picked up as a heading.
+# detected tree is a running label, not a section (unless never on adjacent
+# pages of one section and printed like a bookmark's heading or opening text:
+# a chapter's "Notes"); a title longer than this is a paragraph lead picked up as a heading.
 _BACKFILL_DUP_MIN = 3
 _BACKFILL_MAX_TITLE = 100
 
@@ -502,9 +502,11 @@ def _extends(title: str, other: str) -> bool:
 
 
 def _says_same(title: str, other: str) -> bool:
-    """Half the words of the title with fewer share their first five letters with the other's ("FX Risk", "foreign exchange risk")."""
+    """Half the words of the title with fewer share their first five letters with the other's ("FX Risk", "foreign exchange risk"), under one section number."""
     mine, theirs = ({token[:5] for token in _title_tokens(text) if len(token) >= 4} for text in (title, other))
-    return bool(mine and theirs) and 2 * len(mine & theirs) >= min(len(mine), len(theirs))
+    keys = _section_key(title), _section_key(other)
+    return (bool(mine and theirs) and 2 * len(mine & theirs) >= min(len(mine), len(theirs))
+            and (None in keys or keys[0] == keys[1]))
 
 
 def _enumerated_alike(title: str, other: str) -> bool:
@@ -539,6 +541,20 @@ def _same_heading(node: dict, chapter: dict,
                      or (_similarity(node_squeezed, _normalize_title(
                              "".join(chapter["title"].split()))) >= similarity
                          and not _ends_apart(node["title"], chapter["title"])))))
+
+
+def _exact_print(node: dict, frame: dict) -> bool:
+    """The heading prints the bookmark's title, letter spacing or numbering aside."""
+    return (_same_text(node["title"], frame["title"]) or _numbered_print(node["title"], frame["title"])
+            or any(_normalize_title(frame["title"]).endswith(norm) and _numbered_variant(frame["title"], norm)
+                   for norm in (_normalize_title(node["title"]), _normalize_title("".join(node["title"].split())))))
+
+
+def _numbers_apart(title: str, other: str) -> bool:
+    """Past any section number, neither title's numbers lead the other's ("J18ZF (17.5 Ton)", "J15ZF (15 Ton)")."""
+    mine, theirs = (_DIGIT_RUN.findall(_lead(text)[1] if _readings(text) else text) for text in (title, other))
+    short, longer = sorted((mine, theirs), key=len)
+    return longer[:len(short)] != short
 
 
 def _subtree_max_start(node: dict) -> int:
@@ -811,6 +827,7 @@ _CAPTION_WORDS = _flash_words("ai_section_keywords", "table_keywords", "chart_ke
 _ADDR_DIGIT = re.compile(r"(\(?)\s*(?:§\s*)?([0-9]{1,3}(?:\s*\.\s*[0-9]{1,3})*)(?:\s*([.、):]))?")
 _ADDR_ROMAN = re.compile(r"(\(?)\s*([IVXLCDM]{1,7}|[ivxlcdm]{1,7})(?:\s*([.、):]))?")
 _ADDR_LETTER = re.compile(r"(\(?)\s*([A-Za-z])((?:\s*\.\s*[0-9]{1,3})*)(?:\s*([.、):]))?")
+_GLUED_NUMBER = re.compile(r"\s*([0-9]{1,3}(?:\.[0-9]{1,3})+)(?=[^\W\d_])")
 _ADDR_CJK = re.compile(r"(\(?)\s*([零〇一二三四五六七八九十百]{1,4})(?:\s*([.、):]))?")
 # Label words whose numbers are section numbers ("Section 4" is address "4")
 _NUMBERED_LABELS = frozenset({("chapter",), ("label", "section"), ("label", "article")})
@@ -1064,9 +1081,16 @@ def merge_bookmark_tree(
     bookmark it prints exactly over one it only resembles. A print that adds
     words to a bookmark's title away from its target is another heading,
     and initials are no remark ("Mathematics, B.A." below "Mathematics").
-    A bookmark still without a print takes the first free node at its
-    target sharing half the four-letter-plus words of the title with fewer ("Non-U.S. dollar foreign exchange
-    risk" for "Non-U.S. Dollar FX Risk"); one with a heading glued on only
+    So is one away from a same-page bookmark's target while another heading
+    prints the bookmark there (numbered otherwise, for one printing its
+    title exactly: "7.4.2 Future Perspective" beside "7.5.2 ..."), and one
+    only resembling the title above its target or with other numbers
+    ("J18ZF (17.5 Ton)" for "J15ZF (15 Ton)"); a continued title follows
+    nothing on its page but the bookmark's prints. A bookmark still without a print
+    takes the first free node at its target sharing half the
+    four-letter-plus words of the title with fewer, under one section
+    number ("Non-U.S. dollar foreign exchange risk" for "Non-U.S. Dollar
+    FX Risk", not "Item 7A" for "Item 6"); one with a heading glued on only
     lends its style. A bookmark learns style and position from its copies; detection
     exports the ``_style``, ``_lines`` (each line's text and style),
     ``_y``, ``_content_follows`` (real content after the heading on its
@@ -1084,8 +1108,9 @@ def merge_bookmark_tree(
     target on its page (by column region, then height: a target sits in
     the first region not left of its x nor wholly above it; one without an
     x is placed by height alone), else at its page's start -- never
-    between a same-page
-    detected heading and its children. A same-page heading numbered
+    between a same-page detected heading and its children, unless they
+    print this bookmark or a later one, or the page text prints its title
+    below the heading ("B Prompts" under "A Dataset Details"). A same-page heading numbered
     before the bookmark goes ahead of it; a label line ("Chapter 4") or a
     heading numbered inside the bookmark goes with it.
 
@@ -1102,7 +1127,9 @@ def merge_bookmark_tree(
         part ("5.3" for "5.3.1"), over a box title detected above it;
       * its detected parent, while that is open and spans no later
         bookmark (or numbers the heading directly), unless their numbers
-        set them apart ("NOTE 19" detected under "NOTE 18");
+        set them apart ("NOTE 19" detected under "NOTE 18"); a detected
+        parent of one word in capitals, printed otherwise like the heading,
+        is capitals by spelling ("NSFR"): the heading goes beside it;
       * the parent its section number names. A number is an address
         ("4.3" is the third child of "4") read within its own family:
         digits, Roman, letters, CJK, or a label word ("Chapter 8"); a
@@ -1117,7 +1144,9 @@ def merge_bookmark_tree(
         before bookmark "2 Related Work"). Either way the next numbered
         bookmark in the parent's section must come after the heading. A
         bookmark's address is read from its copy, else its title, else
-        the numbered line printing its title at its target; a reading
+        the numbered line printing its title at its target, else a dotted
+        number glued to its words that a sibling's numbers run through
+        ("3.3Transformer" beside "3.2" or "3.4"); a reading
         unlike all its numbered siblings' is dropped (a table row taken
         for the heading, "V." read as a letter beside "IV." and "VI."),
         and an address a bookmark holds is no evidence for
@@ -1125,19 +1154,29 @@ def merge_bookmark_tree(
       * the parent the printed table of contents lists it under, when
         that contents nests the bookmarks it lists the way they nest
         themselves -- all of them, or those under that parent;
+      * under a bookmark without a print, the open heading flash detects
+        beside it printed alike names its place: beside that heading, or
+        beside the bookmark when that heading prints the bookmark's title;
       * else a climb from the deepest open bookmark, past a candidate
         only on positive evidence the heading is its peer: a numbering
-        prefix outside the candidate's and after it, or the same style
-        fingerprint (face, weight and size as one hash; a larger raw size
+        prefix outside the candidate's and after it (an address forking off
+        after the candidate's in any family: "Item 7A" after "Item 6",
+        "A.2" after "A.1.11"), or the same style as the candidate's print
+        -- for a candidate without one, that of its nearest printed sibling
+        on either side ("Figures" printed like "Introduction"), unless its
+        bookmarked children print it too --
+        (a fingerprint of face, weight and size as one hash; a larger raw size
         in a different face is not seniority) that leaves the candidate
         real content below its heading on a shared page (what flash reads
         between the two, columns included, else a vertical gap) and no
         same-style detected child enumerated like the heading, or a style
         that differs from the candidate's in size alone and is larger
-        ("EXHIBIT B" after a smaller "8. Miscellaneous"); never past a
-        candidate numbered in another list style ("2." below "（三）"), or
+        ("EXHIBIT B" after a smaller "8. Miscellaneous"), or larger so than
+        every print of an unprinted candidate's level; never past a
+        candidate numbered in another list style ("2." below "（三）"),
         unnumbered among siblings numbered so ("3.2." below an "APPENDIX"
-        that follows "VII. REFERENCES").
+        that follows "VII. REFERENCES"), or among siblings all numbered by
+        label words ("二、" below "第一节").
         A climb must reach a numbering parent or the top level (just below
         the root when one root bookmark titles the whole document); one
         stopped halfway sets the heading beside the bookmark it climbed
@@ -1145,20 +1184,24 @@ def merge_bookmark_tree(
         numbered where that bookmark is not (or not where it is), a
         run-in lead or list item beside one that is
         neither ("Subsidiary banks:"), heading a table or list rather than
-        text, coded inside the range the deepest bookmark's title names
+        text beside one heading text, coded inside the range the deepest bookmark's title names
         ("I60" under "(I60-I69)"), under a title the document repeats,
         beside another heading printed alike in that section (a layer the
         bookmarks leave out, unless under the same parent they leave out a
-        heading printed so before its first child), or followed in the page text, before the next
-        bookmark at that level, by a line each section of that level
-        prints ("Requirements for the Minor" after "Eligibility"). It stays
+        heading printed so before its first child, or the deepest bookmark
+        prints its own title exactly so with no such heading under it yet
+        and most of its siblings holding none: "Other capital requirements"
+        beside "Capital actions"), or followed in the page text, before the next
+        bookmark at that level, by a line most sections of that level print
+        once each ("Requirements for the Minor" after "Eligibility"). It stays
         beside that bookmark when the bookmarks print the level below and
         never like the heading, numbered like the level it climbed to
         ("Overall Summary" in bold beside a bookmark whose children print
         in bold italic). Where the bookmarks mostly keep the heading's
         print, the level model built from their own prints sets the level
         they skipped it at. An empty section is read at the bookmark's print,
-        not its target page.
+        not its target page; without a print, from the page text between
+        its title line and the heading, else at its target.
         One the next bookmark's open parent stops keeps its height, beside
         that bookmark, unless the two are numbered in another list style
         or depth ("3." is no peer of "1.1.2").
@@ -1166,10 +1209,13 @@ def merge_bookmark_tree(
     Two noise filters prune the whole detected tree before placement:
     titles recurring across it (running labels, not sections) and
     overlong titles (paragraph leads picked up as headings) are spliced
-    out, their children promoted into their place. A recurring title
-    printed in the style of a bookmark's own heading and never on
-    adjacent pages is a section each chapter repeats (Notes, Exercises,
-    Loan modifications) and stays. Headings before the first bookmark
+    out, their children promoted into their place. A bookmark's own print
+    counts toward no recurrence. A recurring title never on adjacent pages
+    of one bookmark's section is a section each part repeats (Notes,
+    Exercises, Loan modifications) and stays when printed in the style of
+    a bookmark's own heading, or written like a heading (no run-in or list
+    marks) and opening body text somewhere: an attendee name or a table
+    header opens none. Headings before the first bookmark
     stay at the root.
     """
     roots = _build_bookmark_nodes(entries)
@@ -1236,6 +1282,42 @@ def merge_bookmark_tree(
         return (node["start_index"] == flat[b]["start_index"] and dest_y[b] is not None
                 and node.get("_y") is not None and abs(node["_y"] - dest_y[b]) > _DEST_TOL)
 
+    target_prints: dict[int, list[dict]] = {}
+
+    def another_print(node: dict, b: int) -> bool:
+        """Away from bookmark b's target, another heading prints b there, numbered otherwise
+        when this one prints b's title exactly ("7.4.2 Future Perspective" beside "7.5.2 ...")."""
+        if not off_target(node, b):
+            return False
+        if b not in target_prints:
+            target_prints[b] = [other for other in walk(structure) if other["start_index"] == flat[b]["start_index"]
+                                and other.get("_y") is not None and abs(other["_y"] - dest_y[b]) <= _DEST_TOL
+                                and (_same_heading(other, flat[b], _DISSOLVE_SIMILARITY)
+                                     or _printed_as(other["title"], flat[b]["title"]))]
+        exact, mine = _exact_print(node, flat[b]), _numeral_prefix(node["title"])
+        return any(other is not node and (not exact or (
+            mine is not None and _numeral_prefix(other["title"]) not in (None, mine))) for other in target_prints[b])
+
+    def resembles_only(node: dict, b: int) -> bool:
+        """The heading only resembles bookmark b's title, with other numbers or above b's target."""
+        return not _exact_print(node, flat[b]) and (_numbers_apart(node["title"], flat[b]["title"]) or (
+            off_target(node, b) and node["_y"] < dest_y[b]))
+
+    page_heads: dict[int, list[dict]] = {}
+    for node in walk(structure):
+        page_heads.setdefault(node["start_index"], []).append(node)
+
+    def carried_on(node: dict, b: int) -> bool:
+        """The heading carries bookmark b's title onto its page ("... (Continued)"), after nothing there but b's prints."""
+        if not _continued(node["title"], flat[b]["title"]):
+            return False
+        for other in page_heads[node["start_index"]]:
+            if other is node:
+                return True
+            if not (_exact_print(other, flat[b]) or _continued(other["title"], flat[b]["title"])):
+                return False
+        return False
+
     def dissolve_target(node: dict, idx: int,
                         matched: dict[int, Optional[str]]) -> Optional[int]:
         numeral = _numeral_prefix(node["title"])
@@ -1244,7 +1326,8 @@ def merge_bookmark_tree(
         while pos >= 0 and flat[pos]["start_index"] >= node["start_index"] - 1:
             # a print adding words to a bookmark's title away from its target is another heading
             if _same_heading(node, flat[pos], _DISSOLVE_SIMILARITY) and not (
-                    _extends(node["title"], flat[pos]["title"]) and off_target(node, pos)):
+                    (_extends(node["title"], flat[pos]["title"]) and off_target(node, pos))
+                    or resembles_only(node, pos) or another_print(node, pos)):
                 same.append(pos)
             pos -= 1
         if same:
@@ -1262,10 +1345,9 @@ def merge_bookmark_tree(
             free = pos not in matched or (
                 not same_page and numeral is not None and matched[pos] == numeral)
             if same_page:
-                takes = free and _printed_as(node["title"], frame_title)
+                takes = free and _printed_as(node["title"], frame_title) and not another_print(node, pos)
             else:
-                takes = ((free and _numbered_print(node["title"], frame_title))
-                         or _continued(node["title"], frame_title))
+                takes = (free and _numbered_print(node["title"], frame_title)) or carried_on(node, pos)
             if takes:
                 matched.setdefault(pos, numeral)
                 return pos
@@ -1287,35 +1369,52 @@ def merge_bookmark_tree(
             return pos < first_copy[b] or (pos == first_copy[b] + 1 and not printed["_content_follows"])
         if cand["start_index"] != node["start_index"]:
             return False
+        if printed is None and page_lines is not None:
+            # no print: the page text says whether a line comes between b's title and the heading
+            lines = [_normalize_title(line) for line in page_lines(node["start_index"])]
+            theirs, mine = _normalize_title(cand["title"]), _normalize_title(node["title"])
+            at = next((i for i, line in enumerate(lines) if theirs and line == theirs), None)
+            here = next((i for i, line in enumerate(lines) if at is not None and i > at and line
+                         and (line == mine or (len(line) >= 8 and mine.startswith(line)))), None)
+            if at is not None and here is not None:
+                return here == at + 1
         node_y = node.get("_y")
-        cand_y = cand.get("_y")
+        cand_y = cand.get("_y") if cand.get("_y") is not None else dest_y[b]
         if node_y is None or cand_y is None:
             return True
         return node_y - cand_y < _MIN_SECTION_GAP
 
-    title_pages: dict[str, list[int]] = {}
-    # Styles a bookmark's own printed heading uses
+    title_copies: dict[str, list[dict]] = {}
+    # Styles a bookmark's own printed heading uses, and those headings
     section_styles: set[str] = set()
+    bookmark_prints: set[int] = set()
     style_matches: dict[int, Optional[str]] = {}
 
     def survey(nodes: list[dict]) -> None:
         for node in nodes:
             norm = _normalize_title(node["title"])
-            title_pages.setdefault(norm, []).append(node["start_index"])
+            title_copies.setdefault(norm, []).append(node)
             idx = anchor_index(node["start_index"])
             if (node.get("_style") is not None and idx is not None
                     and dissolve_target(node, idx, style_matches) is not None):
                 section_styles.add(node["_style"])
+                bookmark_prints.add(id(node))
             survey(node.get("nodes") or [])
 
     survey(structure)
 
     def filtered_out(node: dict) -> bool:
         norm = _normalize_title(node["title"])
-        pages = sorted(title_pages.get(norm, ()))
+        # a bookmark's own print heads its section: no recurrence of a label
+        copies = [copy for copy in title_copies.get(norm, ()) if id(copy) not in bookmark_prints]
+        pages = sorted(copy["start_index"] for copy in copies)
+        # a running label repeats page after page within one bookmark's section; a section each part repeats is
+        # printed like a bookmark's heading, or written like one and opening text
         if (norm and len(pages) >= _BACKFILL_DUP_MIN
-                and not (node.get("_style") in section_styles
-                         and all(b - a > 1 for a, b in zip(pages, pages[1:])))):
+                and not (all(b - a > 1 or anchor_index(a) != anchor_index(b) for a, b in zip(pages, pages[1:]))
+                         and (node.get("_style") in section_styles
+                              or (not any(any(_marks(copy)) for copy in copies)
+                                  and any(copy.get("_prose_follows") for copy in copies))))):
             return True
         return len(node["title"]) > _BACKFILL_MAX_TITLE
 
@@ -1375,6 +1474,16 @@ def merge_bookmark_tree(
                             if child.get("_style") == style:
                                 det_parent[id(child)] = None  # printed alike: a peer
                 break
+
+    def titled_below(node: dict, b: int) -> bool:
+        """The page text prints bookmark b's title on a line below the heading."""
+        if page_lines is None:
+            return False
+        lines = page_lines(node["start_index"])
+        mine = _normalize_title(node["title"])
+        at = next((i for i, line in enumerate(lines) if (norm := _normalize_title(line))
+                   and (norm == mine or (len(norm) >= 8 and mine.startswith(norm)))), None)
+        return at is not None and any(_exact_print({"title": line}, flat[b]) for line in lines[at + 1:])
 
     def before_target(node: dict, b: int) -> bool:
         """flash reads the heading before bookmark b's target on b's page: by column region, then height,
@@ -1454,11 +1563,15 @@ def merge_bookmark_tree(
                     or (reading[slot]["start_index"] == page
                         and before_target(reading[slot], b))):
                 slot += 1
-            # an imprecise target never splits a same-page section from its children
+            # an imprecise target never splits a same-page section from its children, unless they print this bookmark
+            # or a later one, or the page prints its title below the heading
             for head in range(prev, slot):
                 if (reading[head]["start_index"] == page
                         and id(reading[head]) not in copy_of
-                        and last_desc[id(reading[head])] >= slot):
+                        and last_desc[id(reading[head])] >= slot
+                        and not any(copy_of.get(id(reading[p]), stripped.get(id(reading[p]), -1)) >= b
+                                    for p in range(slot, last_desc[id(reading[head])] + 1))
+                        and not titled_below(reading[head], b)):
                     slot = head
                     break
         # a same-page heading numbered before the bookmark goes ahead ("9.1.2" read after "9.2")
@@ -1540,10 +1653,20 @@ def merge_bookmark_tree(
         return _readings(line) if line else []
 
     addresses = [bookmark_readings(b) for b in range(len(flat))]
-    # A reading unlike all its numbered siblings' is misread (a table row taken for the heading, "V." as a letter)
     siblings: dict[Optional[int], list[int]] = {}
     for b in range(len(flat)):
         siblings.setdefault(parent_pos[b], []).append(b)
+    # A dotted number glued to the title's words ("3.3Transformer") is an address the siblings' numbers run through
+    for kids in siblings.values():
+        for k, b in enumerate(kids):
+            glued = _GLUED_NUMBER.match(unicodedata.normalize("NFKC", flat[b]["title"]))
+            if addresses[b] or not glued:
+                continue
+            values = tuple(int(x) for x in glued.group(1).split("."))
+            if any(scheme[1] == "digit" and n[:-1] == values[:-1] and abs(n[-1] - values[-1]) == 1
+                   for s in kids[max(k - 1, 0):k] + kids[k + 1:k + 2] for scheme, n in addresses[s]):
+                addresses[b] = [((False, "digit", ""), values)]
+    # A reading unlike all its numbered siblings' is misread (a table row taken for the heading, "V." as a letter)
     addresses[:] = [
         [(scheme, values) for scheme, values in readings if _family(scheme) in others]
         if (others := {_family(scheme) for s in siblings[parent_pos[b]] if s != b
@@ -1838,6 +1961,16 @@ def merge_bookmark_tree(
         total = sum(score.values())
         return {h: p / total for h, p in score.items()}
 
+    def kin_prints(b: int) -> set:
+        """Bookmark b's prints: its own, else its nearest printed siblings' on either side, unless its children print one."""
+        if flat[b].get("_style") is not None:
+            return {flat[b]["_style"]}
+        kin = siblings[parent_pos[b]]
+        at = kin.index(b)
+        near = {next((flat[s]["_style"] for s in side if flat[s].get("_style") is not None), None)
+                for side in (reversed(kin[:at]), kin[at + 1:])} - {None}
+        return set() if near & {flat[c].get("_style") for c in siblings.get(b, ())} else near
+
     def looks(node: dict, b: int) -> Optional[bool]:
         """Whether bookmark b prints like the heading; None when either has no print or only caps differ."""
         mine, theirs = node.get("_style"), flat[b].get("_style")
@@ -1880,19 +2013,31 @@ def merge_bookmark_tree(
                     norm = _normalize_title(line)
                     while starting and norm and norm == _normalize_title(flat[starting[0]]["title"]):
                         owner = starting.pop(0)
-                    if norm in title_pages:
+                    if norm in title_copies:
                         text_owners.setdefault(norm, []).append(None if starting else owner)  # None: a start unseen
                 if starting:
                     owner = starting[-1]
         return text_owners
     text_levels: dict[str, Optional[int]] = {}
 
+    def chain_at(b: Optional[int], level: int) -> Optional[int]:
+        """Bookmark b's ancestor-or-self at the given level."""
+        while b is not None and levels[b] > level:
+            b = parent_pos[b]
+        return b if b is not None and levels[b] == level else None
+
     def text_part_level(norm: str, page_lines: Callable[[int], list[str]]) -> Optional[int]:
-        """The bookmark level whose sections each print this heading line once, three times or more."""
+        """The shallowest bookmark level whose sections hold most of this heading line's prints one apiece, three or more."""
         if norm not in text_levels:
             owners = [b for b in owners_of_text(page_lines).get(norm, ()) if b is not None]
-            got = owners_at(owners) if len(owners) >= 3 else None
-            text_levels[norm] = got[0] if got else None
+            text_levels[norm] = None
+            for level in sorted(set(levels)) if len(owners) >= 3 else ():
+                held = [s for s in (chain_at(b, level) for b in owners) if s is not None]
+                if 2 * len(held) <= len(owners):
+                    break
+                if len(set(held)) == len(held):
+                    text_levels[norm] = level
+                    break
         return text_levels[norm]
 
     def text_continues(node: dict, peer: int) -> bool:
@@ -1928,6 +2073,25 @@ def merge_bookmark_tree(
             skipped_under.update((style, last) for d in between if d.get("_style") == style)
         last, between = ref, []
 
+    def holds_print(b: int, style: str) -> bool:
+        """Bookmark b's own section, before its first child bookmark, holds a detected heading printed in style."""
+        for kind, ref in seq[bookmark_seq_pos[b] + 1:]:
+            if kind == "b":
+                return False
+            if ref.get("_style") == style:
+                return True
+        return False
+
+    def own_print_layer(style: Optional[str], a: int) -> bool:
+        """Bookmark a prints its own title exactly in style; headings alike in its section are a layer below it only
+        when one already sits under it or most of its siblings hold one ("Capital actions" beside "Other capital requirements")."""
+        if style is None or style != flat[a].get("_style") or a not in first_copy:
+            return True
+        if not _exact_print(reading[first_copy[a]], flat[a]) or any(c.get("_style") == style for c in flat[a]["nodes"]):
+            return True
+        kin = siblings[parent_pos[a]]
+        return 2 * sum(holds_print(b, style) for b in kin) > len(kin)
+
     def son(node: dict, a: int, peer: int) -> bool:
         """Evidence that a heading the climb would set beside bookmark ``peer`` is a part of bookmark ``a``'s section."""
         if bool(_readings(node["title"])) != bool(addresses[peer]):
@@ -1935,15 +2099,16 @@ def merge_bookmark_tree(
         printed = reading[first_copy[peer]] if peer in first_copy else flat[peer]
         if any(mark and not theirs for mark, theirs in zip(_marks(node), _marks(printed))):
             return True  # a run-in lead or a list item beside a bookmark that is neither
-        if node.get("_prose_follows") is False:
-            return True  # it heads a table or a list, not text
+        if node.get("_prose_follows") is False and printed.get("_prose_follows") is not False:
+            return True  # it heads a table or a list, not text, beside a bookmark that does not
         if _code_within(node["title"], flat[a]["title"]):
             return True  # coded inside the range a's title names ("I60" under "(I60-I69)")
         if len(copies_of.get(_normalize_title(node["title"]), ())) > 1:
             return True  # a title the document repeats
         style = node.get("_style")
         # another heading printed alike in a's section: a layer the bookmarks leave out, unless they leave that print out beside peer
-        for kind, ref in ([] if (style, parent_pos[peer]) in skipped_under else seq[bookmark_seq_pos[a] + 1:]):
+        for kind, ref in ([] if (style, parent_pos[peer]) in skipped_under or not own_print_layer(style, a)
+                          else seq[bookmark_seq_pos[a] + 1:]):
             if kind == "b" and levels[ref] <= levels[a]:
                 break
             if style is not None and ref is not node and (flat[ref] if kind == "b" else ref).get("_style") == style:
@@ -2011,18 +2176,31 @@ def merge_bookmark_tree(
             if _numeral_child(cand_title, title):
                 return "parent"
             return "peer" if _numeral_after(title, cand_title) else "stop"
+        rels = {_relation(sa, a, sh, h) for sa, a in addresses[b] for sh, h in _readings(title)} - {None}
+        if rels and all(isinstance(rel, tuple) for rel in rels):
+            return "peer"  # numbered after the candidate, outside it, in its own numbering ("Item 7A" after "Item 6")
         mine = _list_families(_readings(title))
         kin = _list_families(addresses[b]) or level_families[parent_pos[b]]
-        if mine and kin and not mine & kin:
-            return "stop"  # siblings are numbered alike: "2." is no peer of "（三）", nor "3.2." of "VII."
+        if mine and (not mine & kin if kin else all(addresses[s] for s in siblings[parent_pos[b]])):
+            return "stop"  # siblings are numbered alike: "2." is no peer of "（三）", "3.2." of "VII.", nor "二、" of "第一节"
         if _larger_alike(node.get("_style"), cand.get("_style")):
             return "peer"
-        if (not _style_climbs(node, cand) or _claims_empty(node, b)
+        if cand.get("_style") is None and (seen := level_styles.get(levels[b])) and all(
+                _larger_alike(node.get("_style"), style) for style in seen):
+            return "peer"  # printed larger than every print of an unprinted bookmark's level
+        if (node.get("_style") not in kin_prints(b) or _claims_empty(node, b)
                 or any(id(child) not in frame_ids and _style_climbs(node, child)
                        and _enumerated_alike(title, child["title"])
                        for child in cand["nodes"])):
             return "stop"
         return "peer"
+
+    def acronym_over(node: dict, parent: dict) -> bool:
+        """The detected parent is one word in capitals printed otherwise like the heading: capitals by spelling, no seniority."""
+        mine, theirs = node.get("_style"), parent.get("_style")
+        return (len(parent["title"].split()) == 1 and parent["title"] == parent["title"].upper()
+                and re.search(r"[^\W\d_]", parent["title"]) is not None and mine is not None and theirs is not None
+                and mine != theirs and mine.rsplit(" ", 1)[0] == theirs.rsplit(" ", 1)[0])
 
     def choose(node: dict, floor: int) -> int:
         """Stack index of the heading's parent (-1: the root)."""
@@ -2033,11 +2211,23 @@ def merge_bookmark_tree(
         if k is not None:
             return k
         k = len(stack) - 1
+        parent = det_parent[id(node)]
+        while parent is not None and acronym_over(node, parent):
+            parent = det_parent[id(parent)]  # beside an acronym, not under it
+        beside = None
         while k >= 0 and stack[k][2] == "d":
             ref = stack[k][3]
-            if det_parent[id(node)] is ref and not _numbered_outside(ref["title"], node["title"]) and (
+            if parent is ref and not _numbered_outside(ref["title"], node["title"]) and (
                     not spans(ref) or _numbered_under(ref["title"], node["title"])):
                 return k
+            j = next((j for j in range(k - 1, -1, -1) if stack[j][2] == "b"), None)
+            if (beside is None and parent is not None and det_parent[id(ref)] is parent and node.get("_style") is not None
+                    and ref.get("_style") == node["_style"] and j is not None and flat[stack[j][3]].get("_style") is None):
+                # under a bookmark of unknown look, detected beside an open heading printed alike: its peer,
+                # or the bookmark's peer when that heading prints the bookmark's title
+                p = j - 1 if _exact_print(ref, flat[stack[j][3]]) else k - 1
+                if (stack[p][1] + 1 if p >= 0 else 1) >= floor:
+                    beside = p
             k -= 1
         if k < 0:
             return -1
@@ -2045,6 +2235,8 @@ def merge_bookmark_tree(
             got = named(node, floor)
             if got is not None:
                 return got
+        if beside is not None:
+            return beside
         anchor = k
         while True:
             if parent_pos[stack[k][3]] is None and len(roots) == 1:

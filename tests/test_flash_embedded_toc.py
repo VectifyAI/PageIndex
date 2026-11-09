@@ -335,16 +335,18 @@ def test_heading_stopped_halfway_is_a_peer_the_bookmarks_skipped_only_as_their_p
     assert summary in _children(merged, parent)
 
 
-@pytest.mark.parametrize("change, parent", [
-    ({}, "Chapter 2"),
-    ({"_style": "B"}, "Feedback Exchanges"),  # printed unlike the bookmark it would sit beside
-    ({"_prose_follows": False}, "Feedback Exchanges"),  # it heads a table, not text
-    ({"title": "I60 Overall Summary"}, "Feedback Exchanges (I60-I69)"),  # coded inside the bookmark's range
+@pytest.mark.parametrize("change, peer, parent", [
+    ({}, {}, "Chapter 2"),
+    ({"_style": "B"}, {}, "Feedback Exchanges"),  # printed unlike the bookmark it would sit beside
+    ({"_prose_follows": False}, {}, "Feedback Exchanges"),  # it heads a table, not text
+    ({"_prose_follows": False}, {"_prose_follows": False}, "Chapter 2"),  # as the bookmark beside it does
+    ({"title": "I60 Overall Summary"}, {}, "Feedback Exchanges (I60-I69)"),  # coded inside the bookmark's range
 ])
-def test_heading_stopped_halfway_is_a_peer_unless_it_reads_as_a_part(change, parent):
+def test_heading_stopped_halfway_is_a_peer_unless_it_reads_as_a_part(change, peer, parent):
     entries, detected = _chapters(False, exchanges="Feedback Exchanges (I60-I69)" if "title" in change else "Feedback Exchanges")
     detected[5]["_style"] = "C"
     detected[4].update(change)
+    detected[3].update(peer)
     # the bookmarks leave most of this print out elsewhere, so the level model does not move it
     detected[2:2] = [_node("Aside", 3, style="S", y=0.5), _node("Remark", 4, style="S", y=0.5)]
     merged = merge_bookmark_tree(detected, entries, n_pages=25)
@@ -393,7 +395,8 @@ def test_heading_at_a_bookmark_target_saying_its_words_is_its_print(printed, kep
     assert "Overall Summary" in _children(merged, parent)
 
 
-def test_heading_stopped_halfway_before_a_part_each_section_prints_is_a_part():
+@pytest.mark.parametrize("studies_prints_it", [False, True])  # one print outside the minors leaves most of them one apiece
+def test_heading_stopped_halfway_before_a_part_each_section_prints_is_a_part(studies_prints_it):
     entries = [{"title": "Studies", "level": 1, "page": 1}]
     # the bookmarks leave most of the minors' print out, so the level model does not move it
     detected = [_node("Studies", 1, style="D", y=0.1)] + [_node(t, 1, style="M", y=y) for t, y in (
@@ -406,12 +409,41 @@ def test_heading_stopped_halfway_before_a_part_each_section_prints_is_a_part():
     detected.append(_node("Requirements", 8, style="R", y=0.5))  # read as a heading once, printed in every minor
     detected.insert(5, _node("Eligibility", 2, style="M", y=0.3))  # right after "Minor 0"
     pages[1] = "Minor 0\nAbout it.\nEligibility\nWho may apply.\nRequirements\nCourses."
+    if studies_prints_it:
+        pages[0] = "Studies\nRequirements\nGeneral rules."
     entries.append({"title": "Chapter 2", "level": 1, "page": 9})
     detected.append(_node("Chapter 2", 9, style="D", y=0.1))
     lines = _page_line_reader(pages)
     for page_lines, parent in ((None, "Studies"), (lines, "Minor 0")):
         merged = merge_bookmark_tree(copy.deepcopy(detected), copy.deepcopy(entries), n_pages=9, page_lines=page_lines)
         assert "Eligibility" in _children(merged, parent)
+
+
+@pytest.mark.parametrize("variant, parent", [
+    (None, "Capital Risk"),  # printed like the bookmark beside it, which prints its own title: a peer
+    ("placed", "Capital actions"),  # a heading alike already sits under that bookmark: a layer
+    ("siblings", "Capital actions"),  # most of its siblings hold a heading alike: a layer
+])
+def test_heading_alike_a_bookmark_printing_its_own_title_is_a_layer_only_on_evidence(variant, parent):
+    entries = [{"title": "Capital Risk", "level": 1, "page": 1}, {"title": "Line of business equity", "level": 2, "page": 2},
+               {"title": "Capital actions", "level": 2, "page": 3}, {"title": "Non-U.S. capital", "level": 2, "page": 6},
+               {"title": "Liquidity", "level": 1, "page": 8}]
+    bold = "Sans B 10.0 false"
+    detected = [_node("Capital Risk", 1, style="R", y=0.1), _node("Line of business equity", 2, style=bold, y=0.1),
+                _node("Capital actions", 3, style=bold, y=0.1), _node("Common stock", 3, style="I", y=0.6),
+                _node("Other capital requirements", 4, style=bold, y=0.1), _node("Broker-dealer capital", 5, style=bold, y=0.1),
+                _node("Non-U.S. capital", 6, style=bold, y=0.1), _node("Liquidity", 8, style="R", y=0.1)]
+    # bold is mostly left out of the bookmarks, so the level model keeps what the climb decides
+    detected += [_node(t, 9, style=bold, y=y) for t, y in (("Funding", 0.2), ("Deposits", 0.4), ("Debt", 0.6), ("Ratings", 0.8))]
+    if variant == "placed":  # repeated in the document, so a part of "Capital actions"
+        detected[3:3] = [_node("Dividends", 3, style=bold, y=0.3)]
+        detected.append(_node("Dividends", 10, style=bold, y=0.2))
+    if variant == "siblings":
+        detected[2:2] = [_node("Equity detail", 2, style=bold, y=0.5)]
+        detected[-5:-5] = [_node("Subsidiary detail", 6, style=bold, y=0.5)]
+    detected.sort(key=lambda node: (node["start_index"], node["_y"]))
+    merged = merge_bookmark_tree(detected, entries, n_pages=11)
+    assert "Other capital requirements" in (_children(merged, parent) or [])
 
 
 def test_bookmark_printed_a_page_after_its_target_holds_nothing_were_the_heading_after_it_its_peer():
@@ -585,6 +617,44 @@ def test_recurring_section_in_a_heading_style_is_kept():
     merged = merge_bookmark_tree(detected, entries, n_pages=30)
     assert _titles(merged) == ["Basics", "Notes", "Methods", "Notes",
                                "Results", "Notes"]
+
+
+def test_recurring_title_written_like_a_heading_and_opening_text_is_kept():
+    entries = [{"title": f"Meeting {n}", "level": 1, "page": 10 * n} for n in range(1, 4)]
+    detected = []
+    for n in range(1, 4):
+        detected.append(_node(f"Meeting {n}", 10 * n, style="M", y=0.1))
+        # an attendee name opens no text, a run-in lead is no heading
+        for title, page, prose in (("Jerome Powell", 1, False), ("Staff Outlook", 3, True), ("Vote:", 5, True)):
+            detected.append(dict(_node(title, 10 * n + page, style="S"), _prose_follows=prose))
+    merged = merge_bookmark_tree(detected, entries, n_pages=40)
+    assert [_children(merged, f"Meeting {n}") for n in range(1, 4)] == [["Staff Outlook"]] * 3
+
+
+@pytest.mark.parametrize("topic_2, kept", [
+    (12, True),  # on adjacent pages, but each in its own section
+    (13, False),  # page after page in one section: a running label
+])
+def test_recurring_title_on_adjacent_pages_runs_only_within_one_section(topic_2, kept):
+    pages = {"Topic 1": 11, "Topic 2": topic_2, "Topic 3": 14}
+    entries = [{"title": title, "level": 1, "page": page} for title, page in pages.items()]
+    detected = [_node(title, page, style="T", y=0.1) for title, page in pages.items()]
+    detected += [dict(_node("Stakeholder views", page, style="S", y=0.5), _prose_follows=True) for page in (11, 12, 14)]
+    detected.sort(key=lambda node: (node["start_index"], node["_y"]))
+    merged = merge_bookmark_tree(detected, entries, n_pages=20)
+    assert ("Stakeholder views" in _titles(merged)) is kept
+
+
+def test_bookmarks_own_print_is_no_recurrence_of_its_title():
+    entries = [{"title": "Data Science Minor", "level": 1, "page": 5},
+               {"title": "Data Science, B.S.", "level": 1, "page": 10},
+               {"title": "Computer Science", "level": 1, "page": 20}]
+    listed = dict(_node("Computer Science", 0, style="R"), _prose_follows=False)  # heading a course list
+    detected = [_node("Data Science Minor", 5, style="D", y=0.1), dict(listed, start_index=6),
+                _node("Data Science, B.S.", 10, style="D", y=0.1), dict(listed, start_index=12),
+                _node("Computer Science", 20, style="D", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert _children(merged, "Data Science Minor") == _children(merged, "Data Science, B.S.") == ["Computer Science"]
 
 
 def test_numbered_children_stay_with_a_spanning_detected_parent():
@@ -835,6 +905,168 @@ def test_heading_printed_larger_in_the_same_face_climbs_out_of_a_bookmark():
     assert merged("Arial-Bold B 11.0 true") == ["Terms", "Pricing"]  # small caps are set small by design
 
 
+def test_heading_numbered_after_a_bookmark_in_its_own_numbering_climbs_past_it():
+    entries = [{"title": "Part II", "level": 1, "page": 2, "x": 0.1, "y": 0.05},
+               {"title": "Item 6. Reserved", "level": 2, "page": 2, "x": 0.1, "y": 0.7},
+               {"title": "Item 7. Management's Discussion", "level": 2, "page": 2, "x": 0.1, "y": 0.76},
+               {"title": "Item 8. Financial Statements", "level": 2, "page": 3, "x": 0.1, "y": 0.1}]
+    # printed before "Item 7" on the page, so no sibling order names its parent
+    detected = [_node("Part II", 2, y=0.05), _node("Item 7A. Quantitative Disclosures", 2, y=0.73),
+                _node("Item 7. Management's Discussion", 2, y=0.76), _node("Item 8. Financial Statements", 3, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=4)
+    assert "Item 7A. Quantitative Disclosures" in (_children(merged, "Part II") or [])
+
+
+@pytest.mark.parametrize("glued, heading, parent", [
+    ("3.3Transformer principles", "3.4 GPT-1", "3 Technology"),  # "3.2" runs through it: an address
+    ("3.7Transformer principles", "3.8 GPT-3", "3.7Transformer principles"),  # no sibling runs through it
+])
+def test_dotted_number_glued_to_a_bookmark_title_is_an_address_its_siblings_run_through(glued, heading, parent):
+    entries = [{"title": "3 Technology", "level": 1, "page": 1}, {"title": "3.2 Origins", "level": 2, "page": 2},
+               {"title": glued, "level": 2, "page": 3}, {"title": "4 Markets", "level": 1, "page": 6}]
+    detected = [_node(heading, 4, style="H", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=7)
+    assert heading in (_children(merged, parent) or [])
+
+
+@pytest.mark.parametrize("parent_title, parent", [
+    ("LARMEA", "Review by Segment"),  # one word in capitals: an acronym, no senior
+    ("LATIN AMERICA", "LATIN AMERICA"),  # words set in capitals: a senior
+])
+def test_heading_flash_nests_under_an_acronym_goes_beside_it(parent_title, parent):
+    entries = [{"title": "Press release", "level": 1, "page": 1}, {"title": "About", "level": 1, "page": 6}]
+    detected = [_node("Review by Segment", 4, style="O R 16.0 false", y=0.1, children=[
+        _node("Europe", 4, style="A B 10.0 false", y=0.3),
+        _node(parent_title, 4, style="A B 10.0 true", y=0.45, children=[_node("Peet's", 4, style="A B 10.0 false", y=0.6)])])]
+    merged = merge_bookmark_tree(detected, entries, n_pages=7)
+    assert "Peet's" in (_children(merged, parent) or [])
+
+
+@pytest.mark.parametrize("first, parent", [
+    ("Cost efficiency:", "Assessment 1"),  # beside the open heading printed alike
+    ("Assessment 1", "Options"),  # that heading prints the unprinted bookmark: beside the bookmark
+])
+def test_heading_flash_detects_beside_an_open_heading_printed_alike_under_an_unprinted_bookmark(first, parent):
+    entries = [{"title": f"Topic {n}", "level": 1, "page": n} for n in (1, 2, 3)]
+    entries += [{"title": "Our decision", "level": 2, "page": n} for n in (1, 2, 3)]
+    entries.sort(key=lambda entry: (entry["page"], entry["level"]))
+    entries += [{"title": "Options", "level": 1, "page": 5}, {"title": "Assessment 1", "level": 2, "page": 6},
+                {"title": "Assessment 2", "level": 2, "page": 9}]
+    detected = []
+    for n in (1, 2, 3):
+        detected += [_node(f"Topic {n}", n, style="T", y=0.1), _node("Our decision", n, style="U", y=0.4)]
+    detected.append(_node("Options", 5, style="T", y=0.1, children=[  # the printed assessments go undetected
+        _node(first, 7 if first.endswith(":") else 8, style="U", y=0.3), _node("Conclusion", 8, style="U", y=0.6)]))
+    merged = merge_bookmark_tree(detected, entries, n_pages=10)
+    assert "Conclusion" in (_children(merged, parent) or [])
+
+
+def test_heading_larger_than_every_print_of_an_unprinted_bookmarks_level_is_its_peer():
+    entries = [{"title": "Part A", "level": 1, "page": 1}, {"title": "Part B", "level": 1, "page": 3},
+               {"title": "Glossary", "level": 1, "page": 5}]
+    detected = [_node("Part A", 1, style="Sans-Bold B 12.0 false", y=0.1),
+                _node("Part B", 3, style="Sans-Bold B 12.0 false", y=0.1),
+                _node("Signatures", 8, style="Sans-Bold B 14.0 false", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=9)
+    assert [n["title"] for n in merged] == ["Part A", "Part B", "Glossary", "Signatures"]
+
+
+def test_unprinted_bookmark_sits_at_its_target_when_asked_if_a_peer_leaves_it_empty():
+    entries = [{"title": "Definitions", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": "Parties", "level": 1, "page": 2, "x": 0.1, "y": 0.1},
+               {"title": "Terms", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+    detected = [_node("Definitions", 1, style="G B 11.0 true", y=0.1),
+                _node("Background", 2, style="G B 11.0 true", y=0.5),
+                _node("Terms", 4, style="G B 11.0 true", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert [n["title"] for n in merged] == ["Definitions", "Parties", "Background", "Terms"]
+
+
+@pytest.mark.parametrize("between, parent", [
+    ("(1) Vectify AI Limited\n(2) Yuexun Jiang\n", None),  # text under the bookmark's title: not left empty
+    ("", "Parties"),  # nothing between: the heading is the section's first part
+])
+def test_unprinted_bookmark_is_read_in_the_page_text_when_asked_if_a_peer_leaves_it_empty(between, parent):
+    entries = [{"title": "Definitions", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": "Parties", "level": 1, "page": 2, "x": 0.1, "y": 0.1},
+               {"title": "Terms", "level": 1, "page": 4, "x": 0.1, "y": 0.1}]
+    detected = [_node("Definitions", 1, style="G B 11.0 true", y=0.1),
+                _node("Background", 2, style="G B 11.0 true", y=0.2),
+                _node("Terms", 4, style="G B 11.0 true", y=0.1)]
+    pages = ["Definitions\nText", "Parties\n" + between + "Background\nText", "", "Terms\nText"]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5, page_lines=_page_line_reader(pages))
+    assert ("Background" in (_children(merged, "Parties") or [])) is (parent == "Parties")
+    assert ("Background" in [n["title"] for n in merged]) is (parent is None)
+
+
+def test_heading_printed_like_an_unprinted_bookmarks_siblings_is_its_peer():
+    entries = [{"title": "Report", "level": 1, "page": 1}, {"title": "Overview", "level": 2, "page": 2},
+               {"title": "Risks", "level": 2, "page": 4}, {"title": "Notes", "level": 1, "page": 8},
+               {"title": "Note 1", "level": 2, "page": 8}]
+    detected = [_node("Report", 1, style="T B 16.0 false", y=0.1), _node("Overview", 2, style="S B 10.0 false", y=0.1),
+                _node("Liquidity", 6, style="S B 10.0 false", y=0.1), _node("Notes", 8, style="T B 16.0 false", y=0.1),
+                _node("Note 1", 8, style="N R 12.0 false", y=0.3)]
+    detected += [_node(title, page, style="S B 10.0 false", y=0.2) for title, page in (
+        ("Fair value", 9), ("Leases", 10), ("Taxes", 11))]  # printed alike, never bookmarked
+    merged = merge_bookmark_tree(detected, entries, n_pages=12)
+    assert _children(merged, "Report") == ["Overview", "Risks", "Liquidity"]
+
+
+def test_heading_printed_like_an_unprinted_bookmarks_nearest_printed_sibling_is_its_peer():
+    entries = [{"title": "Title Page", "level": 1, "page": 1}, {"title": "Contents", "level": 1, "page": 2},
+               {"title": "Introduction", "level": 1, "page": 5}, {"title": "1 Theory", "level": 1, "page": 7}]
+    detected = [_node("Figures", 4, style="A B 15.0 false", y=0.1), _node("Introduction", 5, style="A B 15.0 false", y=0.1),
+                _node("1 Theory", 7, style="A R 15.0 false", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=9)
+    assert [n["title"] for n in merged] == ["Title Page", "Contents", "Figures", "Introduction", "1 Theory"]
+
+
+def test_heading_larger_than_an_unprinted_bookmarks_nearest_sibling_alone_stays_under_it():
+    entries = [{"title": "Copyright", "level": 1, "page": 1}, {"title": "Contents", "level": 1, "page": 2},
+               {"title": "Preface", "level": 1, "page": 5}, {"title": "1 Cells", "level": 1, "page": 7}]
+    detected = [_node("SECTION FIFTEEN", 4, style="F B 14.0 true", y=0.1), _node("Preface", 5, style="F B 12.0 true", y=0.1),
+                _node("1 Cells", 7, style="F R 14.0 false", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=9)
+    assert _children(merged, "Contents") == ["SECTION FIFTEEN"]
+
+
+def test_siblings_print_says_nothing_of_an_unprinted_bookmark_whose_children_print_alike():
+    entries = [{"title": "Part II", "level": 1, "page": 1}, {"title": "Item 7", "level": 2, "page": 1},
+               {"title": "Item 8", "level": 2, "page": 3}, {"title": "Balance Sheets", "level": 3, "page": 3},
+               {"title": "Notes", "level": 3, "page": 5}, {"title": "Item 9", "level": 2, "page": 9}]
+    detected = [_node("Part II", 1, style="T B 16.0 false", y=0.1), _node("Item 7", 1, style="S B 10.0 true", y=0.3),
+                _node("Balance Sheets", 3, style="S B 10.0 true", y=0.3), _node("Notes", 5, style="S B 10.0 true", y=0.1),
+                _node("NOTE 2. LEASES", 6, style="S B 10.0 true", y=0.1), _node("Item 9", 9, style="S B 10.0 true", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=10)
+    assert _children(merged, "Notes") == ["NOTE 2. LEASES"]
+
+
+def test_list_numbered_heading_is_no_peer_of_a_level_numbered_by_named_parts():
+    entries = [{"title": "第一章、总则", "level": 1, "page": 1}, {"title": "第一节、范围", "level": 2, "page": 1},
+               {"title": "第二节、测量", "level": 2, "page": 3}, {"title": "第二章、方法", "level": 1, "page": 6}]
+    detected = [_node("第一章、总则", 1, style="C R 22.0 false", y=0.1), _node("第一节、范围", 1, style="S R 15.9 false", y=0.2),
+                _node("二、距离测量", 4, style="S R 15.9 false", y=0.3), _node("第二章、方法", 6, style="C R 22.0 false", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=7)
+    assert _children(merged, "第二节、测量") == ["二、距离测量"]
+
+
+@pytest.mark.parametrize("page, order", [
+    ("A Dataset Details\nText\nB Prompts\nText", ["Conclusion", "A Dataset Details", "Prompts", "Cases"]),
+    ("B Prompts\nA Dataset Details\nText", ["Conclusion", "Prompts", "Cases"]),  # its title above: the target is off
+])
+def test_bookmark_titled_below_a_same_page_heading_comes_after_it(page, order):
+    entries = [{"title": "Conclusion", "level": 1, "page": 1, "x": 0.1, "y": 0.2},
+               {"title": "Prompts", "level": 1, "page": 2, "x": 0.1, "y": 0.7},
+               {"title": "Cases", "level": 1, "page": 4, "x": 0.1, "y": 0.5}]
+    detected = [_node("Conclusion", 1, style="P B 14.3 false", y=0.2),
+                _node("A Dataset Details", 2, style="P B 14.3 false", y=0.1, children=[
+                    _node("QA Prompt", 3, style="P B 8.0 false", y=0.4)]),
+                _node("Cases", 4, style="P B 14.3 false", y=0.5)]
+    pages = ["Conclusion\nText", page, "QA Prompt\nText", "Cases\nText"]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5, page_lines=_page_line_reader(pages))
+    assert [n["title"] for n in merged] == order
+
+
 def test_page_number_above_a_heading_is_no_section_number():
     assert _heading_line_reader(["17\nBackground\nText"])(1, "Background") is None
 
@@ -1017,6 +1249,56 @@ def test_print_takes_the_bookmark_it_prints_exactly_over_a_similar_one():
     merged = merge_bookmark_tree(detected, entries, n_pages=3)
     assert _children(merged, "Sociology, B.A.") == ["Core Courses"]
     assert _children(merged, "Sociology, B.S.") == ["Electives"]
+
+
+@pytest.mark.parametrize("bookmark, target, at_target, other, y", [
+    ("Art, B.A.", 0.18, "Art, B.A.", "Art, B.F.A.", 0.78),  # another heading prints the bookmark at its target
+    ("J25ZR - Low Static Drive With Powered Convenience Outlet", 0.45, None,
+     "J25ZR - Low Static Drive Without Powered Convenience Outlet", 0.08),  # only resembling it, above its target
+    ("J15ZF (15 Ton) Bottom Duct", 0.1, None, "J18ZF (17.5 Ton) Bottom Duct", 0.37),  # other numbers
+    ("Future Perspective", 0.79, "7.5.2 Future Perspective", "7.4.2 Future Perspective", 0.3),  # numbered otherwise
+])
+def test_heading_resembling_a_bookmark_on_its_page_is_another_heading(bookmark, target, at_target, other, y):
+    entries = [{"title": "Programs", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": bookmark, "level": 2, "page": 2, "x": 0.1, "y": target}]
+    prints = [_node(other, 2, y=y)] + ([_node(at_target, 2, y=target)] if at_target else [])
+    detected = [_node("Programs", 1, y=0.1)] + sorted(prints, key=lambda node: node["_y"])
+    assert other in _titles(merge_bookmark_tree(detected, entries, n_pages=3))
+
+
+@pytest.mark.parametrize("before, kept", [
+    (None, False), ("J15ZJ (15 Ton)", False),  # first on its page, or after a running header
+    ("Cooling Data", True),  # after another heading: a section of its own
+])
+def test_continued_title_follows_nothing_on_its_page_but_its_bookmarks_prints(before, kept):
+    entries = [{"title": "J15ZJ (15 Ton)", "level": 1, "page": 1}, {"title": "Wiring", "level": 1, "page": 4}]
+    detected = [_node("J15ZJ (15 Ton)", 1, y=0.1)] + ([_node(before, 2, y=0.05)] if before else [])
+    detected += [_node("J15ZJ (15 Ton) (Continued)", 2, y=0.5), _node("Wiring", 4, y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=5)
+    assert ("J15ZJ (15 Ton) (Continued)" in _titles(merged)) is kept
+
+
+def test_heading_at_a_bookmark_target_under_another_section_number_is_not_its_print():
+    entries = [{"title": "Item 5. Market", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": "Item 6. Reserved", "level": 1, "page": 2, "x": 0.1, "y": 0.73},
+               {"title": "Item 8. Financial Statements", "level": 1, "page": 3, "x": 0.1, "y": 0.1}]
+    item_7a = "Item 7A. Quantitative and Qualitative Disclosures About Market Risk."
+    detected = [_node("Item 5. Market", 1, y=0.1), _node(item_7a, 2, y=0.73),
+                _node("Item 8. Financial Statements", 3, y=0.1)]
+    assert item_7a in _titles(merge_bookmark_tree(detected, entries, n_pages=4))
+
+
+def test_flash_nesting_a_bookmark_print_under_a_heading_does_not_move_the_bookmark_before_it():
+    entries = [{"title": "Part I", "level": 1, "page": 1, "x": 0.1, "y": 0.1},
+               {"title": "Item 1C. Cybersecurity", "level": 2, "page": 2, "x": 0.1, "y": 0.16},
+               {"title": "Item 2. Properties", "level": 2, "page": 3, "x": 0.1, "y": 0.08}]
+    detected = [_node("Part I", 1, y=0.1),
+                _node("Item 1B. Unresolved staff comments", 2, y=0.08, children=[
+                    _node("Item 1C. Cybersecurity Risk management and strategy", 2, y=0.155)]),
+                _node("Item 2. Properties", 3, y=0.08)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=4)
+    assert _children(merged, "Part I") == ["Item 1B. Unresolved staff comments", "Item 1C. Cybersecurity",
+                                           "Item 2. Properties"]
 
 
 def test_bookmark_target_on_a_page_whose_box_is_inherited():
