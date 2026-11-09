@@ -1524,13 +1524,13 @@ def merge_bookmark_tree(
         if b in first_copy or dest_y[b] is None or frame.get("_style") is not None:
             continue
         pos = next((p for p in at_target.get(frame["start_index"], ())
-                    if id(reading[p]) not in copy_of and abs(reading[p]["_y"] - dest_y[b]) <= _DEST_TOL), None)
+                    if id(reading[p]) not in copy_of and abs(reading[p]["_y"] - dest_y[b]) <= _DEST_TOL
+                    and (_extends(reading[p]["title"], frame["title"]) or _says_same(reading[p]["title"], frame["title"]))),
+                   None)
         if pos is None:
             continue
         node = reading[pos]
         glued = _extends(node["title"], frame["title"])
-        if not glued and not _says_same(node["title"], frame["title"]):
-            continue
         if not glued:
             copy_of[id(node)] = b
             first_copy[b] = pos

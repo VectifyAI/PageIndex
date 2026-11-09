@@ -395,6 +395,16 @@ def test_heading_at_a_bookmark_target_saying_its_words_is_its_print(printed, kep
     assert "Overall Summary" in _children(merged, parent)
 
 
+def test_bookmark_print_worded_otherwise_is_found_past_another_heading_at_its_height():
+    entries, detected = _chapters(False)
+    entries[3]["y"] = 0.1
+    detected[3]["title"] = "Exchanges of feedback"
+    detected.insert(3, _node("Methods", 11, style="S", y=0.1))  # the left column's heading, read first
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert "Exchanges of feedback" not in _titles(merged)
+    assert "Methods" in _children(merged, "Chapter 2")
+
+
 @pytest.mark.parametrize("studies_prints_it", [False, True])  # one print outside the minors leaves most of them one apiece
 def test_heading_stopped_halfway_before_a_part_each_section_prints_is_a_part(studies_prints_it):
     entries = [{"title": "Studies", "level": 1, "page": 1}]
