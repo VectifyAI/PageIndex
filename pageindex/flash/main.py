@@ -253,8 +253,9 @@ def extract_toc(
 
     # ----- 11) Outline assembly and validation gate ---------------------
     outline_nodes = assemble_outline(doc, section_openers)
-    # Validate the assembled outline. Structured outlines are kept as they
-    # are; unstructured outlines are filtered by density gap.
+    # Validate the assembled outline. One with three or more References
+    # headings, as in collected articles, is kept as it is; other outlines
+    # are filtered by density gap.
     # The abstract/references signal rides along with this gate: it is False on
     # the valid-outline branch, and on the other branch it is read off the
     # possibly-emptied list once the density filter has run.
