@@ -1383,19 +1383,44 @@ def merge_bookmark_tree(
 
     survey(structure)
 
+    def recurs(node: dict) -> bool:
+        return len(title_copies[_normalize_title(node["title"])]) >= _BACKFILL_DUP_MIN
+
+    # The section headings read before each detected heading: the titles that do not recur
+    order: dict[int, int] = {}
+    heads_before = [0]
+    for pos, node in enumerate(walk(structure)):
+        order[id(node)] = pos
+        heads_before.append(heads_before[-1] + (not recurs(node)))
+
+    def one_section(a: dict, b: dict) -> bool:
+        """Two headings a page apart at most, with no bookmark and no section heading read between them."""
+        return (b["start_index"] - a["start_index"] <= 1
+                and anchor_index(a["start_index"]) == anchor_index(b["start_index"])
+                and heads_before[order[id(b)]] == heads_before[order[id(a)] + 1])
+
+    def in_a_row(node: dict) -> bool:
+        """Another recurring title sits on the heading's line."""
+        return node.get("_y") is not None and any(
+            other is not node and other.get("_y") is not None
+            and abs(other["_y"] - node["_y"]) <= _DEST_TOL and recurs(other)
+            for other in page_heads[node["start_index"]])
+
     def filtered_out(node: dict) -> bool:
         norm = _normalize_title(node["title"])
         # a bookmark's own print heads its section: no recurrence of a label
         copies = [copy for copy in title_copies.get(norm, ()) if id(copy) not in bookmark_prints]
-        pages = sorted(copy["start_index"] for copy in copies)
-        # a title a bookmark carries in this print is a section wherever it recurs; a running label repeats page
-        # after page within one bookmark's section; a section each part repeats is printed like a bookmark's
-        # heading, or written like one and opening text
-        if (norm and len(pages) >= _BACKFILL_DUP_MIN and (norm, node.get("_style")) not in section_prints
-                and not (all(b - a > 1 or anchor_index(a) != anchor_index(b) for a, b in zip(pages, pages[1:]))
-                         and (node.get("_style") in section_styles
-                              or (not any(any(_marks(copy)) for copy in copies)
-                                  and any(copy.get("_prose_follows") for copy in copies))))):
+        alike = [copy for copy in copies if copy.get("_style") == node.get("_style")]
+        # a title a bookmark carries in this print is a section wherever it recurs; a label repeats within one
+        # section, or sits on a line with another recurring title as most of its copies in this print do (a
+        # table's header row); a section each part repeats is printed like a bookmark's heading, or written like
+        # one and opening text
+        if (norm and len(copies) >= _BACKFILL_DUP_MIN and (norm, node.get("_style")) not in section_prints
+                and ((in_a_row(node) and 2 * sum(map(in_a_row, alike)) > len(alike))
+                     or any(one_section(a, b) for a, b in zip(copies, copies[1:]))
+                     or not (node.get("_style") in section_styles
+                             or (not any(any(_marks(copy)) for copy in copies)
+                                 and any(copy.get("_prose_follows") for copy in copies))))):
             return True
         return len(node["title"]) > _BACKFILL_MAX_TITLE
 

@@ -676,18 +676,55 @@ def test_recurring_title_written_like_a_heading_and_opening_text_is_kept():
     assert [_children(merged, f"Meeting {n}") for n in range(1, 4)] == [["Staff Outlook"]] * 3
 
 
-@pytest.mark.parametrize("topic_2, kept", [
-    (12, True),  # on adjacent pages, but each in its own section
-    (13, False),  # page after page in one section: a running label
+@pytest.mark.parametrize("topic_2, printed, kept", [
+    (12, True, True),  # on adjacent pages, but each in its own section
+    (12, False, True),  # a bookmark without a print parts them too
+    (13, True, False),  # page after page in one section: a label
 ])
-def test_recurring_title_on_adjacent_pages_runs_only_within_one_section(topic_2, kept):
+def test_recurring_title_on_adjacent_pages_runs_only_within_one_section(topic_2, printed, kept):
     pages = {"Topic 1": 11, "Topic 2": topic_2, "Topic 3": 14}
     entries = [{"title": title, "level": 1, "page": page} for title, page in pages.items()]
-    detected = [_node(title, page, style="T", y=0.1) for title, page in pages.items()]
+    detected = [_node(title, page, style="T", y=0.1) for title, page in pages.items() if printed or title != "Topic 2"]
     detected += [dict(_node("Stakeholder views", page, style="S", y=0.5), _prose_follows=True) for page in (11, 12, 14)]
     detected.sort(key=lambda node: (node["start_index"], node["_y"]))
     merged = merge_bookmark_tree(detected, entries, n_pages=20)
     assert ("Stakeholder views" in _titles(merged)) is kept
+
+
+@pytest.mark.parametrize("between, kept", [
+    (["Part B"], True),  # a section heading between the copies: each part has its own
+    ([], False),  # nothing between them: a label repeating within one section
+    (["Notes"], False),  # only another recurring title between them
+])
+def test_recurring_title_repeats_within_one_section_only_with_no_section_heading_between(between, kept):
+    entries = [{"title": "Topic 1", "level": 1, "page": 11}, {"title": "Topic 2", "level": 1, "page": 20}]
+    detected = [_node("Topic 1", 11, style="T", y=0.1), _node("Topic 2", 20, style="T", y=0.1)]
+    detected += [dict(_node("Stakeholder views", page, style="S", y=0.5), _prose_follows=True) for page in (11, 12, 14)]
+    detected += [_node(title, 12, style="P", y=0.2) for title in between]
+    detected += [_node("Notes", page, style="P", y=0.8) for page in (15, 17)]
+    detected.sort(key=lambda node: (node["start_index"], node["_y"]))
+    merged = merge_bookmark_tree(detected, entries, n_pages=25)
+    assert ("Stakeholder views" in _titles(merged)) is kept
+
+
+@pytest.mark.parametrize("beside, heights, others, requirements, cells", [
+    (["First-Years"] * 3, [0.5] * 3, 0, 1, 0),  # a header row on three pages: its cells go, the lone heading stays
+    (["Alpha", "Beta", "Gamma"], [0.5] * 3, 0, 4, 3),  # beside a title that does not recur: two columns' headings
+    (["First-Years"] * 3, [0.5, 0.8, 0.8], 0, 4, 3),  # on such a line once: a coincidence
+    (["First-Years"] * 3, [0.5] * 3, 4, 1, 0),  # copies in another print do not dilute the row
+])
+def test_recurring_title_mostly_on_a_line_with_another_is_a_table_header_cell(beside, heights, others, requirements, cells):
+    entries = [{"title": f"Topic {n}", "level": 1, "page": 10 * n} for n in range(1, 10)]
+    detected = [_node(f"Topic {n}", 10 * n, style="T", y=0.1) for n in range(1, 10)]
+    for n, (title, height) in enumerate(zip(beside, heights), 1):
+        detected.append(dict(_node("Requirements", 10 * n + 1, style="S", y=0.5), _prose_follows=True))
+        detected.append(dict(_node(title, 10 * n + 1, style="S", y=height + 0.005), _prose_follows=True))
+    detected.append(dict(_node("Requirements", 41, style="S", y=0.5), _prose_follows=True))
+    detected += [dict(_node("Requirements", 10 * n + 1, style="L", y=0.5), _prose_follows=True) for n in range(5, 5 + others)]
+    detected.sort(key=lambda node: (node["start_index"], node["_y"]))
+    titles = _titles(merge_bookmark_tree(detected, entries, n_pages=100))
+    assert titles.count("Requirements") == requirements + others
+    assert sum(titles.count(title) for title in set(beside)) == cells
 
 
 @pytest.mark.parametrize("bookmark, print_style, kept", [
