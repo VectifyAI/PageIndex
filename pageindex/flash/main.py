@@ -116,6 +116,26 @@ def page_by_block_lookup(pages, block) -> Optional[PageView]:
     return None
 
 
+def _group_first_document(doc, title_winner, outline_nodes: list[OutlineNode]) -> list[OutlineNode]:
+    """A compilation with no cover page opens with its first document, whose
+    title is the document title. Once a later top-level heading styled as
+    that title starts plain numbering over at 1, the top-level sections before
+    it are that first document's, so they go under the title."""
+    from .heading_detection import PageScanState, classify_heading, similar_style
+
+    def is_one(node):
+        return node.heading.type == 1 and node.heading.numbering == [1]
+
+    for index, node in enumerate(outline_nodes[1:], 1):
+        if (not node.heading.numbering and any(is_one(child) for child in node.child_nodes)
+                and any(is_one(earlier) for earlier in outline_nodes[:index])
+                and any(similar_style(node.heading.group_slot, block) for block in title_winner.output_slot)):
+            first = OutlineNode(classify_heading(PageScanState(doc, title_winner.page), title_winner.output_slot[0]))
+            first.child_nodes = outline_nodes[:index]
+            return [first, *outline_nodes[index:]]
+    return outline_nodes
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end entry point #
 # --------------------------------------------------------------------------- #
@@ -252,7 +272,9 @@ def extract_toc(
     # second doc-wide pass would double-count headers and pollute title scoring.
 
     # ----- 11) Outline assembly and validation gate ---------------------
-    outline_nodes = assemble_outline(doc, section_openers)
+    outline_nodes = assemble_outline(doc, section_openers, title_winner.output_slot if title_winner is not None else ())
+    if title_winner is not None:
+        outline_nodes = _group_first_document(doc, title_winner, outline_nodes)
     # Validate the assembled outline. One with three or more References
     # headings, as in collected articles, is kept as it is; other outlines
     # are filtered by density gap.

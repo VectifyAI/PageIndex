@@ -209,10 +209,10 @@ def continue_numbering(doc, clusters: list[dict], start: int, heading: HeadingCa
         candidates.insert(position, follower)
 
 
-def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
-    """Produce the outline tree as a list of outline nodes. Arguments: ``doc`` is the document state; ``labeled`` is the list of outline nodes wrapping labeled headings. Output is a list of root outline nodes. Each node contains child nodes recursively. """
+def assemble_outline(doc, labeled: list[OutlineNode], title_blocks=()) -> list[OutlineNode]:
+    """Produce the outline tree as a list of outline nodes. Arguments: ``doc`` is the document state; ``labeled`` is the list of outline nodes wrapping labeled headings; ``title_blocks`` are the document title's blocks. Output is a list of root outline nodes. Each node contains child nodes recursively. """
     # ----- Stage 1: collect general headings.
-    from ..heading_detection import build_doc_heading_candidates
+    from ..heading_detection import build_doc_heading_candidates, similar_style, matches_references
     # Labeled headings prime the type gates used by general heading filtering.
     general: list[HeadingCandidate] = build_doc_heading_candidates(doc, labeled)
 
@@ -247,13 +247,25 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
     if not state.measure_slot and state.option_slot <= state.previous_slot:
         return []
 
+    def is_references(heading):
+        return heading.primary_slot is not None and matches_references(heading.primary_slot)
+
     out: list[OutlineNode] = []
+    references_seen = False
     for cluster_index, cluster in enumerate(clusters):
         cluster_anchor = cluster.get("labeled_anchor")
         cluster_candidates = cluster.get("cluster_candidates", [])
         if cluster_anchor is not None:
             previous = state.auxiliary_slot
             push_heading_to_state(state, cluster_anchor.heading)
+            # After a References heading, an unnumbered top-level heading styled
+            # as the document title opens another document bound into this one,
+            # which numbers its sections from 1 again.
+            if references_seen and not cluster_anchor.heading.numbering and any(
+                    similar_style(cluster_anchor.heading.group_slot, block) for block in title_blocks):
+                state.tertiary_slot = 0
+                references_seen = False
+            references_seen = references_seen or is_references(cluster_anchor.heading)
             cluster_anchor.heading.group_slot.used_as_heading = True
             out.append(cluster_anchor)
             continue_numbering(doc, clusters, cluster_index, cluster_anchor.heading, previous, True)
@@ -268,6 +280,7 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
                 continue
             previous = state.auxiliary_slot
             push_heading_to_state(state, insertion_candidate)
+            references_seen = references_seen or is_references(insertion_candidate)
             insertion_candidate.group_slot.used_as_heading = True
             stack_outline_node = OutlineNode(insertion_candidate)
             parent = find_parent_heading(stack, insertion_candidate)

@@ -756,6 +756,32 @@ def test_reports_numbered_from_1_again_stay_side_by_side(tmp_path):
         assert [child["title"] for child in top[title]["nodes"]] == ["References"]
 
 
+@pytest.mark.parametrize("cover", [False, True])
+def test_proceedings_papers_keep_their_sections(tmp_path, cover):
+    """Papers bound into proceedings, each titled at a page top with its
+    sections in bold and numbered from 1 again, ending in References: every
+    paper is a top-level node holding its own sections. With no cover page
+    the first paper's title is the document title and still opens its node."""
+    from pageindex.flash.main import extract_toc
+
+    sections = ["1 Introduction", "2 Method", "3 Results", "4 Discussion"]
+    papers = ["Sketching Streams", "Robust Hashing", "Learned Indexes", "Private Queries"]
+    pages = [("Proceedings Volume", ["Workshop proceedings."])] if cover else []
+    # A different section tops each paper's second page: the same text in the
+    # same spot on every paper would read as a running header.
+    for title, top in zip(papers, [2, 3, 2, 4]):
+        body = _body(title)
+        sections_on = lambda chosen: [line for section in chosen for line in (("bold", section), *body[:3])]
+        pages += [(title, ["Abstract. " + body[0], *body[1:3], *sections_on(sections[:top - 1])]),
+                  ("", sections_on(sections[top - 1:])),
+                  ("", [*body[:3], ("bold", "References"), *[f"{n}. Author A. A paper. J. 2023;{n}:1-9." for n in range(1, 5)]])]
+    pdf = tmp_path / "proceedings.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    structure = extract_toc(str(pdf))["structure"]
+    assert [(node["title"], [child["title"] for child in node["nodes"]]) for node in structure] == [
+        (title, [*sections, "References"]) for title in papers]
+
+
 def _body(title):
     return [f"Line {n} of the {title.lower()} section with some body text."
             for n in range(1, 6)]
