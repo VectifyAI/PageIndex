@@ -69,11 +69,14 @@ _MIN_SECTION_GAP = 0.15
 _DEST_TOL = 0.02
 
 # Backfill noise filters: a normalized title recurring this often across the
-# detected tree is a running label, not a section (unless never on adjacent
-# pages of one section and printed like a bookmark's heading or opening text:
-# a chapter's "Notes"); a title longer than this is a paragraph lead picked up as a heading.
+# detected tree is a label, not a section, when it repeats within one section
+# or is neither printed like a bookmark's heading nor opening text (a chapter's
+# "Notes" stays); a title longer than this is a paragraph lead picked up as a heading.
 _BACKFILL_DUP_MIN = 3
 _BACKFILL_MAX_TITLE = 100
+
+# A line opening with one of these is a list item
+_LIST_BULLETS = ("•", "◦", "▪", "·")
 
 _GENERIC_TITLE = re.compile(
     r"^(?:(?:page|slide|folie|document\s+page)\s*)?\d+$", re.IGNORECASE
@@ -1034,6 +1037,54 @@ def _unique_key(scheme: tuple, values: tuple) -> tuple:
     return ((False, "digit") if family in _NUMBERED_LABELS else family, values)
 
 
+def drop_label_headings(structure: list[dict]) -> list[dict]:
+    """Flash's headings without the list items ("• iPhones") and the cells of a table's header row among them."""
+    copies: dict[str, list[dict]] = {}
+    on_page: dict[int, list[dict]] = {}
+
+    def survey(nodes: list[dict]) -> None:
+        for node in nodes:
+            copies.setdefault(_normalize_title(node["title"]), []).append(node)
+            on_page.setdefault(node["start_index"], []).append(node)
+            survey(node.get("nodes") or [])
+
+    survey(structure)
+
+    def recurs(node: dict) -> bool:
+        norm = _normalize_title(node["title"])
+        return bool(norm) and len(copies[norm]) >= _BACKFILL_DUP_MIN
+
+    def in_a_row(node: dict) -> bool:
+        """Another recurring title sits on the heading's line."""
+        return node.get("_y") is not None and any(
+            other is not node and other.get("_y") is not None
+            and abs(other["_y"] - node["_y"]) <= _DEST_TOL and recurs(other)
+            for other in on_page[node["start_index"]])
+
+    def label(node: dict) -> bool:
+        if (node.get("_lines") or [[node["title"]]])[0][0].lstrip().startswith(_LIST_BULLETS):
+            return True
+        if not (recurs(node) and in_a_row(node)):
+            return False
+        # a header cell sits on such a line as most copies of its title in that print do: two columns' headings
+        # that meet at one height once stay
+        alike = [copy for copy in copies[_normalize_title(node["title"])] if copy.get("_style") == node.get("_style")]
+        return 2 * sum(map(in_a_row, alike)) > len(alike)
+
+    def prune(nodes: list[dict]) -> list[dict]:
+        kept: list[dict] = []
+        for node in nodes:
+            children = prune(node.get("nodes") or [])
+            if label(node):
+                kept.extend(children)
+            else:
+                node["nodes"] = children
+                kept.append(node)
+        return kept
+
+    return prune(structure)
+
+
 def merge_bookmark_tree(
     structure: list[dict], entries: list[dict], n_pages: int,
     toc: Optional[list[dict]] = None,
@@ -1399,25 +1450,15 @@ def merge_bookmark_tree(
                 and anchor_index(a["start_index"]) == anchor_index(b["start_index"])
                 and heads_before[order[id(b)]] == heads_before[order[id(a)] + 1])
 
-    def in_a_row(node: dict) -> bool:
-        """Another recurring title sits on the heading's line."""
-        return node.get("_y") is not None and any(
-            other is not node and other.get("_y") is not None
-            and abs(other["_y"] - node["_y"]) <= _DEST_TOL and recurs(other)
-            for other in page_heads[node["start_index"]])
-
     def filtered_out(node: dict) -> bool:
         norm = _normalize_title(node["title"])
         # a bookmark's own print heads its section: no recurrence of a label
         copies = [copy for copy in title_copies.get(norm, ()) if id(copy) not in bookmark_prints]
-        alike = [copy for copy in copies if copy.get("_style") == node.get("_style")]
         # a title a bookmark carries in this print is a section wherever it recurs; a label repeats within one
-        # section, or sits on a line with another recurring title as most of its copies in this print do (a
-        # table's header row); a section each part repeats is printed like a bookmark's heading, or written like
-        # one and opening text
+        # section; a section each part repeats is printed like a bookmark's heading, or written like one and
+        # opening text
         if (norm and len(copies) >= _BACKFILL_DUP_MIN and (norm, node.get("_style")) not in section_prints
-                and ((in_a_row(node) and 2 * sum(map(in_a_row, alike)) > len(alike))
-                     or any(one_section(a, b) for a, b in zip(copies, copies[1:]))
+                and (any(one_section(a, b) for a, b in zip(copies, copies[1:]))
                      or not (node.get("_style") in section_styles
                              or (not any(any(_marks(copy)) for copy in copies)
                                  and any(copy.get("_prose_follows") for copy in copies))))):
@@ -2589,5 +2630,5 @@ __all__ = [
     "IGNORE", "SKELETON", "FULL",
     "read_bookmarks", "validate_bookmarks", "classify_bookmarks",
     "bookmarks_to_structure", "merge_bookmark_skeleton", "merge_bookmark_tree",
-    "read_printed_toc", "apply_embedded_toc",
+    "read_printed_toc", "apply_embedded_toc", "drop_label_headings",
 ]

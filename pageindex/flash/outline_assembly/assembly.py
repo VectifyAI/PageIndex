@@ -23,6 +23,7 @@ from .candidates import (
 from .style_context import (
     OutlineState,
     compare_heading_depth,
+    position_ranks,
 )
 from .cliques import (
     block_style_signature,
@@ -237,6 +238,7 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
         # No dedup here: duplicate candidates that wrap the same block are
         # collapsed downstream by partitioning and already-placed-block checks.
         general = sorted(general, key=heading_order_key)
+    ranks = position_ranks(general)
 
     # ----- Stage 3: partition + cluster
     if labeled:
@@ -277,7 +279,7 @@ def assemble_outline(doc, labeled: list[OutlineNode]) -> list[OutlineNode]:
             push_heading_to_state(state, insertion_candidate)
             insertion_candidate.group_slot.used_as_heading = True
             stack_outline_node = OutlineNode(insertion_candidate)
-            parent = find_parent_heading(stack, insertion_candidate)
+            parent = find_parent_heading(stack, insertion_candidate, ranks)
             if parent is not None:
                 parent.child_nodes.append(stack_outline_node)
             elif cluster_anchor is not None:
@@ -404,7 +406,8 @@ def outline_to_dict_tree(outline_node_list: list[OutlineNode], total_pages: int)
             result.append(node)
         return result
 
-    root = _walk_nodes(outline_node_list)
+    from ..embedded_toc import drop_label_headings  # imported here: embedded_toc imports this package
+    root = drop_label_headings(_walk_nodes(outline_node_list))
 
     # Fill end_index via DFS-order next-start - 1; last node extends to doc end.
     flat: list[dict] = []

@@ -4,7 +4,8 @@ from io import BytesIO
 import pytest
 
 from pageindex.flash.embedded_toc import (
-    _heading_line_reader, _page_line_reader, _readings, merge_bookmark_tree, read_bookmarks, read_printed_toc)
+    _heading_line_reader, _page_line_reader, _readings, drop_label_headings, merge_bookmark_tree, read_bookmarks,
+    read_printed_toc)
 
 
 def _node(title, start, children=(), style=None, y=None):
@@ -714,17 +715,22 @@ def test_recurring_title_repeats_within_one_section_only_with_no_section_heading
     (["First-Years"] * 3, [0.5] * 3, 4, 1, 0),  # copies in another print do not dilute the row
 ])
 def test_recurring_title_mostly_on_a_line_with_another_is_a_table_header_cell(beside, heights, others, requirements, cells):
-    entries = [{"title": f"Topic {n}", "level": 1, "page": 10 * n} for n in range(1, 10)]
     detected = [_node(f"Topic {n}", 10 * n, style="T", y=0.1) for n in range(1, 10)]
     for n, (title, height) in enumerate(zip(beside, heights), 1):
-        detected.append(dict(_node("Requirements", 10 * n + 1, style="S", y=0.5), _prose_follows=True))
-        detected.append(dict(_node(title, 10 * n + 1, style="S", y=height + 0.005), _prose_follows=True))
-    detected.append(dict(_node("Requirements", 41, style="S", y=0.5), _prose_follows=True))
-    detected += [dict(_node("Requirements", 10 * n + 1, style="L", y=0.5), _prose_follows=True) for n in range(5, 5 + others)]
+        detected.append(_node("Requirements", 10 * n + 1, style="S", y=0.5))
+        detected.append(_node(title, 10 * n + 1, style="S", y=height + 0.005))
+    detected.append(_node("Requirements", 41, style="S", y=0.5))
+    detected += [_node("Requirements", 10 * n + 1, style="L", y=0.5) for n in range(5, 5 + others)]
     detected.sort(key=lambda node: (node["start_index"], node["_y"]))
-    titles = _titles(merge_bookmark_tree(detected, entries, n_pages=100))
+    titles = _titles(drop_label_headings(detected))
     assert titles.count("Requirements") == requirements + others
     assert sum(titles.count(title) for title in set(beside)) == cells
+
+
+def test_list_item_set_like_a_heading_is_dropped_and_its_children_stay():
+    detected = [_node("Pairing", 1, [_node("• iPhones", 2, [_node("Settings", 3)]), _node("- Dash", 4)]),
+                _node("*Starred", 5), _node("Mode • Auto", 6)]
+    assert _titles(drop_label_headings(detected)) == ["Pairing", "Settings", "- Dash", "*Starred", "Mode • Auto"]
 
 
 @pytest.mark.parametrize("bookmark, print_style, kept", [
