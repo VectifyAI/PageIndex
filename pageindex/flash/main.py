@@ -21,7 +21,7 @@ from .classification import is_body_paragraph, detect_header_footer, HeaderFoote
 from .labels import detect_captions, build_caption_regions, CaptionContext
 from .model import Rect, numbering_kind, block_text, deaccented_text, Block
 from .outline_assembly import (
-    build_heading_from_block, is_outline_valid, is_chapter_outline_valid, mark_outline_block_types, assemble_outline, compute_max_heading_gap, has_table_or_prominent, OutlineNode, outline_to_dict_tree,
+    build_heading_from_block, is_outline_valid, mark_outline_block_types, assemble_outline, compute_max_heading_gap, has_table_or_prominent, OutlineNode, outline_to_dict_tree,
 )
 from .parser_pdfium_parallel import parse_charlevel_meta_parallel
 from .phases import assign_reading_order, PageView, process_page
@@ -253,14 +253,12 @@ def extract_toc(
 
     # ----- 11) Outline assembly and validation gate ---------------------
     outline_nodes = assemble_outline(doc, section_openers)
-    # Validate the assembled outline. Structured outlines must cover enough
-    # chapters; unstructured outlines are filtered by density gap.
+    # Validate the assembled outline. Structured outlines are kept as they
+    # are; unstructured outlines are filtered by density gap.
     # The abstract/references signal rides along with this gate: it is False on
     # the valid-outline branch, and on the other branch it is read off the
     # possibly-emptied list once the density filter has run.
     if is_outline_valid(doc, outline_nodes):
-        if not is_chapter_outline_valid(doc, outline_nodes):
-            outline_nodes = []
         has_abstract_or_references = False
     else:
         mark_outline_block_types(outline_nodes)

@@ -718,6 +718,23 @@ def test_short_document_headings_are_detected(tmp_path):
     assert result["doc_title"] == "Mission"
 
 
+def test_articles_ending_in_references_keep_their_outline(tmp_path):
+    """A journal issue whose articles each end in a References list keeps its
+    article outline, though no heading reads "Chapter N"."""
+    from pageindex.flash.main import extract_toc
+
+    articles = ["Oral Oncolytics", "A New Front Door", "Remote Monitoring"]
+    pages = [("Issue Contents", ["Volume 38, number 3 of the journal."])]
+    for title in articles:
+        pages.append((title, _body(title)))
+        pages.append(("", _body(title)[:3] + [("bold", "References")]
+                      + [f"{n}. Author A. A paper. J Onc. 2023;{n}:1-9." for n in range(1, 5)]))
+    pdf = tmp_path / "issue.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == articles
+
+
 def _body(title):
     return [f"Line {n} of the {title.lower()} section with some body text."
             for n in range(1, 6)]

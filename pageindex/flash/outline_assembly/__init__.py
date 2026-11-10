@@ -80,7 +80,6 @@ from .selection import (
     extract_sub_headings,
     extract_top_level_headings,
     is_outline_valid,
-    is_chapter_outline_valid,
 )
 from .assembly import (
     mark_outline_block_types,
@@ -101,7 +100,7 @@ __all__ = [
     "OutlineState",
     "find_keyword_clique", "detect_body_headings", "CliqueFilterContext",
     "partition_candidates", "interleave_clusters", "push_heading_to_state", "should_reject_heading", "find_parent_heading", "HierarchyStack", "extract_sub_headings", "min_font_distance",
-    "extract_top_level_headings", "is_outline_valid", "is_chapter_outline_valid", "mark_outline_block_types", "compute_max_heading_gap", "has_table_or_prominent",
+    "extract_top_level_headings", "is_outline_valid","mark_outline_block_types", "compute_max_heading_gap", "has_table_or_prominent",
     "build_heading_from_block",
     "assemble_outline",
     "outline_to_dict_tree",
