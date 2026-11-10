@@ -228,7 +228,7 @@ def extract_toc(
 
     from .heading_detection import find_section_openers as _find_section_openers
     title_page_idx = title_winner.page.page_index if title_winner is not None else 0
-    section_openers = _find_section_openers(doc, title_page_idx)
+    section_openers = _find_section_openers(doc, title_page_idx, title_winner.output_slot if title_winner is not None else ())
 
     # ----- 10) Extend labeled sections and claim body blocks ------------
     # Each labeled heading keeps its label type; body blocks are marked with

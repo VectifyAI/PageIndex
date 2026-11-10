@@ -735,6 +735,27 @@ def test_articles_ending_in_references_keep_their_outline(tmp_path):
     assert [node["title"] for node in result["structure"]] == articles
 
 
+def test_reports_numbered_from_1_again_stay_side_by_side(tmp_path):
+    """Reports bound into one PDF, the first on page 1 so its title is the
+    document's, each number their chapters from 1 again: every later report
+    stays a top-level node holding its own References, not a child of the
+    last chapter of the report before it."""
+    from pageindex.flash.main import extract_toc
+
+    reports = ["Sketching Streams", "Robust Hashing", "Learned Indexes"]
+    pages = []
+    for title in reports:
+        pages += [(title, _body(title)), ("1 Introduction", _body(title)), ("2 Method", _body(title)),
+                  ("", _body(title)[:3] + [("bold", "References")]
+                   + [f"{n}. Author A. A paper. J. 2023;{n}:1-9." for n in range(1, 5)])]
+    pdf = tmp_path / "reports.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    result = extract_toc(str(pdf))
+    top = {node["title"]: node for node in result["structure"]}
+    for title in reports[1:]:
+        assert [child["title"] for child in top[title]["nodes"]] == ["References"]
+
+
 def _body(title):
     return [f"Line {n} of the {title.lower()} section with some body text."
             for n in range(1, 6)]
