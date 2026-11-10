@@ -690,6 +690,24 @@ def test_recurring_title_on_adjacent_pages_runs_only_within_one_section(topic_2,
     assert ("Stakeholder views" in _titles(merged)) is kept
 
 
+@pytest.mark.parametrize("bookmark, print_style, kept", [
+    ("Stakeholder views", "S", True),
+    ("Stakeholder views", "X", False),  # the bookmark prints otherwise
+    ("Stakeholder views and replies", "S", False),  # a longer title, cut in print
+])
+def test_title_a_bookmark_carries_in_the_same_print_is_a_section_wherever_it_recurs(bookmark, print_style, kept):
+    entries = [{"title": "Topic 0", "level": 1, "page": 5}, {"title": bookmark, "level": 2, "page": 6},
+               {"title": "Topic 1", "level": 1, "page": 11}, {"title": "Topic 2", "level": 1, "page": 13}]
+    detected = [_node("Topic 0", 5, style="T", y=0.1), _node("Stakeholder views", 6, style=print_style, y=0.5),
+                _node("Topic 1", 11, style="T", y=0.1), _node("Topic 2", 13, style="T", y=0.1)]
+    # page after page in one section, as a running label sits
+    detected += [dict(_node("Stakeholder views", page, style="S", y=0.5), _prose_follows=True) for page in (11, 12, 14)]
+    detected.sort(key=lambda node: (node["start_index"], node["_y"]))
+    merged = merge_bookmark_tree(detected, entries, n_pages=20)
+    assert (_children(merged, "Topic 1") == ["Stakeholder views"] * 2) is kept
+    assert (_children(merged, "Topic 2") == ["Stakeholder views"]) is kept
+
+
 def test_bookmarks_own_print_is_no_recurrence_of_its_title():
     entries = [{"title": "Data Science Minor", "level": 1, "page": 5},
                {"title": "Data Science, B.S.", "level": 1, "page": 10},
@@ -1025,6 +1043,38 @@ def test_unprinted_bookmark_sits_at_its_target_when_asked_if_a_peer_leaves_it_em
                 _node("Terms", 4, style="G B 11.0 true", y=0.1)]
     merged = merge_bookmark_tree(detected, entries, n_pages=5)
     assert [n["title"] for n in merged] == ["Definitions", "Parties", "Background", "Terms"]
+
+
+@pytest.mark.parametrize("heading, parent", [
+    ("8.4.8 Learning the graph structure", "8.4 Inference"),  # numbered inside the section "Exercises" closes
+    ("Learning the graph structure", "Exercises"),
+])
+def test_bookmark_follows_the_same_page_headings_numbered_inside_a_section_it_closes(heading, parent):
+    entries = [{"title": "8 Graphical Models", "level": 1, "page": 1},
+               {"title": "8.4 Inference", "level": 2, "page": 2},
+               {"title": "8.4.7 Loopy belief propagation", "level": 3, "page": 3},
+               {"title": "Exercises", "level": 2, "page": 4},
+               {"title": "9 Mixture Models", "level": 1, "page": 10}]
+    detected = [_node("8 Graphical Models", 1, style="C", y=0.1), _node("8.4 Inference", 2, style="S", y=0.1),
+                _node("8.4.7 Loopy belief propagation", 3, style="T", y=0.1), _node(heading, 4, style="T", y=0.3),
+                _node("9 Mixture Models", 10, style="C", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=12)
+    assert heading in _children(merged, parent)
+
+
+@pytest.mark.parametrize("closed, code, parent", [
+    ("Pediculosis (B85-B89)", "B88.3 External hirudiniasis", "Pediculosis (B85-B89)"),
+    ("Burns and corrosions (B80-B93)", "B91 Sequelae of poliomyelitis", "Sequelae (B90-B94)"),  # coded inside both
+])
+def test_bookmark_follows_the_same_page_headings_coded_inside_a_block_it_closes(closed, code, parent):
+    entries = [{"title": "Chapter 1 (A00-B99)", "level": 1, "page": 1},
+               {"title": closed, "level": 2, "page": 2},
+               {"title": "Sequelae (B90-B94)", "level": 2, "page": 3},
+               {"title": "Chapter 2 (C00-D49)", "level": 1, "page": 10}]
+    detected = [_node("Chapter 1 (A00-B99)", 1, style="C", y=0.1), _node(closed, 2, style="S", y=0.1),
+                _node(code, 3, style="K", y=0.2), _node("Chapter 2 (C00-D49)", 10, style="C", y=0.1)]
+    merged = merge_bookmark_tree(detected, entries, n_pages=12)
+    assert code in _children(merged, parent)
 
 
 @pytest.mark.parametrize("between, parent", [

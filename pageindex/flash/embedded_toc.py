@@ -1365,6 +1365,7 @@ def merge_bookmark_tree(
     # Styles a bookmark's own printed heading uses, and those headings
     section_styles: set[str] = set()
     bookmark_prints: set[int] = set()
+    section_prints: set[tuple[str, str]] = set()  # a bookmark's title in the style it prints in
     style_matches: dict[int, Optional[str]] = {}
 
     def survey(nodes: list[dict]) -> None:
@@ -1372,10 +1373,12 @@ def merge_bookmark_tree(
             norm = _normalize_title(node["title"])
             title_copies.setdefault(norm, []).append(node)
             idx = anchor_index(node["start_index"])
-            if (node.get("_style") is not None and idx is not None
-                    and dissolve_target(node, idx, style_matches) is not None):
+            target = (dissolve_target(node, idx, style_matches)
+                      if node.get("_style") is not None and idx is not None else None)
+            if target is not None:
                 section_styles.add(node["_style"])
                 bookmark_prints.add(id(node))
+                section_prints.add((_normalize_title(flat[target]["title"]), node["_style"]))
             survey(node.get("nodes") or [])
 
     survey(structure)
@@ -1385,9 +1388,10 @@ def merge_bookmark_tree(
         # a bookmark's own print heads its section: no recurrence of a label
         copies = [copy for copy in title_copies.get(norm, ()) if id(copy) not in bookmark_prints]
         pages = sorted(copy["start_index"] for copy in copies)
-        # a running label repeats page after page within one bookmark's section; a section each part repeats is
-        # printed like a bookmark's heading, or written like one and opening text
-        if (norm and len(pages) >= _BACKFILL_DUP_MIN
+        # a title a bookmark carries in this print is a section wherever it recurs; a running label repeats page
+        # after page within one bookmark's section; a section each part repeats is printed like a bookmark's
+        # heading, or written like one and opening text
+        if (norm and len(pages) >= _BACKFILL_DUP_MIN and (norm, node.get("_style")) not in section_prints
                 and not (all(b - a > 1 or anchor_index(a) != anchor_index(b) for a, b in zip(pages, pages[1:]))
                          and (node.get("_style") in section_styles
                               or (not any(any(_marks(copy)) for copy in copies)
@@ -1561,6 +1565,19 @@ def merge_bookmark_tree(
                     >= _numeral_depth(frame["title"]))):
             ahead += 1
             slot = ahead
+        # a same-page heading numbered or coded inside a bookmark this one closes, and not inside this one, goes ahead
+        # ("8.4.8" before "Exercises", "B88.3" before "(B90-B94)")
+        closed = []
+        p = b - 1 if b > 0 else None
+        while p is not None and p != parent_pos[b]:
+            closed.append(p)
+            p = parent_pos[p]
+        while (closed and slot < len(reading) and reading[slot]["start_index"] == page
+               and any(numbered_inside(reading[slot]["title"], c) or _code_within(reading[slot]["title"], flat[c]["title"])
+                       for c in closed)
+               and not numbered_inside(reading[slot]["title"], b)
+               and not _code_within(reading[slot]["title"], frame["title"])):
+            slot += 1
         # a label line or a heading numbered inside the bookmark goes with it
         while (slot > prev and reading[slot - 1]["start_index"] == page
                and id(reading[slot - 1]) not in copy_of
