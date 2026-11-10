@@ -761,6 +761,22 @@ def _body(title):
             for n in range(1, 6)]
 
 
+def test_heading_starting_with_a_caption_word_is_a_heading(tmp_path):
+    """A heading whose first word is a caption word ("Graph", "Chart",
+    "Table", "Figure") followed by a plain word stays a heading. One followed
+    by a label ("Table A", "Figure SA-08.0") or abbreviated ("Fig.") is still
+    a caption."""
+    from pageindex.flash.main import extract_toc
+
+    titles = ["Overview", "Graph Theory", "Table A", "Chart of Accounts", "Figure SA-08.0 Pricing structure",
+              "Table Tennis Rules", "Fig. Plant layout", "Figure Skating", "Summary"]
+    pdf = tmp_path / "handbook.pdf"
+    pdf.write_bytes(_layout_pdf([("Annual Handbook", ["Prepared for the members, 2024"])]
+                                + [(title, _body(title)) for title in titles]))
+    assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == [
+        "Overview", "Graph Theory", "Chart of Accounts", "Table Tennis Rules", "Figure Skating", "Summary"]
+
+
 def test_running_contents_link_does_not_hide_headings(tmp_path, monkeypatch):
     """SEC filings print a "Table of Contents" link at the top of pages (here
     only the first half, as some filings do). Over mostly prose pages it is
