@@ -855,9 +855,14 @@ class PageIndexClient:
             metadata (dict, optional): Your own JSON-serializable tags for the
                 document; returned in get_document/get_tree/get_ocr responses
                 and list_documents entries (both modes). Cloud: a metadata
-                schema must apply to the folder or the collection
+                schema must apply to the folder
                 (``create_metadata_schema()``); without one, a non-empty dict
-                raises PageIndexAPIError (HTTP 400).
+                raises PageIndexAPIError (HTTP 400). A collection without
+                declared fields learns them from this metadata, each key typed
+                by its first value, up to 32 keys. In a collection a document
+                takes at most 16 keys, names up to 64 characters and strings
+                up to 512; a breach or another type raises PageIndexAPIError
+                (HTTP 400).
             wait (bool): Return only once the document is ready for use.
                 Cloud: polls status until "completed" (raises on "failed" or
                 after 30 minutes). Local: indexing is synchronous already, so
@@ -2906,7 +2911,8 @@ class PageIndexClient:
         Declare the metadata fields of a collection (``collection_id=``), of a
         top-level folder (workspace), or of the account with
         ``folder_id="root"``. A collection's documents follow only the
-        collection's fields. Subfolders share their
+        collection's fields; declaring them replaces the ones it learned from
+        its documents' metadata. Subfolders share their
         top-level folder's fields. Chat's metadata search filters, sorts and
         counts documents by these fields. ``metadata`` on a document under
         the folder or in the collection may use only these fields, with their
@@ -2944,8 +2950,14 @@ class PageIndexClient:
         top-level folder's schema, else the account's (``"root"``) schema.
         ``schema`` is None when neither has one; ``inherited`` is True when
         the fields come from a parent folder or the account. With
-        ``collection_id=``: the collection's own fields, None when it
-        declares none. Cloud-only: local mode raises PageIndexAPIError.
+        ``collection_id=``: the collection's own fields, declared or learned
+        (``schema['learned']`` is True), None when it has neither, counted
+        from its documents that have not failed: ``documents`` is how many
+        there are, and each field gives how many carry it (``documents``), a
+        number's ``min`` and ``max``, and a string's 20 commonest ``values``
+        as ``{'value', 'documents'}``; counts adding up to less than the
+        field's ``documents`` mean more values exist. Cloud-only: local mode
+        raises PageIndexAPIError.
 
         Args:
             folder_id (str, optional): Any folder ID, or "root" for the
@@ -2955,7 +2967,7 @@ class PageIndexClient:
 
         Returns:
             dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}; for a
-            collection, {'collection_id', 'schema'}.
+            collection, {'collection_id', 'documents', 'schema'}.
         """
         return self._require_cloud(
             "get_metadata_schema is cloud-only — local mode has no "
@@ -2978,7 +2990,8 @@ class PageIndexClient:
         account's fields; to allow no metadata at all, declare
         ``create_metadata_schema(folder_id, {})``, which removes the metadata
         they carry. Documents keep their metadata until fields are declared
-        again. Cloud-only: local mode raises PageIndexAPIError.
+        again; a collection learns its fields again from that metadata.
+        Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
             folder_id (str, optional): Top-level folder ID, or "root".
