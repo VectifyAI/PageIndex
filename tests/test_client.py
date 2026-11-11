@@ -1888,6 +1888,19 @@ def test_folders_are_cloud_only(local_client):
     assert local_client.folder_context("root") == ""  # the library itself
 
 
+def test_collections_are_cloud_only(local_client, sample_pdf):
+    for call in (lambda: local_client.create_collection("papers"),
+                 local_client.list_collections,
+                 lambda: local_client.delete_collection("c"),
+                 lambda: local_client.get_metadata_schema(collection_id="c")):
+        with pytest.raises(PageIndexAPIError, match="cloud-only"):
+            call()
+    for call in (lambda: local_client.submit_document(sample_pdf, collection_id="c"),
+                 lambda: local_client.list_documents(collection_id="c")):
+        with pytest.raises(PageIndexAPIError, match="collections are not supported"):
+            call()
+
+
 # ── local: retrieval endpoints are cloud-only ──
 
 def test_retrieval_endpoints_cloud_only(local_client):
@@ -1993,6 +2006,62 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     client.get_document("pi-1")
     assert calls[-1]["url"] == "https://staging.example/doc/pi-1/metadata/"
     assert calls[-1]["headers"] == {"api_key": "other"}
+
+
+def test_cloud_collection_wiring(cloud, sample_pdf):
+    client, calls, fake = cloud
+
+    fake.payload = {"collection": {"id": "c/1", "name": "papers"}}
+    assert client.create_collection("papers") == fake.payload
+    assert calls[-1]["method"] == "POST"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/collection/"
+    assert calls[-1]["json"] == {"name": "papers"}
+    client.create_collection("papers", description="2024")
+    assert calls[-1]["json"] == {"name": "papers", "description": "2024"}
+
+    fake.payload = {"collections": [], "total": 0}
+    assert client.list_collections() == fake.payload
+    assert calls[-1]["method"] == "GET"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/collections/"
+
+    fake.payload = {"collection_id": "c/1", "deleted": True, "deleted_documents": 2}
+    assert client.delete_collection("c/1") == fake.payload
+    assert calls[-1]["method"] == "DELETE"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/collection/c%2F1/"
+
+    fake.payload = {"doc_id": "pi-1"}
+    client.submit_document(sample_pdf, collection_id="c/1")
+    assert calls[-1]["data"] == {"if_retrieval": True, "collection_id": "c/1"}
+
+    client.list_documents(collection_id="c/1")
+    assert calls[-1]["params"] == {"limit": 50, "offset": 0, "collection_id": "c/1"}
+
+
+def test_cloud_collection_metadata_schema(cloud):
+    client, calls, _ = cloud
+    fields = {"year": {"type": "number"}}
+    url = "https://api.pageindex.ai/collection/c%2F1/metadata/schema/"
+
+    client.create_metadata_schema(fields=fields, collection_id="c/1")
+    assert (calls[-1]["method"], calls[-1]["url"]) == ("PUT", url)
+    assert calls[-1]["json"] == {"fields": fields}
+    client.get_metadata_schema(collection_id="c/1")
+    assert (calls[-1]["method"], calls[-1]["url"]) == ("GET", url)
+    client.delete_metadata_schema(collection_id="c/1")
+    assert (calls[-1]["method"], calls[-1]["url"]) == ("DELETE", url)
+
+    sent = len(calls)
+    for call in (lambda: client.create_metadata_schema(fields=fields),
+                 lambda: client.create_metadata_schema("f", fields, collection_id="c"),
+                 lambda: client.get_metadata_schema(),
+                 lambda: client.get_metadata_schema("f", collection_id="c"),
+                 lambda: client.delete_metadata_schema(),
+                 lambda: client.delete_metadata_schema("f", collection_id="c")):
+        with pytest.raises(PageIndexAPIError, match="exactly one"):
+            call()
+    with pytest.raises(PageIndexAPIError, match="fields is required"):
+        client.create_metadata_schema(collection_id="c")
+    assert len(calls) == sent
 
 
 def test_cloud_get_tree_unified_shape(monkeypatch):

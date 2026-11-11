@@ -53,6 +53,7 @@ class CloudAPI:
         beta_headers: Optional[List[str]] = None,
         folder_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        collection_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Upload a PDF document for processing; the tree is built in the background.
@@ -66,6 +67,7 @@ class CloudAPI:
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
             metadata (dict, optional): Your own JSON-serializable tags for the document;
                 returned in get_tree/get_ocr responses and list_documents entries. Defaults to None.
+            collection_id (str, optional): Collection ID to store the document in, in place of a folder. Defaults to None.
 
         Returns:
             dict: {'doc_id': ...} — plus 'name', the stored document name
@@ -88,6 +90,8 @@ class CloudAPI:
             data['folder_id'] = folder_id
         if metadata is not None:
             data['metadata'] = json.dumps(metadata)
+        if collection_id is not None:
+            data['collection_id'] = collection_id
 
         with open(file_path, "rb") as f:
             response = self._http.post(
@@ -439,7 +443,7 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json() if response.content else {}
 
-    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None, recursive: bool = False) -> Dict[str, Any]:
+    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None, recursive: bool = False, collection_id: Optional[str] = None) -> Dict[str, Any]:
         """
         List all documents for the authenticated user with pagination.
 
@@ -450,6 +454,7 @@ class CloudAPI:
                 in the specified folder are returned. Defaults to None (all documents).
             recursive (bool, optional): Also return documents in descendant folders of folder_id.
                 Defaults to False (direct contents only).
+            collection_id (str, optional): Return one collection's documents. Defaults to None.
 
         Returns:
             dict: API response containing:
@@ -470,6 +475,8 @@ class CloudAPI:
             params["name"] = name
         if recursive:
             params["recursive"] = recursive
+        if collection_id is not None:
+            params["collection_id"] = collection_id
 
         response = self._http.get(
             f"{self.BASE_URL}/docs/",
@@ -555,28 +562,117 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
-    def create_metadata_schema(
-        self,
-        folder_id: str,
-        fields: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    # ---------- COLLECTION MANAGEMENT ----------
+
+    def create_collection(self, name: str, description: Optional[str] = None) -> Dict[str, Any]:
         """
-        Declare the metadata fields of a top-level folder (workspace).
+        Create a new, empty collection.
 
         Args:
-            folder_id (str): Top-level folder ID, or "root" for the account-level
+            name (str): Collection name, unique among your collections.
+            description (str, optional): Collection description. Defaults to None.
+
+        Returns:
+            dict: {"collection": {"id", "name", "description"}}
+        """
+        payload = {"name": name}
+        if description is not None:
+            payload["description"] = description
+
+        response = self._http.post(
+            f"{self.BASE_URL}/collection/",
+            headers=self._headers(),
+            json=payload,
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to create collection: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def list_collections(self) -> Dict[str, Any]:
+        """
+        List collections, newest first.
+
+        Returns:
+            dict: API response containing:
+                - collections (List[Dict]): Each with id, name, description,
+                    metadata_schema, created_at, document_count
+                - total (int): Total number of collections
+        """
+        response = self._http.get(
+            f"{self.BASE_URL}/collections/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to list collections: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def delete_collection(self, collection_id: str) -> Dict[str, Any]:
+        """
+        Delete a collection and every document in it.
+
+        Args:
+            collection_id (str): Collection ID.
+
+        Returns:
+            dict: {"collection_id": ..., "deleted": True, "deleted_documents": ...}
+        """
+        response = self._http.delete(
+            f"{self.BASE_URL}/collection/{_enc(collection_id)}/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to delete collection: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    # ---------- METADATA SCHEMAS ----------
+
+    def _schema_url(self, folder_id: Optional[str], collection_id: Optional[str]) -> str:
+        if folder_id is not None and collection_id is None:
+            owner = f"folder/{_enc(folder_id)}"
+        elif collection_id is not None and folder_id is None:
+            owner = f"collection/{_enc(collection_id)}"
+        else:
+            raise PageIndexAPIError(
+                "A metadata schema belongs to a folder or to a collection: "
+                "pass exactly one of folder_id and collection_id.")
+        return f"{self.BASE_URL}/{owner}/metadata/schema/"
+
+    def create_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        fields: Optional[Dict[str, Any]] = None,
+        collection_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Declare the metadata fields of a top-level folder (workspace) or of a collection.
+
+        Args:
+            folder_id (str, optional): Top-level folder ID, or "root" for the account-level
                 schema used where a top-level folder declares none.
             fields (dict): Field name to spec, e.g.
                 {"year": {"type": "number", "description": "Fiscal year"}};
                 type is "string", "number" or "boolean".
+            collection_id (str, optional): Collection ID, in place of folder_id.
 
         Returns:
             dict: Created schema containing:
-                - folder_id (str): The folder ID, or "root"
+                - folder_id (str) or collection_id (str): The ID passed
                 - schema (dict): {"fields": ...} as stored
         """
+        if fields is None:
+            raise PageIndexAPIError(
+                "Failed to create metadata schema: fields is required.")
         response = self._http.put(
-            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            self._schema_url(folder_id, collection_id),
             headers=self._headers(),
             json={"fields": fields},
             timeout=30
@@ -587,26 +683,31 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
-    def get_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
+    def get_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Get the metadata fields that apply to a folder's documents.
+        Get the metadata fields that apply to a folder's or a collection's documents.
 
         Args:
-            folder_id (str): Any folder ID, or "root" for the account-level
+            folder_id (str, optional): Any folder ID, or "root" for the account-level
                 schema.
+            collection_id (str, optional): Collection ID, in place of folder_id.
 
         Returns:
             dict: Effective schema containing:
-                - folder_id (str): The folder ID asked for
+                - folder_id (str) or collection_id (str): The ID passed
                 - workspace_id (str): The folder's top-level folder, or
-                  "root"
+                  "root" (folders only)
                 - inherited (bool): True when the schema comes from a
-                  parent folder or the account
+                  parent folder or the account (folders only)
                 - schema (dict | None): {"fields": ...}, or None when no
                   schema is declared
         """
         response = self._http.get(
-            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            self._schema_url(folder_id, collection_id),
             headers=self._headers(),
             timeout=30
         )
@@ -616,20 +717,25 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
-    def delete_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
+    def delete_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Delete the metadata fields declared on a top-level folder
-        (workspace), or on the account with folder_id "root". Documents keep
-        their metadata.
+        (workspace), on the account with folder_id "root", or on a
+        collection. Documents keep their metadata.
 
         Args:
-            folder_id (str): Top-level folder ID, or "root".
+            folder_id (str, optional): Top-level folder ID, or "root".
+            collection_id (str, optional): Collection ID, in place of folder_id.
 
         Returns:
-            dict: {"folder_id": ..., "deleted": True}
+            dict: {"folder_id" or "collection_id": ..., "deleted": True}
         """
         response = self._http.delete(
-            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            self._schema_url(folder_id, collection_id),
             headers=self._headers(),
             timeout=30
         )

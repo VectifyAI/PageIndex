@@ -828,6 +828,7 @@ class PageIndexClient:
         folder_id: Optional[str] = None,
         metadata: Optional[dict] = None,
         wait: bool = False,
+        collection_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Submit a PDF document for processing. Returns {'doc_id': ..., 'name': ...}.
@@ -854,14 +855,17 @@ class PageIndexClient:
             metadata (dict, optional): Your own JSON-serializable tags for the
                 document; returned in get_document/get_tree/get_ocr responses
                 and list_documents entries (both modes). Cloud: a metadata
-                schema must apply to the folder (``create_metadata_schema()``);
-                without one, a non-empty dict raises PageIndexAPIError (HTTP
-                400).
+                schema must apply to the folder or the collection
+                (``create_metadata_schema()``); without one, a non-empty dict
+                raises PageIndexAPIError (HTTP 400).
             wait (bool): Return only once the document is ready for use.
                 Cloud: polls status until "completed" (raises on "failed" or
                 after 30 minutes). Local: indexing is synchronous already, so
                 this changes nothing. Leave False to submit many documents
                 concurrently and poll afterwards.
+            collection_id (str, optional): Cloud-only collection to store the
+                document in, in place of a folder: passing ``folder_id`` too
+                raises PageIndexAPIError (HTTP 400).
 
         Returns:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
@@ -874,6 +878,7 @@ class PageIndexClient:
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
             beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
+            collection_id=collection_id,
         )
         stored = result.get("name")
         if stored and stored != os.path.basename(file_path):
@@ -2105,7 +2110,8 @@ class PageIndexClient:
         'createdAt', 'pageNum', 'folderId', 'metadata'}. Status is one of
         "queued", "processing", "completed", "failed" (local documents are
         always "completed"; local 'folderId' is always None). 'metadata'
-        is your own tags from ``submit_document``, or None.
+        is your own tags from ``submit_document``, or None. A cloud document
+        also carries 'collectionId': its collection, or None.
 
         'createdAt' is UTC with no timezone marker, in both modes. To show
         it in the user's timezone::
@@ -2148,6 +2154,7 @@ class PageIndexClient:
         offset: int = 0,
         folder_id: Optional[str] = None,
         recursive: bool = False,
+        collection_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         List documents with pagination, newest first.
@@ -2159,6 +2166,9 @@ class PageIndexClient:
             recursive (bool): Include documents in ``folder_id``'s
                 descendant folders, flattened into one list. Cloud-only;
                 local libraries have no folders.
+            collection_id (str, optional): Cloud-only: list one collection's
+                documents. Passing ``folder_id`` or ``recursive`` too raises
+                PageIndexAPIError (HTTP 400).
 
         Returns:
             dict: {'documents': [...], 'total', 'limit', 'offset'}.
@@ -2169,7 +2179,8 @@ class PageIndexClient:
         of something below it, and for every local document.
         """
         return self._api.list_documents(limit=limit, offset=offset,
-                                        folder_id=folder_id, recursive=recursive)
+                                        folder_id=folder_id, recursive=recursive,
+                                        collection_id=collection_id)
 
     # ---------- AGENT INTEGRATION ----------
 
@@ -2830,61 +2841,136 @@ class PageIndexClient:
             parent_folder_id=parent_folder_id,
         )
 
-    def create_metadata_schema(
+    # ---------- COLLECTION MANAGEMENT ----------
+
+    def create_collection(
         self,
-        folder_id: str,
-        fields: dict[str, Any],
+        name: str,
+        description: Optional[str] = None,
     ) -> dict[str, Any]:
         """
-        Declare the metadata fields of a top-level folder (workspace), or of
-        the account with ``folder_id="root"``. Subfolders share their
-        top-level folder's fields. Chat's metadata search filters, sorts and
-        counts documents by these fields. ``metadata`` on a document under
-        the folder may use only these fields, with their types (HTTP 400
-        otherwise); a document may leave any of them out. Declaring also
-        removes, from the documents these fields apply to, the metadata keys
-        they don't declare or declare with another type; matching keys stay.
-        Set once: a second call on the same folder raises PageIndexAPIError
-        (HTTP 409); to change the fields, call ``delete_metadata_schema()``,
-        then declare them again. Cloud-only: local mode raises
+        Create a collection: a flat set of documents beside the folders, with
+        metadata fields of its own. A document is stored in a folder or in one
+        collection (``submit_document(collection_id=...)``). A name another of
+        your collections has raises PageIndexAPIError (HTTP 409). Cloud-only:
+        local mode raises PageIndexAPIError.
+
+        Returns:
+            dict: {'collection': {'id', 'name', 'description'}}.
+        """
+        return self._require_cloud(
+            "create_collection is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).create_collection(name=name, description=description)
+
+    def list_collections(self) -> dict[str, Any]:
+        """
+        List collections, newest first. Cloud-only: local mode raises
         PageIndexAPIError.
 
+        Returns:
+            dict: {'collections': [...], 'total'}; each collection is {'id',
+            'name', 'description', 'metadata_schema', 'created_at',
+            'document_count'}.
+        """
+        return self._require_cloud(
+            "list_collections is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).list_collections()
+
+    def delete_collection(self, collection_id: str) -> dict[str, Any]:
+        """
+        Delete a collection and every document in it. While one of its
+        documents is still queued or processing, the collection and that
+        document stay and PageIndexAPIError (HTTP 409) is raised: call again
+        once it has finished. Cloud-only: local mode raises PageIndexAPIError.
+
+        Returns:
+            dict: {'collection_id', 'deleted': True, 'deleted_documents'}.
+        """
+        return self._require_cloud(
+            "delete_collection is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).delete_collection(collection_id=collection_id)
+
+    # ---------- METADATA SCHEMAS ----------
+
+    def create_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        fields: Optional[dict[str, Any]] = None,
+        *,
+        collection_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Declare the metadata fields of a collection (``collection_id=``), of a
+        top-level folder (workspace), or of the account with
+        ``folder_id="root"``. A collection's documents follow only the
+        collection's fields. Subfolders share their
+        top-level folder's fields. Chat's metadata search filters, sorts and
+        counts documents by these fields. ``metadata`` on a document under
+        the folder or in the collection may use only these fields, with their
+        types (HTTP 400 otherwise); a document may leave any of them out.
+        Declaring also removes, from the documents these fields apply to, the
+        metadata keys they don't declare or declare with another type;
+        matching keys stay. Set once: a second call on the same folder or
+        collection raises PageIndexAPIError (HTTP 409); to change the fields,
+        call ``delete_metadata_schema()``, then declare them again.
+        Cloud-only: local mode raises PageIndexAPIError.
+
         Args:
-            folder_id (str): Top-level folder ID, or "root".
+            folder_id (str, optional): Top-level folder ID, or "root".
             fields (dict): Field name to spec, e.g.
                 ``{"year": {"type": "number", "description": "Fiscal year"}}``;
                 type is "string", "number" or "boolean".
+            collection_id (str, optional): Collection ID, in place of
+                ``folder_id``.
         """
         return self._require_cloud(
             "create_metadata_schema is cloud-only — local mode has no "
             "metadata schemas. Create the client with an api_key to use them."
         ).create_metadata_schema(
-            folder_id=folder_id, fields=fields,
+            folder_id=folder_id, fields=fields, collection_id=collection_id,
         )
 
-    def get_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+    def get_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        *,
+        collection_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         """
         Get the metadata fields that apply to a folder's documents: from its
         top-level folder's schema, else the account's (``"root"``) schema.
         ``schema`` is None when neither has one; ``inherited`` is True when
-        the fields come from a parent folder or the account.
-        Cloud-only: local mode raises PageIndexAPIError.
+        the fields come from a parent folder or the account. With
+        ``collection_id=``: the collection's own fields, None when it
+        declares none. Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
-            folder_id (str): Any folder ID, or "root" for the account-level
-                fields alone.
+            folder_id (str, optional): Any folder ID, or "root" for the
+                account-level fields alone.
+            collection_id (str, optional): Collection ID, in place of
+                ``folder_id``.
 
         Returns:
-            dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}.
+            dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}; for a
+            collection, {'collection_id', 'schema'}.
         """
         return self._require_cloud(
             "get_metadata_schema is cloud-only — local mode has no "
             "metadata schemas. Create the client with an api_key to use them."
-        ).get_metadata_schema(folder_id=folder_id)
+        ).get_metadata_schema(folder_id=folder_id, collection_id=collection_id)
 
-    def delete_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+    def delete_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        *,
+        collection_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         """
-        Delete the metadata fields declared on a top-level folder
+        Delete the metadata fields declared on a collection
+        (``collection_id=``), on a top-level folder
         (workspace), or on the account with ``folder_id="root"``, so they can
         be declared again with ``create_metadata_schema()``. It deletes only
         what this folder itself declares, and ``deleted`` is True even when
@@ -2895,15 +2981,19 @@ class PageIndexClient:
         again. Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
-            folder_id (str): Top-level folder ID, or "root".
+            folder_id (str, optional): Top-level folder ID, or "root".
+            collection_id (str, optional): Collection ID, in place of
+                ``folder_id``.
 
         Returns:
-            dict: {'folder_id', 'deleted': True}.
+            dict: {'folder_id', 'deleted': True}; for a collection,
+            {'collection_id', 'deleted': True}.
         """
         return self._require_cloud(
             "delete_metadata_schema is cloud-only — local mode has no "
             "metadata schemas. Create the client with an api_key to use them."
-        ).delete_metadata_schema(folder_id=folder_id)
+        ).delete_metadata_schema(folder_id=folder_id,
+                                 collection_id=collection_id)
 
     # ---------- PATH HELPERS ----------
 
