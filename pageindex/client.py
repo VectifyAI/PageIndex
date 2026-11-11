@@ -2175,8 +2175,8 @@ class PageIndexClient:
 
         Each document carries ``path``, its folder chain rendered
         ``"Parent/Child"`` — what a flat listing otherwise loses. None
-        at the library root, for a folder reached only through a share
-        of something below it, and for every local document.
+        at the library root, in a collection, for a folder reached only
+        through a share of something below it, and for every local document.
         """
         return self._api.list_documents(limit=limit, offset=offset,
                                         folder_id=folder_id, recursive=recursive,

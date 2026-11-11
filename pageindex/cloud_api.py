@@ -625,7 +625,7 @@ class CloudAPI:
         response = self._http.delete(
             f"{self.BASE_URL}/collection/{_enc(collection_id)}/",
             headers=self._headers(),
-            timeout=30
+            timeout=600
         )
         if response.status_code != 200:
             raise PageIndexAPIError(
