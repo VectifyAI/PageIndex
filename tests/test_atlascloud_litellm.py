@@ -82,7 +82,7 @@ def test_llm_completion_routes_atlascloud_through_litellm(monkeypatch):
         return completion_response("sync response")
 
     monkeypatch.setenv("ATLASCLOUD_API_KEY", "test-key")
-    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion, model_cost={}))
 
     result = llm_completion("atlascloud/qwen/qwen3.5-flash", "hello")
 
@@ -105,7 +105,7 @@ def test_index_backend_overrides_atlascloud_defaults(monkeypatch):
         return completion_response("sync response")
 
     monkeypatch.setenv("ATLASCLOUD_API_KEY", "environment-key")
-    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion, model_cost={}))
     token = _llm_backend.set({
         "api_base": "https://backend.example/v1",
         "api_key": "backend-key",
@@ -130,7 +130,7 @@ def test_llm_acompletion_routes_atlascloud_through_litellm(monkeypatch):
         return completion_response("async response")
 
     monkeypatch.setenv("ATLASCLOUD_API_KEY", "test-key")
-    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(acompletion=acompletion))
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(acompletion=acompletion, model_cost={}))
 
     result = asyncio.run(
         llm_acompletion("atlascloud/qwen/qwen3.5-flash", "hello")
