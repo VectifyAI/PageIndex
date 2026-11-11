@@ -959,7 +959,8 @@ def _refusal(field):
 def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
                                              settings):
     """A field a 400 names goes again at once without it and stays out for
-    the rest of the call; the next call tries it afresh."""
+    the rest of the call and, once a request went through without it, for
+    the process at that model and server: the next call leaves it out too."""
     pytest.importorskip("litellm")
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
@@ -975,7 +976,7 @@ def test_refused_field_goes_again_without_it(client, store_path, monkeypatch,
         else:
             assert out.choices[0].message.content == "A"
     assert [any(m.get("reasoning_content") for m in messages)
-            for messages in sent] == [False, True, False, False, False, True]
+            for messages in sent] == [False, True, False, False, False, False]
 
 
 @needs_agents
@@ -999,6 +1000,76 @@ def test_missing_field_400_costs_one_retry_at_most(client, store_path,
     client.chat_completions("q", doc_id=doc_id, model=model)
     assert [any(m.get("reasoning_content") for m in messages)
             for messages in sent] == [False, True, False, False, True]
+
+
+@needs_agents
+def test_a_remembered_field_the_server_asks_for_goes_again_with_it(
+        client, store_path, monkeypatch):
+    """A field the process remembers refused that a later 400 names, which
+    the call withheld only for that, goes again at once with it, and the
+    process forgets the refusal: the next call sends it from the start."""
+    pytest.importorskip("litellm")
+    from litellm.exceptions import BadRequestError
+    doc_id = seed_doc(store_path, "pi-a", "report.pdf")
+    model = "groq/qwen/qwen3-32b"
+    call = _litellm_reply(tool_calls=_TWO_CALLS[:1], reasoning_content="think")
+    missing = BadRequestError(
+        message="Missing `reasoning_content` field in the assistant message",
+        model="m", llm_provider="groq")
+    sent = _mock_litellm(monkeypatch, [
+        call, _refusal("reasoning_content"), _litellm_reply("A"),
+        call, missing, _litellm_reply("A"),
+        call, _litellm_reply("A")])
+    for _ in range(3):
+        out = client.chat_completions("q", doc_id=doc_id, model=model)
+        assert out.choices[0].message.content == "A"
+    assert [any(m.get("reasoning_content") for m in messages)
+            for messages in sent] == [False, True, False,
+                                      False, False, True,
+                                      False, True]
+
+
+@needs_agents
+def test_a_call_leaves_what_another_call_forgot_forgotten(monkeypatch):
+    """A call that inherited the process's refusals, going through after
+    another call forgot one, adds back only the ones it refused itself."""
+    pytest.importorskip("litellm")
+    from agents import Agent, ModelSettings
+    from agents.extensions.models.litellm_model import LitellmModel
+    from pageindex import utils
+    model = LitellmModel(model="groq/qwen/qwen3-32b")
+
+    async def fetch(*args, **kwargs):
+        return _litellm_reply("A")
+    monkeypatch.setattr(model, "_fetch_response", fetch)
+    remembered = utils._refused(model.model, model.base_url)
+    remembered.update({"reasoning_content", "reasoning_details"})
+    replies = local_chat._keep_reply_fields(Agent(name="a", model=model), [])
+    remembered.discard("reasoning_content")  # another call's 400 asked for it
+    replies.refused.add("thinking_blocks")  # this call's own refusal
+    asyncio.run(model._fetch_response(None, [], ModelSettings()))
+    assert remembered == {"reasoning_details", "thinking_blocks"}
+
+
+@needs_agents
+def test_forced_params_join_the_callers_allowed_openai_params(monkeypatch):
+    """Params a refusal forced join the caller's own
+    allowed_openai_params, never replace them, as on the index lane."""
+    pytest.importorskip("litellm")
+    from agents import Agent, ModelSettings
+    from agents.extensions.models.litellm_model import LitellmModel
+    model = LitellmModel(model="azure/test-prod-deployment")
+    seen = []
+
+    async def fetch(system_instructions, input, model_settings, *args, **kwargs):
+        seen.append(set(model_settings.extra_args["allowed_openai_params"]))
+        return _litellm_reply("A")
+    monkeypatch.setattr(model, "_fetch_response", fetch)
+    replies = local_chat._keep_reply_fields(Agent(name="a", model=model), [])
+    replies.forced.add("reasoning_effort")
+    asyncio.run(model._fetch_response(None, [], ModelSettings(
+        extra_args={"allowed_openai_params": ["service_tier"]})))
+    assert seen == [{"service_tier", "reasoning_effort"}]
 
 
 @needs_agents
@@ -1123,6 +1194,7 @@ def _publish(monkeypatch, entries, offline=False):
 
     monkeypatch.setattr(httpx, "get", get)
     monkeypatch.setattr(utils, "_published", None)
+    monkeypatch.setattr(utils, "_retry_published_at", float("inf"))
     monkeypatch.setattr(utils, "_filled", False)
     monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
     return fetched
@@ -1148,27 +1220,120 @@ def test_published_entries_lift_litellms_own_refusal(monkeypatch):
 
 
 def test_indexing_learns_a_model_whose_effort_litellm_would_drop(monkeypatch):
-    """LiteLLM drops a summary's reasoning_effort, unseen, for a Fireworks
+    """LiteLLM drops a summary's reasoning_effort, unseen, for a Mistral
     model its packaged map lacks; the published map's entry, learned before
-    the summaries, keeps it. A model whose effort LiteLLM sends, or one its
-    packaged map has, downloads nothing."""
+    the summaries, keeps it. A model whose effort LiteLLM sends, one its
+    packaged map has, or one on an OpenAI-format API (the effort goes as
+    is there) downloads nothing."""
     pytest.importorskip("litellm")
     from litellm.utils import get_optional_params
     from pageindex.utils import learn_model_if_effort_dropped
-    name = "accounts/fireworks/models/test-unpackaged"  # LiteLLM keeps it
-    fetched = _publish(monkeypatch, {f"fireworks_ai/{name}": {
-        "litellm_provider": "fireworks_ai", "mode": "chat",
+    name = "test-unpackaged-mistral"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {f"mistral/{name}": {
+        "litellm_provider": "mistral", "mode": "chat",
         "supports_reasoning": True}})
 
     def sent():
-        return get_optional_params(model=name, custom_llm_provider="fireworks_ai",
+        return get_optional_params(model=name, custom_llm_provider="mistral",
                                    reasoning_effort="none",
                                    drop_params=True).get("reasoning_effort")
-    for model in ("openrouter/vendor/model-test-unlisted", "gpt-4o"):
+    for model in ("openrouter/vendor/model-test-unlisted", "gpt-4o",
+                  "fireworks_ai/accounts/fireworks/models/test-unpackaged",
+                  "azure/my-test-deployment"):
         learn_model_if_effort_dropped(model)
     assert not fetched and sent() is None
-    learn_model_if_effort_dropped(f"fireworks_ai/{name}")
+    learn_model_if_effort_dropped(f"mistral/{name}")
     assert len(fetched) == 1 and sent() == "none"
+
+
+def test_a_chosen_level_litellm_refuses_learns_the_published_map(monkeypatch):
+    """A chosen level LiteLLM refuses for a model its packaged map lacks
+    ("xhigh" on a GPT-6 newer than it) learns the published map, OpenAI's
+    own API included, then goes: chosen for the summaries or in the
+    index backend. A level LiteLLM takes there downloads nothing."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import _litellm_refuses, _llm_backend, learn_model_if_effort_dropped
+    xhigh = {"reasoning_effort": "xhigh"}
+    for name, backend, effort in (("gpt-6.9-test-chosen-xhigh", {}, "xhigh"),
+                                  ("gpt-6.9-test-backend-xhigh", xhigh, None)):
+        model = f"openai/{name}"
+        fetched = _publish(monkeypatch, {name: {
+            "litellm_provider": "openai", "mode": "chat", "supports_reasoning": True,
+            "supports_xhigh_reasoning_effort": True}})
+        learn_model_if_effort_dropped(model)
+        learn_model_if_effort_dropped(model, "high")
+        assert not fetched and _litellm_refuses(model, xhigh), name
+        token = _llm_backend.set(backend)
+        try:
+            learn_model_if_effort_dropped(model, effort)
+        finally:
+            _llm_backend.reset(token)
+        assert len(fetched) == 1 and _litellm_refuses(model, xhigh) is None, name
+
+
+def test_chosen_effort_learns_the_published_map_before_it_judges(monkeypatch):
+    """A chosen level LiteLLM refuses for a model its packaged map lacks
+    goes once the published map's entry takes it, on any route ("xhigh" on
+    a GPT-6 newer than the package, which LiteLLM's GPT-5 rules refuse even
+    with allowed_openai_params on azure/); a deployment that takes it as is
+    downloads nothing."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import chosen_effort
+    fetched = _publish(monkeypatch, {})
+    assert chosen_effort("azure/test-prod-deployment", "low") == {
+        "reasoning_effort": "low", "allowed_openai_params": ["reasoning_effort"]}
+    assert not fetched
+    for provider in ("openai", "azure", "azure_ai"):
+        name = f"gpt-6.9-test-chosen-{provider}"
+        key = name if provider == "openai" else f"{provider}/{name}"
+        fetched = _publish(monkeypatch, {key: {
+            "litellm_provider": provider, "mode": "chat", "supports_reasoning": True,
+            "supports_xhigh_reasoning_effort": True}})
+        assert chosen_effort(f"{provider}/{name}", "xhigh") == {"reasoning_effort": "xhigh"}
+        assert len(fetched) == 1, provider
+
+
+def test_summaries_wait_on_the_published_map_at_most_map_wait(monkeypatch):
+    """The early start begins the one download on a thread; summaries wait
+    for it _MAP_WAIT at most, then go on with the effort dropped while it
+    runs on, and the next document learns from it."""
+    pytest.importorskip("litellm")
+    import time
+    from pageindex import utils
+    name = "test-slow-map-mistral"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {f"mistral/{name}": {
+        "litellm_provider": "mistral", "mode": "chat",
+        "supports_reasoning": True}})
+    get, release = httpx.get, threading.Event()
+
+    def slow(url, timeout):
+        release.wait(5)
+        return get(url, timeout=timeout)
+    monkeypatch.setattr(httpx, "get", slow)
+    monkeypatch.setattr(utils, "_MAP_WAIT", 0.05)
+    model = f"mistral/{name}"
+    threads, dropped = [], utils._effort_dropped_unmapped
+    monkeypatch.setattr(utils, "_effort_dropped_unmapped",
+                        lambda m, effort=None: threads.append(threading.current_thread())
+                        or dropped(m, effort))
+    utils.start_learning_if_effort_dropped(model)
+    # checked where it's called (a thread importing LiteLLM would hang a fork)
+    assert threads == [threading.current_thread()] and utils._published is not None
+    began = time.monotonic()
+    utils.learn_model_if_effort_dropped(model)
+    assert time.monotonic() - began < 2 and not utils._filled
+    release.set()
+    utils._published.result(timeout=5)
+    utils.learn_model_if_effort_dropped(model)
+    assert utils._filled and len(fetched) == 1
+
+    # the caller's own LITELLM_LOCAL_MODEL_COST_MAP: neither starts one
+    fetched = _publish(monkeypatch, {})
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
+    unlearned = "mistral/test-users-map-mistral"
+    utils.start_learning_if_effort_dropped(unlearned)
+    utils.learn_model_if_effort_dropped(unlearned)
+    assert fetched == [] and utils._published is None
 
 
 def test_a_cancelled_wait_leaves_the_download_to_the_others(monkeypatch):
@@ -1262,6 +1427,138 @@ def test_refusal_the_published_map_cannot_lift_surfaces(client, monkeypatch,
                 "q", model="bedrock/global.openai.gpt-test-unpublished")
     assert len(fetched) == (0 if case == "user's map" else 1)
     assert len(sent) == (4 if case == "unpublished" else 2)
+
+
+def test_a_failed_download_gives_way_to_another_after_map_retry(monkeypatch):
+    """A failed download stands for _MAP_RETRY (one per process while
+    offline: test_refusal_the_published_map_cannot_lift_surfaces), then
+    gives way to another: the network back, a model is learned without a
+    restart."""
+    pytest.importorskip("litellm")
+    from pageindex import utils
+    key = "global.openai.gpt-test-retried"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {key: _UNPACKAGED}, offline=True)
+    monkeypatch.setattr(utils, "_MAP_RETRY", 0)
+    assert not asyncio.run(utils.learn_published_models())
+
+    def online(url, timeout):
+        fetched.append(url)
+        return httpx.Response(200, json={key: _UNPACKAGED},
+                              request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx, "get", online)
+    assert asyncio.run(utils.learn_published_models())
+    assert len(fetched) == 2
+
+
+@needs_agents
+def test_litellms_refusal_on_an_openai_format_api_sends_the_param_as_is(
+        client, monkeypatch):
+    """LiteLLM refusing an effort for a model it doesn't know on an
+    OpenAI-format API (an Azure deployment named its own way) goes again at
+    once with the effort as is, as summaries send it, for the server to
+    answer; nothing downloads."""
+    litellm = pytest.importorskip("litellm")
+    fetched = _publish(monkeypatch, {})
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 4)
+    real, asked = litellm.acompletion, []
+
+    async def acompletion(**kwargs):
+        asked.append({key: kwargs.get(key) for key in (
+            "reasoning_effort", "allowed_openai_params", "drop_params")})
+        return await real(**kwargs)
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    for _ in range(2):
+        out = client.chat_completions("q", model="azure/test-prod-deployment",
+                                      reasoning_effort="low")
+        assert out.choices[0].message.content == "A"
+    assert fetched == [] and len(sent) == 4
+    refused = {"reasoning_effort": "low", "allowed_openai_params": None, "drop_params": None}
+    forced = {**refused, "allowed_openai_params": ["reasoning_effort"]}
+    assert asked == [refused, forced, refused, forced]
+
+
+@needs_agents
+def test_a_refusal_naming_no_param_on_an_openai_format_api_learns_the_map(
+        client, monkeypatch):
+    """LiteLLM's GPT-5 rules refusing "xhigh" for an Azure GPT-6 its
+    packaged map lacks name no param to send as is: the request goes again
+    with the published map's entry in, and answers."""
+    pytest.importorskip("litellm")
+    key = "azure/gpt-6.9-test-chat-xhigh"  # LiteLLM keeps it
+    fetched = _publish(monkeypatch, {key: {
+        "litellm_provider": "azure", "mode": "chat", "supports_reasoning": True,
+        "supports_xhigh_reasoning_effort": True, "supports_function_calling": True}})
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 2)
+    out = client.chat_completions("q", model=key, reasoning_effort="xhigh")
+    assert out.choices[0].message.content == "A"
+    assert len(fetched) == 1 and len(sent) == 2
+
+
+@needs_agents
+def test_litellms_refusal_for_a_foundry_claude_deployment_stands(client, monkeypatch):
+    """A Claude deployment on Foundry goes out in Anthropic's format, though
+    LiteLLM lists azure_ai as OpenAI-compatible: LiteLLM's refusal of an
+    effort stands once the published map can't lift it, never forced into
+    that body."""
+    pytest.importorskip("litellm")
+    fetched = _publish(monkeypatch, {})
+    _mock_litellm(monkeypatch, [_litellm_reply("A")] * 2)
+    with pytest.raises(PageIndexAPIError, match="does not support"):
+        client.chat_completions("q", model="azure_ai/claude-test-deployment",
+                                reasoning_effort="low")
+    assert len(fetched) == 1
+
+
+def test_the_request_hook_takes_none_off_only_beside_a_claude_switch(monkeypatch):
+    """The fill hook takes a "none" effort off where a thinking switch rides
+    beside it on a Claude route (LiteLLM's Databricks route drops both), and
+    leaves any other request's effort as sent."""
+    pytest.importorskip("litellm")
+    local_chat._register_fill()
+    monkeypatch.setitem(local_chat._REQUESTS, "test-hook-call", local_chat._Replies("m"))
+
+    def hooked(model, effort="none"):
+        return asyncio.run(local_chat._fill_hook.async_pre_call_deployment_hook(
+            {"litellm_call_id": "test-hook-call", "model": model, "messages": [],
+             "reasoning_effort": effort, "thinking": {"type": "disabled"}},
+            "acompletion"))
+    assert "reasoning_effort" not in hooked("databricks/databricks-claude-sonnet-5")
+    assert hooked("databricks/databricks-claude-sonnet-5", "low")["reasoning_effort"] == "low"
+    assert hooked("deepseek/deepseek-chat")["reasoning_effort"] == "none"
+
+
+@needs_agents
+def test_a_refused_model_litellms_map_holds_downloads_nothing(client, monkeypatch):
+    """LiteLLM refusing a model its map already holds isn't for want of an
+    entry (the published map adds only missing ones), so nothing
+    downloads and the refusal surfaces at once."""
+    litellm = pytest.importorskip("litellm")
+    key = "global.openai.gpt-test-mapped-no-tools"  # LiteLLM keeps it
+    litellm.register_model({key: {**_UNPACKAGED, "supports_function_calling": False}})
+    fetched = _publish(monkeypatch, {f"{key}-other": _UNPACKAGED})
+    sent = _mock_litellm(monkeypatch, [_litellm_reply("A")] * 2)
+    with pytest.raises(PageIndexAPIError, match="does not support"):
+        client.chat_completions("q", model=f"bedrock/{key}")
+    assert fetched == [] and len(sent) == 1
+
+
+def test_another_providers_entry_leaves_a_model_unmapped(monkeypatch):
+    """An entry another provider owns under the model's bare name doesn't
+    make the model mapped, as LiteLLM's own lookup matches the provider,
+    nor does an answer from LiteLLM's fallback rules: the published map may
+    still hold the model's own, and summaries learn it."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex.utils import _effort_dropped_unmapped, _in_model_map
+    # its Hugging Face fallback would fetch the model's config from the Hub
+    monkeypatch.setattr(litellm.utils, "_get_max_position_embeddings",
+                        lambda model_name: None)
+    litellm.register_model({"sibling-test-model-x9": {"litellm_provider": "deepseek",
+                                                      "mode": "chat"}})
+    assert _in_model_map("deepseek/sibling-test-model-x9")
+    assert not _in_model_map("fireworks_ai/accounts/fireworks/models/sibling-test-model-x9")
+    fallback = "huggingface/meta-llama/Llama-3-8B"
+    litellm.get_model_info(fallback)  # answered, though the map lacks it
+    assert not _in_model_map(fallback) and _effort_dropped_unmapped(fallback)
 
 
 @needs_agents
@@ -1866,22 +2163,21 @@ def test_gateway_requests_send_user_text_as_blocks(client, store_path,
 def test_gateway_refusing_marks_goes_again_without_them(client, store_path,
                                                         monkeypatch):
     """A gateway that refuses cache_control gets the request again without
-    the marks, and none for the rest of the call; the next call tries them
-    afresh."""
+    the marks, and, once that went through, none for the rest of the
+    process at that gateway: the next call sends none either."""
     pytest.importorskip("litellm")
     doc_id = seed_doc(store_path, "pi-a", "report.pdf")
     marks = []
     _mock_litellm(monkeypatch, [
         _refusal("cache_control"), _litellm_reply(tool_calls=_TWO_CALLS[:1]),
-        _litellm_reply("A"), _refusal("cache_control"), _litellm_reply("A")],
+        _litellm_reply("A"), _litellm_reply("A")],
         marks)
     backend = {"base_url": "https://gateway.example/v1", "api_key": "k"}
     for _ in range(2):
         out = client.chat_completions("q", doc_id=doc_id, backend=backend,
                                       model="openai/anthropic/claude-strict")
         assert out.choices[0].message.content == "A"
-    assert [bool(points) for points in marks] == [True, False, False, True,
-                                                  False]
+    assert [bool(points) for points in marks] == [True, False, False, False]
 
 
 @needs_agents
@@ -1932,7 +2228,7 @@ def test_chat_retry_waits_as_the_server_asks():
 @needs_agents
 def test_chat_retry_budget_follows_the_constant(monkeypatch):
     monkeypatch.setattr("pageindex.retry.CHAT_RETRIES", 5)
-    assert local_chat._chat_retry(local_chat._Replies("m")).max_retries == 5
+    assert local_chat._chat_retry(local_chat._Replies("m"), set()).max_retries == 5
 
 
 def test_a_stream_error_retries_by_its_status():
@@ -3940,6 +4236,29 @@ def test_chat_none_turns_claude_thinking_off(monkeypatch):
             sent(model)
     with pytest.raises(PageIndexAPIError, match="can't turn thinking off"):
         sent("anthropic/claude-opus-5-5", "low", extra_body={"reasoning": {"effort": "none"}})
+
+
+@needs_agents
+def test_chat_none_reaches_databricks_claude_as_its_switch(client, monkeypatch):
+    """The switch that stands in for "none" goes out alone, so Databricks,
+    where LiteLLM drops a switch sent beside "none", gets it too."""
+    pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+    bodies = []
+    reply = {"id": "c", "object": "chat.completion", "created": 0, "model": "m",
+             "choices": [{"index": 0, "finish_reason": "stop",
+                          "message": {"role": "assistant", "content": "ok"}}],
+             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+
+    async def post(self, url=None, *args, **kwargs):
+        bodies.append(kwargs.get("json") or json.loads(kwargs.get("data") or "{}"))
+        return httpx.Response(200, json=reply, request=httpx.Request("POST", str(url)))
+    monkeypatch.setattr(AsyncHTTPHandler, "post", post)
+    client.chat_completions("q", model="databricks/databricks-claude-sonnet-5",
+                            reasoning_effort="none",
+                            backend={"api_key": "test", "base_url": "http://127.0.0.1:9"})
+    assert bodies[-1].get("thinking") == {"type": "disabled"}
+    assert "reasoning_effort" not in bodies[-1]
 
 
 def test_claude_code_chat_refuses_none():
@@ -6360,15 +6679,19 @@ def test_chat_protocol_messages_is_the_door(client, monkeypatch):
 
 def test_chat_protocol_messages_none_turns_claude_thinking_off(client, monkeypatch):
     """Anthropic's effort takes no "none": a Claude model gets its own
-    thinking switch instead, one that can't turn thinking off raises, and a
-    caller's own thinking or another model keeps the effort field."""
+    thinking switch instead, as the LiteLLM lane sends it (disabled where
+    the table lacks the model), one that can't turn thinking off raises, and
+    a caller's own thinking or a model that isn't Claude keeps the effort
+    field."""
     seen = []
     monkeypatch.setattr(local_chat, "run_messages",
                         lambda c, messages, **kw: seen.append(kw) or "door")
     for model, body in (("claude-haiku-5-5", {"thinking": {"type": "disabled"}}),
                         ("anthropic/claude-sonnet-5-5",
                          {"thinking": {"type": "between_tools"}}),
-                        ("claude-x", {"output_config": {"effort": "none"}})):
+                        ("claude-opus-4-8", {"thinking": {"type": "disabled"}}),
+                        ("claude-x", {"thinking": {"type": "disabled"}}),
+                        ("kimi-k2-test", {"output_config": {"effort": "none"}})):
         client.chat("q", protocol="messages", model=model, reasoning_effort="none")
         assert seen[-1]["extra_body"] == body, model
     client.chat("q", protocol="messages", model="claude-haiku-5-5",

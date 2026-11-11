@@ -190,7 +190,7 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                      optimize_model=None, summary_concurrency=None,
                      use_embedded_toc=True, summary_max_words=None,
                      summary_reasoning_effort=None) -> dict:
-    """Build a PageIndex tree structure from a PDF using layout statistics. The tree extraction itself uses no LLM; by default an LLM writes node summaries and expands the tree (``summary=False, optimize=False`` runs fully LLM-free). Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand (a model unreachable after the retry ladder — a missing credential included — fails the run loudly from expand itself; a per-prompt rejection leaves just that node collapsed), ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility; defaults to ``"full"``. Expand needs readable page text, so a bookmark-only or scanned PDF runs the merge half only (``expands`` reports 0). optimize_expand: deprecated — use ``optimize``. Honored only when ``optimize`` is not passed (or is the legacy ``True``): ``False`` maps to ``"merge"``, ``True`` to ``"full"``. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: cap on simultaneous indexing model calls per lane: the summaries, and expand up to its own ceiling of 32 (the lanes overlap, so up to cap + min(32, cap) calls run at once); None uses the library defaults (128 and 32). use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored. On by default; pass False for the pure detected structure. summary_max_words: word cap each model-written node summary is asked to stay within (a leaf shorter than that keeps its raw text); None uses the library default (150). summary_reasoning_effort: the reasoning effort sent with each summary call (``"none"``, ``"low"``, ``"high"``, ...; a model without the setting drops it); None sends the library default (``"none"``) unless LiteLLM lists the model as refusing it, and stops sending it once a prompt the server refused with it (HTTP 400) goes through without it (never on ``claude-code/``, whose effort is checked up front). ``"none"`` raises on a model whose thinking can't be turned off (Claude Opus 5.5 and Fable under ``anthropic/``, ``bedrock/``, ``vertex_ai/`` or ``azure_ai/``) and on any ``claude-code/`` model; the default runs them at ``"low"``. Expand keeps the model's own default. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of ``{"title", "node_id", "start_index", "end_index"}`` dicts; ``"nodes"`` holds the children where there are any and ``"summary"`` appears when summaries ran; page indexes are 1-based; a hierarchy that starts after page 1 is preceded by a ``Preface`` node covering the pages before it, as in standard mode, and the first section's page too unless that heading opens it; a parent whose first child starts on a later page opens with a child titled ``"<parent title> (intro)"`` holding the pages before it; a parent's range and summary cover its whole subtree) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). ``toc_source`` says where the structure came from: ``"detected"`` (layout), ``"bookmarks"`` (the embedded outline), ``"hybrid"`` (bookmarks framing the detected sections), ``"pages"`` (no hierarchy found, so one node per page titled ``Page N``; left unsummarized and unoptimized when there are more than ``FLAT_TREE_MAX_NODES`` pages, a size the local client and CLI refuse) or ``"unreadable"`` (no page carries text; ``structure`` is empty). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics; a refused flat tree carries neither it nor node summaries. """
+    """Build a PageIndex tree structure from a PDF using layout statistics. The tree extraction itself uses no LLM; by default an LLM writes node summaries and expands the tree (``summary=False, optimize=False`` runs fully LLM-free). Args: pdf: path to a PDF file (``str`` or ``pathlib.Path``) or an in-memory binary stream (``io.BytesIO``). summary: if True, generate LLM summaries for each node (requires ``summary_model``). summary_model: the LLM model identifier to use for summary generation. optimize: ``"full"`` for merge + LLM expand (a model unreachable after the retry ladder — a missing credential included — fails the run loudly from expand itself; a per-prompt rejection leaves just that node collapsed), ``"merge"`` for deterministic merge only, ``False`` to disable. ``True`` is accepted as ``"full"`` for backward compatibility; defaults to ``"full"``. Expand needs readable page text, so a bookmark-only or scanned PDF runs the merge half only (``expands`` reports 0). optimize_expand: deprecated — use ``optimize``. Honored only when ``optimize`` is not passed (or is the legacy ``True``): ``False`` maps to ``"merge"``, ``True`` to ``"full"``. optimize_model: the LLM model for expand (defaults to the summary model). summary_concurrency: cap on simultaneous indexing model calls per lane: the summaries, and expand up to its own ceiling of 32 (the lanes overlap, so up to cap + min(32, cap) calls run at once); None uses the library defaults (128 and 32). use_embedded_toc: if True, consume the PDF's embedded bookmarks when trustworthy: deep bookmarks become the frame and the detected sections they lack are grafted back in after noise filtering, coarse ones become the chapter frame with detected nodes re-hung under them (deeper sparse entries are filled in when the page text confirms them, and garbled extracted titles are repaired from the bookmark strings), garbage ones are ignored. On by default; pass False for the pure detected structure. summary_max_words: word cap each model-written node summary is asked to stay within (a leaf shorter than that keeps its raw text); None uses the library default (150). summary_reasoning_effort: the reasoning effort sent with each summary call (``"none"``, ``"low"``, ``"high"``, ...; a level LiteLLM's model map says the model doesn't take raises before any model call, as chat does, a model LiteLLM doesn't know on an OpenAI-format API, ``azure/`` or a provider LiteLLM lists as OpenAI-compatible, gets it as is (a level LiteLLM drops even then raises too), and one it doesn't know elsewhere, ``openai/`` included, goes as LiteLLM takes it, which may drop the effort unless LiteLLM's published map knows the model; a global ``litellm.drop_params = True`` turns these checks off, and LiteLLM then drops a level the model doesn't take, unseen); None sends the least thinking the model takes, trying ``"none"``, ``"minimal"``, ``"low"`` in turn (a Claude model under ``anthropic/``, ``bedrock/``, ``vertex_ai/``, ``azure_ai/`` or ``databricks/``: ``thinking`` ``disabled``, then ``between_tools``, then ``"low"``), skipping a level LiteLLM would not send or its model map says the model doesn't take, ``"minimal"`` tried only where the map lists it, and steps past a level the server refuses (HTTP 400 or 422) once a prompt goes through without it (never on ``claude-code/``, whose effort is checked up front). ``"none"`` also raises on a model whose thinking can't be turned off (Claude Opus 5.5 and Fable under ``anthropic/``, ``bedrock/``, ``vertex_ai/``, ``azure_ai/`` or ``databricks/``) and on any ``claude-code/`` model; the default runs them at ``"low"``. Expand keeps the model's own default. Returns: dict with keys ``doc_name``, ``doc_title``, ``structure`` (a list of ``{"title", "node_id", "start_index", "end_index"}`` dicts; ``"nodes"`` holds the children where there are any and ``"summary"`` appears when summaries ran; page indexes are 1-based; a hierarchy that starts after page 1 is preceded by a ``Preface`` node covering the pages before it, as in standard mode, and the first section's page too unless that heading opens it; a parent whose first child starts on a later page opens with a child titled ``"<parent title> (intro)"`` holding the pages before it; a parent's range and summary cover its whole subtree) and ``has_abstract_or_references_section`` (True when a top-level entry is an abstract or references heading). ``toc_source`` says where the structure came from: ``"detected"`` (layout), ``"bookmarks"`` (the embedded outline), ``"hybrid"`` (bookmarks framing the detected sections), ``"pages"`` (no hierarchy found, so one node per page titled ``Page N``; left unsummarized and unoptimized when there are more than ``FLAT_TREE_MAX_NODES`` pages, a size the local client and CLI refuse) or ``"unreadable"`` (no page carries text; ``structure`` is empty). With ``optimize`` an ``optimize`` key reports merge/expand counts and before/after search-cost metrics; a refused flat tree carries neither it nor node summaries. """
     for name, value in (("summary_concurrency", summary_concurrency),
                         ("summary_max_words", summary_max_words)):
         if value is not None and not (isinstance(value, numbers.Integral) and int(value) >= 1):
@@ -200,8 +200,12 @@ def page_index_flash(pdf, summary=True, summary_model=None,
         raise ValueError(f"summary_reasoning_effort must be a non-empty str, "
                          f"got {summary_reasoning_effort!r}")
     effort = summary_reasoning_effort and summary_reasoning_effort.strip()
+    if summary and summary_model is None:
+        from ..utils import ConfigLoader
+        cfg = ConfigLoader().load()
+        summary_model = getattr(cfg, 'summary_model', None) or cfg.model
     if summary:
-        _refuse_none(summary_model, effort)
+        _refuse_effort(summary_model, effort)
     from ..integrations.claude_agent_sdk import claude_code_workflows, is_claude_code
     prewarm = ()
     if summary and is_claude_code(summary_model):
@@ -214,18 +218,20 @@ def page_index_flash(pdf, summary=True, summary_model=None,
                                  summary_max_words, summary_reasoning_effort)
 
 
-def _refuse_none(model, effort):
-    """Raise when ``effort`` is a "none" that ``model`` can't honor."""
+def _refuse_effort(model, effort):
+    """Raise when a chosen ``effort`` can't reach ``model`` as chosen. A
+    verdict LiteLLM's published map may change, its download still
+    running, the summaries' own check judges: the PDF read by then and
+    before any model call (expand's included)."""
     from ..integrations.claude_agent_sdk import is_claude_code
-    from ..utils import thinking_stays_on
     if effort == "none" and is_claude_code(model):
         raise ValueError(
             f"{model} takes no summary_reasoning_effort='none'; pass 'low' "
             "or leave it unset.")
-    if effort == "none" and thinking_stays_on(model):
-        raise ValueError(
-            f"{model} can't turn thinking off, so it can't honor "
-            "summary_reasoning_effort='none'; pass 'low' or leave it unset.")
+    if effort and not is_claude_code(model):
+        from ..utils import chosen_effort, start_learning_if_effort_dropped
+        if not start_learning_if_effort_dropped(model, effort):
+            chosen_effort(model, effort, name="summary_reasoning_effort")
 
 
 def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
@@ -247,6 +253,11 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
     elif optimize not in ("full", "merge"):
         raise ValueError(
             f"optimize must be 'full', 'merge', or False, got {optimize!r}")
+    from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
+    effort = summary_reasoning_effort and summary_reasoning_effort.strip()
+    if summary and not effort and not is_claude_code(summary_model):
+        from ..utils import start_learning_if_effort_dropped
+        start_learning_if_effort_dropped(summary_model)  # downloads while the PDF is read
     result = extract_toc(_validate_pdf(pdf), use_embedded_toc=use_embedded_toc)
     structure = result.get("structure", [])
     if not structure:
@@ -262,21 +273,13 @@ def _page_index_flash(pdf, summary, summary_model, optimize, optimize_expand,
         # the managed pipelines refuse a flat tree this size; skip the model passes
         result.pop("page_texts", None)
         return result
-    if summary and structure and summary_model is None:
-        from ..utils import ConfigLoader
-        cfg = ConfigLoader().load()
-        summary_model = getattr(cfg, 'summary_model', None) or cfg.model
     from ..utils import (SUMMARY_MAX_WORDS, default_summary_reasoning_effort,
                          learn_model_if_effort_dropped)
-    from ..integrations.claude_agent_sdk import claude_code_check, is_claude_code
     if summary and structure and not is_claude_code(summary_model):
-        learn_model_if_effort_dropped(summary_model)  # before the default reads the map
-    effort = summary_reasoning_effort and summary_reasoning_effort.strip()
+        learn_model_if_effort_dropped(summary_model, effort)  # before the default or the chosen check reads the map
     defaulted = not effort
     if summary and structure and defaulted:
         effort = default_summary_reasoning_effort(summary_model)
-    if summary and structure and not defaulted:
-        _refuse_none(summary_model, effort)  # a model read from the config
     if summary and structure and not defaulted and effort != "none" \
             and is_claude_code(summary_model):
         # a summary call would first check the effort after expand has

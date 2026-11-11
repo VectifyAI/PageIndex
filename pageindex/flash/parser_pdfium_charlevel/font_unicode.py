@@ -187,8 +187,17 @@ def _simple_font_to_unicode(
     return to_unicode
 
 
-def _font_unicode_map(pdf_doc, xref: int) -> tuple[int, dict[int, str]] | None:
-    """Return the final per-charcode glyph-unicode map for one font as ``(bytes_per_code, {charcode: unicode})``. Simple fonts use 1-byte codes; Identity-H/V composite fonts use 2-byte codes with the included ToUnicode map. ``None`` means uncovered input such as non-Identity composite CMaps or unreadable dictionaries; callers then skip the page patch walk and keep PDFium's output."""
+def _tounicode_map(pdf_doc, stream_xref: int, map_cache: dict) -> dict[int, str]:
+    """Parse a ToUnicode stream once per distinct content per document: fonts, and each page's own copy of a font, often carry the same CMap, and one 0000-FFFF range expands to 65,536 entries. Fonts with equal CMaps share the parsed dict, so it is read-only."""
+    data = pdf_doc.xref_stream(stream_xref)
+    key = ("tounicode", data)
+    if key not in map_cache:
+        map_cache[key] = _parse_tounicode_cmap(data)
+    return map_cache[key]
+
+
+def _font_unicode_map(pdf_doc, xref: int, map_cache: dict) -> tuple[int, dict[int, str]] | None:
+    """Return the final per-charcode glyph-unicode map for one font as ``(bytes_per_code, {charcode: unicode})``. Simple fonts use 1-byte codes; Identity-H/V composite fonts use 2-byte codes with the included ToUnicode map. ``None`` means uncovered input such as non-Identity composite CMaps or unreadable dictionaries; callers then skip the page patch walk and keep PDFium's output. ``map_cache`` is the caller's per-document cache; parsed ToUnicode streams are kept there."""
     glyphs, encs = _load_glyph_tables()
 
     def _xref_key(number: int, other_text: str) -> tuple[str, str]:
@@ -219,8 +228,7 @@ def _font_unicode_map(pdf_doc, xref: int) -> tuple[int, dict[int, str]] | None:
         tu_map: dict[int, str] | None = None
         if pdf_value_type == "xref":
             try:
-                tu_map = _parse_tounicode_cmap(
-                    pdf_doc.xref_stream(int(pdf_value.split()[0])))
+                tu_map = _tounicode_map(pdf_doc, int(pdf_value.split()[0]), map_cache)
             except Exception:
                 tu_map = None  # ToUnicode parsing rejects -> no ToUnicode map
         # The "font carries a ToUnicode map" flag is set only for a present,
@@ -347,7 +355,7 @@ def _font_unicode_map(pdf_doc, xref: int) -> tuple[int, dict[int, str]] | None:
     pdf_value_type, pdf_value = _xref_key(xref, "ToUnicode")
     if pdf_value_type == "xref":
         try:
-            included = _parse_tounicode_cmap(pdf_doc.xref_stream(int(pdf_value.split()[0])))
+            included = _tounicode_map(pdf_doc, int(pdf_value.split()[0]), map_cache)
         except Exception:
             included = None  # ToUnicode parsing error path: treat as absent
 

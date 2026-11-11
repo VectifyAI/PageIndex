@@ -34,7 +34,7 @@ def _apply_font_unicode(
             return None
         if font_xref not in map_cache:
             try:
-                map_cache[font_xref] = _font_unicode_map(pdf_doc, font_xref)
+                map_cache[font_xref] = _font_unicode_map(pdf_doc, font_xref, map_cache)
             except Exception:
                 map_cache[font_xref] = None
         entry = map_cache[font_xref]

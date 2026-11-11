@@ -55,12 +55,12 @@ class CloudAPI:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Upload a PDF document for processing. The system will automatically process both tree generation and OCR.
+        Upload a PDF document for processing; the tree is built in the background.
         Immediately returns a document identifier (`doc_id`) for subsequent operations.
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): Processing mode (e.g., "mcp"). Defaults to None.
+            mode (str, optional): None (default), the OCR-based cloud pipeline, or "flash".
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
@@ -72,9 +72,16 @@ class CloudAPI:
                 (a taken name gains a numeric suffix), when the server
                 returns it.
         """
+        if mode not in (None, "flash"):
+            raise PageIndexAPIError(
+                f"Failed to submit document: unknown cloud processing mode {mode!r}. "
+                "Cloud supports only 'flash'."
+            )
         data: Dict[str, Any] = {'if_retrieval': True}
-        if mode is not None:
-            data['mode'] = mode
+        if mode == "flash":
+            # The server rejects if_retrieval alongside algorithm=flash, and
+            # keeps node text for Flash trees by default.
+            data = {'algorithm': 'flash'}
         if beta_headers is not None:
             data['beta_headers'] = json.dumps(beta_headers)
         if folder_id is not None:

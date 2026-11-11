@@ -18,6 +18,13 @@ def _no_published_model_map(monkeypatch):
     monkeypatch.setattr(utils, "_MAP_SET_BY_USER", True)
 
 
+@pytest.fixture(autouse=True)
+def _no_refusals_remembered(monkeypatch):
+    """Each test starts with no server refusal remembered for the process."""
+    from pageindex import utils
+    monkeypatch.setattr(utils, "_refusals", {})
+
+
 def exit_code_in_forked_child(check, timeout=5):
     """``check()`` run in a forked child of this process: exit code 0 when it
     returns true, 1 when false or raising, minus SIGALRM when it hangs."""
