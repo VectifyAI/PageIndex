@@ -1382,10 +1382,12 @@ def _raise_account_limit(blocks: list) -> None:
 
 
 def _bridge_invoker(bridge, name: str, schema: dict,
+                    collection: Optional[str] = None,
                     ) -> "Callable[[dict], tuple[list, bool]]":
     """One cloud tool call proxied over MCP: string booleans are coerced
     (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
-    matching the contract's "omit if ..." semantics) and failures are
+    matching the contract's "omit if ..." semantics), a tool that takes a
+    ``collection`` is held to the given one, and failures are
     contained in the error envelope — except auth failures, what
     survived the bridge's own retries (401/403/429/5xx), an unreachable
     server and the cloud's RATE_LIMITED / USAGE_LIMIT_REACHED tool errors
@@ -1395,6 +1397,9 @@ def _bridge_invoker(bridge, name: str, schema: dict,
         try:
             arguments = {key: value for key, value in arguments.items()
                          if value is not None}
+            if collection is not None and "collection" in (
+                    schema.get("properties") or {}):
+                arguments["collection"] = collection
             _coerce_bool_args(schema, arguments)
             blocks, is_error = bridge.call_tool(name, arguments)
         except Exception as exc:
@@ -1523,6 +1528,7 @@ def _require_doc_selection(doc_ids) -> None:
 
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
                 annotations: Optional[dict] = None,
+                collection: Optional[str] = None,
                 ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[list, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (content blocks, is_error):
@@ -1531,10 +1537,15 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     ``doc_ids`` is the local chat scope, already validated and dropped on
     cloud by ``_local_doc_scope``. A dict passed as ``annotations``
     receives each annotated tool's MCP annotations by name: the server's
-    on cloud, the contract's locally."""
+    on cloud, the contract's locally. ``collection`` is the cloud chat's
+    collection, by name: every tool that takes one is held to it, and the
+    folder-tree tools are left out."""
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
+        if collection is not None:
+            tools_meta = [meta for meta in tools_meta if meta.get("name") not in
+                          ("browse_documents", "get_folder_structure")]
         if not tools_meta:
             raise PageIndexAPIError(
                 "The MCP server returned no tools — a zero-tool agent would "
@@ -1549,7 +1560,7 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
                  copy.deepcopy(meta.get("inputSchema"))
                  or {"type": "object", "properties": {}},
                  _bridge_invoker(bridge, str(meta.get("name") or "tool"),
-                                 meta.get("inputSchema") or {}))
+                                 meta.get("inputSchema") or {}, collection))
                 for meta in tools_meta]
 
     def local_invoke(name: str) -> "Callable[[dict], tuple[list, bool]]":
@@ -1661,16 +1672,21 @@ CITATIONS
 
 def fetch_citation_prompt(client, format: str) -> str:
     """The MCP server's ``cited_answer`` prompt as system-prompt text;
-    ``format`` rides as its one argument. Local: the frozen copy,
-    page-level."""
-    if format not in LOCAL_CITATION_PROMPTS:
+    ``format`` rides as its one argument: a frozen format, or another the
+    server completes. Local: the frozen copy, page-level."""
+    known = list(LOCAL_CITATION_PROMPTS)
+    bridge = None
+    if getattr(client, "api_key", None):
+        bridge = _cloud_bridge(client, gated=True)
+        if format not in known:
+            known = (bridge.prompt_argument_values("cited_answer", "format")
+                     or known)
+    if format not in known:
         raise PageIndexAPIError(
-            f"citations format {format!r} is not one of "
-            f"{', '.join(LOCAL_CITATION_PROMPTS)}.")
-    if not getattr(client, "api_key", None):
+            f"citations format {format!r} is not one of {', '.join(known)}.")
+    if bridge is None:
         return LOCAL_CITATION_PROMPTS[format]
-    _, messages = _cloud_bridge(client, gated=True).get_prompt(
-        "cited_answer", {"format": format})
+    _, messages = bridge.get_prompt("cited_answer", {"format": format})
     text = render_prompt_text(messages)
     if not text.strip():
         raise PageIndexAPIError(
@@ -1772,10 +1788,48 @@ def folder_targeting_block(client, folder_id) -> Optional[str]:
     )
 
 
-def targeting_block(client, doc_id, folder_id=None) -> Optional[str]:
-    """The chat lanes' leading user message: the folder block, then the
-    document block, joined as the managed chat joins them; None when
-    there is nothing to place."""
-    blocks = [folder_targeting_block(client, folder_id),
+def collection_targeting_block(client, collection_id,
+                               ) -> tuple[Optional[str], Optional[str]]:
+    """The collection_id targeting text, in the folder block's shape, and
+    the collection's name, which the tools address it by. Cloud-only."""
+    if collection_id is None:
+        return None, None
+    if not isinstance(collection_id, str) or not collection_id:
+        raise PageIndexAPIError("collection_id must be a non-empty string.")
+    if not getattr(client, "api_key", None):
+        raise PageIndexAPIError(
+            "collection_id is cloud-only — collections are not supported in "
+            "local mode. Create the client with an api_key to use them.")
+    collections = client.list_collections().get("collections") or []
+    collection = next(
+        (c for c in collections if c.get("id") == collection_id), None)
+    if collection is None:
+        raise PageIndexAPIError(
+            f"Collection not found or access denied: {collection_id}")
+    metadata = {key: collection[key] for key in ("id", "name", "description")
+                if collection.get(key)}
+    name = json.dumps(collection.get("name"), ensure_ascii=False)
+    return (
+        f"The user has specified collection: {collection.get('name')}\n"
+        f"Collection metadata: {json.dumps(metadata, ensure_ascii=False)}\n"
+        f"Discover its documents with list_documents(collection={name}) "
+        f"or search_documents(questions, collection={name})."
+    ), collection.get("name")
+
+
+def targeting_block(client, doc_id, folder_id=None, collection_id=None,
+                    ) -> tuple[Optional[str], Optional[str]]:
+    """The chat lanes' leading user message: the folder or collection
+    block, then the document block, joined as the managed chat joins them,
+    None when there is nothing to place; and the collection's name, for
+    the tools to be held to."""
+    if collection_id is not None and (
+            doc_id is not None or folder_id not in (None, "", "root")):
+        raise PageIndexAPIError(
+            "collection_id scopes the chat to one collection — pass it "
+            "without doc_id and folder_id.")
+    collection_block, collection = collection_targeting_block(
+        client, collection_id)
+    blocks = [folder_targeting_block(client, folder_id), collection_block,
               doc_targeting_block(client, doc_id)]
-    return "\n\n".join(block for block in blocks if block) or None
+    return "\n\n".join(block for block in blocks if block) or None, collection

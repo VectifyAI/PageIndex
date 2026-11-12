@@ -26,7 +26,8 @@ from ..errors import PageIndexAPIError
 
 def build_anthropic_tools(client, include_management: bool = False,
                           asynchronous: bool = False, doc_ids=None,
-                          failures: Optional[list] = None) -> list:
+                          failures: Optional[list] = None,
+                          collection: Optional[str] = None) -> list:
     """``failures`` records the invoker's re-raised failures for
     chat(protocol="messages") to fail fast on."""
     try:
@@ -81,4 +82,4 @@ def build_anthropic_tools(client, include_management: bool = False,
 
     return [wrap(*spec)
             for spec in _tool_specs(client, include_management,
-                                    doc_ids=doc_ids)]
+                                    doc_ids=doc_ids, collection=collection)]

@@ -2845,6 +2845,9 @@ def test_citation_prompt_cloud(monkeypatch):
             created.append(self)
             self.prompts = []
 
+        def prompt_argument_values(self, prompt, argument):
+            pytest.fail("a frozen format is asked about")
+
         def get_prompt(self, name, arguments=None):
             self.prompts.append((name, arguments))
             fmt = (arguments or {}).get("format", "markdown")
@@ -2868,12 +2871,51 @@ def test_citation_prompt_empty_raises(monkeypatch):
     import pageindex.mcp_bridge as mcp_bridge
 
     class _Bridge(_FakeBridge):
+        def prompt_argument_values(self, prompt, argument):
+            return None
+
         def get_prompt(self, name, arguments=None):
             return None, []
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
     with pytest.raises(PageIndexAPIError, match="empty cited_answer prompt"):
         PageIndexCloudClient(api_key="pi-test-key").citation_prompt()
+
+
+@pytest.mark.parametrize("served, allowed", [
+    (["markdown", "cite", "cite_with_boxes"],
+     ["markdown", "cite", "cite_with_boxes"]),
+    (["markdown", "cite"], ["markdown", "cite"]),
+    (None, ["markdown", "cite"]),
+])
+def test_citation_prompt_cloud_takes_the_servers_formats(monkeypatch, served,
+                                                         allowed):
+    """A cloud format beyond the frozen ones is one the server completes for
+    cited_answer's format argument; the server serves its default for a
+    name it does not know, so another name raises before any prompt is
+    fetched."""
+    import pageindex.mcp_bridge as mcp_bridge
+    fetched = []
+
+    class _Bridge(_FakeBridge):
+        def prompt_argument_values(self, prompt, argument):
+            assert (prompt, argument) == ("cited_answer", "format")
+            return served
+
+        def get_prompt(self, name, arguments=None):
+            fetched.append(arguments["format"])
+            return None, [{"role": "user", "content": {
+                "type": "text", "text": f"CITATIONS — {arguments['format']}"}}]
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    for fmt in allowed:
+        assert cloud.citation_prompt(format=fmt) == f"CITATIONS — {fmt}"
+    for fmt in {"cite_with_boxes", "bogus"} - set(allowed):
+        with pytest.raises(PageIndexAPIError,
+                           match=f"{fmt}' is not one of {', '.join(allowed)}"):
+            cloud.citation_prompt(format=fmt)
+    assert fetched == allowed
 
 
 def test_citation_prompt_local_frozen_copy(client):
@@ -3634,6 +3676,36 @@ def test_mcp_bridge_prompts(monkeypatch):
 
     with pytest.raises(PageIndexAPIError, match="-32602: Prompt nope not found"):
         bridge.get_prompt("nope")
+
+
+@pytest.mark.parametrize("capabilities, values", [
+    ({"prompts": {}, "completions": {}}, ["markdown", "cite"]),
+    ({"prompts": {}}, None),
+])
+def test_mcp_bridge_prompt_argument_values(monkeypatch, capabilities, values):
+    """completion/complete for a prompt argument from an empty value; a
+    server without the completions capability is never asked."""
+    from pageindex.mcp_bridge import McpBridge
+
+    posts = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posts.append(json)
+        if json.get("method") == "initialize":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": json["id"], "result": {
+                "protocolVersion": "2025-06-18", "capabilities": capabilities}})
+        if json.get("method") == "completion/complete":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": json["id"], "result": {
+                "completion": {"values": ["markdown", "cite"], "total": 2}}})
+        return _JsonResp(202)
+
+    _fake_requests(monkeypatch, fake_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    assert bridge.prompt_argument_values("cited_answer", "format") == values
+    sent = [p for p in posts if p.get("method") == "completion/complete"]
+    assert [p["params"] for p in sent] == ([{
+        "ref": {"type": "ref/prompt", "name": "cited_answer"},
+        "argument": {"name": "format", "value": ""}}] if values else [])
 
 
 def test_mcp_bridge_prompts_require_server_capability(monkeypatch):
