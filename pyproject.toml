@@ -39,6 +39,7 @@ mcp = ">=1.19.0,<3"
 # 1.107 line: lift the cap at its first clean release (1.107.0 was malware).
 litellm = ">=1.105.1,<1.106"
 PyPDF2 = ">=3.0.0"
+pycryptodome = ">=3.15.0"
 pypdfium2 = ">=5"
 sortedcontainers = ">=2.4.0"
 regex = ">=2024.0.0"
