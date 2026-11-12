@@ -1661,16 +1661,20 @@ CITATIONS
 
 def fetch_citation_prompt(client, format: str) -> str:
     """The MCP server's ``cited_answer`` prompt as system-prompt text;
-    ``format`` rides as its one argument. Local: the frozen copy,
-    page-level."""
-    if format not in LOCAL_CITATION_PROMPTS:
+    ``format`` rides as its one argument and must be one the server
+    completes (the frozen formats where it completes none). Local: the
+    frozen copy, page-level."""
+    known = list(LOCAL_CITATION_PROMPTS)
+    bridge = None
+    if getattr(client, "api_key", None):
+        bridge = _cloud_bridge(client, gated=True)
+        known = bridge.prompt_argument_values("cited_answer", "format") or known
+    if format not in known:
         raise PageIndexAPIError(
-            f"citations format {format!r} is not one of "
-            f"{', '.join(LOCAL_CITATION_PROMPTS)}.")
-    if not getattr(client, "api_key", None):
+            f"citations format {format!r} is not one of {', '.join(known)}.")
+    if bridge is None:
         return LOCAL_CITATION_PROMPTS[format]
-    _, messages = _cloud_bridge(client, gated=True).get_prompt(
-        "cited_answer", {"format": format})
+    _, messages = bridge.get_prompt("cited_answer", {"format": format})
     text = render_prompt_text(messages)
     if not text.strip():
         raise PageIndexAPIError(
@@ -1772,10 +1776,45 @@ def folder_targeting_block(client, folder_id) -> Optional[str]:
     )
 
 
-def targeting_block(client, doc_id, folder_id=None) -> Optional[str]:
-    """The chat lanes' leading user message: the folder block, then the
-    document block, joined as the managed chat joins them; None when
-    there is nothing to place."""
+def collection_targeting_block(client, collection_id) -> Optional[str]:
+    """The collection_id targeting text, in the folder block's shape,
+    naming the collection as the tools address it: by name. Cloud-only."""
+    if collection_id is None:
+        return None
+    if not isinstance(collection_id, str) or not collection_id:
+        raise PageIndexAPIError("collection_id must be a non-empty string.")
+    if not getattr(client, "api_key", None):
+        raise PageIndexAPIError(
+            "collection_id is cloud-only — collections are not supported in "
+            "local mode. Create the client with an api_key to use them.")
+    collections = client.list_collections().get("collections") or []
+    collection = next(
+        (c for c in collections if c.get("id") == collection_id), None)
+    if collection is None:
+        raise PageIndexAPIError(
+            f"Collection not found or access denied: {collection_id}")
+    metadata = {key: collection[key] for key in ("id", "name", "description")
+                if collection.get(key)}
+    name = json.dumps(collection.get("name"), ensure_ascii=False)
+    return (
+        f"The user has specified collection: {collection.get('name')}\n"
+        f"Collection metadata: {json.dumps(metadata, ensure_ascii=False)}\n"
+        f"Discover its documents with list_documents(collection={name}) "
+        f"or search_documents(questions, collection={name})."
+    )
+
+
+def targeting_block(client, doc_id, folder_id=None,
+                    collection_id=None) -> Optional[str]:
+    """The chat lanes' leading user message: the folder or collection
+    block, then the document block, joined as the managed chat joins them;
+    None when there is nothing to place."""
+    if collection_id is not None and (
+            doc_id is not None or folder_id not in (None, "", "root")):
+        raise PageIndexAPIError(
+            "collection_id scopes the chat to one collection — pass it "
+            "without doc_id and folder_id.")
     blocks = [folder_targeting_block(client, folder_id),
+              collection_targeting_block(client, collection_id),
               doc_targeting_block(client, doc_id)]
     return "\n\n".join(block for block in blocks if block) or None

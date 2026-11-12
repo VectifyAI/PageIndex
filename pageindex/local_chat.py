@@ -841,7 +841,8 @@ def _merged_backend(client, backend):
 _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
 _ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
-                  "folder_id": "folder_id=", "model": "model=",
+                  "folder_id": "folder_id=",
+                  "collection_id": "collection_id=", "model": "model=",
                   "reasoning_effort":
                       "reasoning_effort= (own chat models only)",
                   **dict.fromkeys(("api_key", "base_url", "api_base"),
@@ -979,11 +980,12 @@ def _validate_max_turns(max_turns) -> None:
 
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
-                            items, folder_id=None) -> str:
+                            items, folder_id=None, collection_id=None) -> str:
     """prompt_cache_key per conversation; items exclude the targeting block."""
     scope = [doc_id] if isinstance(doc_id, str) else doc_id
     seed = json.dumps([model_name, instructions, scope,
                        *([folder_id] if folder_id else []),
+                       *([collection_id] if collection_id else []),
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -1304,7 +1306,7 @@ def _text_only(chunks) -> Iterator[str]:
 def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
-                folder_id=None,
+                folder_id=None, collection_id=None,
                 ) -> "tuple[Any, list, str, Optional[_Replies]]":
     """The chat lane's shared prologue: validated history, doc targeting,
     and the configured agent. Returns (agent, input items, model name,
@@ -1312,7 +1314,7 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     messages = list(messages)
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block = targeting_block(client, doc_id, folder_id, collection_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
     managed = _managed_instructions(client, system_texts)
@@ -1320,7 +1322,7 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
                               model_name, managed, doc_id, history,
-                              folder_id),
+                              folder_id, collection_id),
                           reasoning_effort=reasoning_effort,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
@@ -1636,7 +1638,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                     reasoning_effort=None,
                     show_process: Union[bool, Mapping[str, Any]] = False,
                     max_turns=None, backend=None, extra_headers=None,
-                    extra_body=None, folder_id=None,
+                    extra_body=None, folder_id=None, collection_id=None,
                     ) -> ChatStream:
     """chat(stream=True): validation and the agent build run here, eagerly;
     the run itself starts when the returned stream's chosen view is first
@@ -1654,6 +1656,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     if is_claude_code(model or client.chat_model):
         run = _claude_code_run(client, messages, model or client.chat_model,
                                doc_id=doc_id, folder_id=folder_id,
+                               collection_id=collection_id,
                                reasoning_effort=reasoning_effort,
                                max_turns=max_turns, partial=True,
                                extra_body=extra_body,
@@ -1671,7 +1674,8 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                                      reasoning_effort=reasoning_effort,
                                      extra_body=extra_body, backend=backend,
                                      extra_headers=extra_headers,
-                                     folder_id=folder_id)
+                                     folder_id=folder_id,
+                                     collection_id=collection_id)
     run_kwargs = _run_kwargs(max_turns)
 
     def events():
@@ -1694,6 +1698,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
                          folder_id: Optional[str] = None,
+                         collection_id: Optional[str] = None,
                          ) -> Union[ChatObject, Iterator[str],
                                     Iterator[ChatObject]]:
     if enable_citations:
@@ -1707,6 +1712,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     if is_claude_code(model or client.chat_model):
         run = _claude_code_run(client, messages, model or client.chat_model,
                                doc_id=doc_id, folder_id=folder_id,
+                               collection_id=collection_id,
                                reasoning_effort=reasoning_effort,
                                max_turns=max_turns, partial=stream,
                                temperature=temperature, top_p=top_p,
@@ -1721,7 +1727,8 @@ def run_chat_completions(client, messages, stream: bool = False,
         client, messages, doc_id, model, temperature=temperature,
         top_p=top_p, reasoning_effort=reasoning_effort,
         extra_body=extra_body, max_tokens=max_tokens, backend=backend,
-        extra_headers=extra_headers, folder_id=folder_id)
+        extra_headers=extra_headers, folder_id=folder_id,
+        collection_id=collection_id)
     reported_model = _reported_model(model_name)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
@@ -1855,6 +1862,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
+                  collection_id: Optional[str] = None,
                   ) -> Union[ChatObject, Iterator[ChatObject]]:
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
@@ -1866,7 +1874,7 @@ def run_responses(client, input, model: Optional[str] = None,
         raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block = targeting_block(client, doc_id, folder_id, collection_id)
     conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
@@ -1877,7 +1885,7 @@ def run_responses(client, input, model: Optional[str] = None,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
                               model_name, managed, doc_id, conversation,
-                              folder_id),
+                              folder_id, collection_id),
                           reasoning=reasoning, extra_body=extra_body,
                           max_tokens=max_output_tokens,
                           backend=_merged_backend(client, backend),
@@ -2260,6 +2268,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
+                 collection_id: Optional[str] = None,
                  ) -> Union[ChatObject, MessagesStream]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -2274,7 +2283,7 @@ def run_messages(client, messages, model: str, route: str,
         raise PageIndexAPIError("messages must be a non-empty string or a "
                                 "list of message dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block = targeting_block(client, doc_id, folder_id, collection_id)
     prepared = [dict(message) for message in messages]
     if block:
         prepared = [{"role": "user", "content": block}] + prepared
@@ -2478,7 +2487,8 @@ _CLAUDE_CUT: dict[Optional[str], str] = {"max_tokens": "length",
 
 
 def _claude_code_run(client, messages, model_name: str, doc_id=None,
-                     folder_id=None, reasoning_effort=None, max_turns=None,
+                     folder_id=None, collection_id=None,
+                     reasoning_effort=None, max_turns=None,
                      partial: bool = False, **unsupported):
     """The claude-code/ engine: one Claude Code CLI run per call. The
     conversation goes in as ONE user message, a text block per turn: the
@@ -2501,7 +2511,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         claude_code_messages, claude_code_options, tool_server)
     system_texts, history = _split_chat_messages(messages, text_only=model_name)
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block = targeting_block(client, doc_id, folder_id, collection_id)
     blocks = [{"type": "text", "text": block}] if block else []
     blocks += [{"type": "text", "text": f'<turn role="{m["role"]}">\n'
                 f'{m["content"].replace("</turn>", "</ turn>")}\n</turn>'}

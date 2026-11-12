@@ -267,6 +267,18 @@ class McpBridge:
         result = self._request("prompts/get", params) or {}
         return result.get("description"), list(result.get("messages") or [])
 
+    def prompt_argument_values(self, prompt: str,
+                               argument: str) -> Optional[list[str]]:
+        """The values the server completes for a prompt argument from an
+        empty value; None when it serves no completions."""
+        self._require_prompts()
+        if "completions" not in self._capabilities:
+            return None
+        result = self._request("completion/complete", {
+            "ref": {"type": "ref/prompt", "name": prompt},
+            "argument": {"name": argument, "value": ""}}) or {}
+        return list((result.get("completion") or {}).get("values") or [])
+
     def call_tool(self, name: str, arguments: dict[str, Any],
                   ) -> "tuple[list[dict], bool]":
         """Returns (content, is_error): the MCP content blocks untouched,

@@ -2881,8 +2881,8 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     keys = []
     real = local_chat._conversation_cache_key
 
-    def spy(model_name, instructions, doc_id, items, folder_id=None):
-        key = real(model_name, instructions, doc_id, items, folder_id)
+    def spy(model_name, instructions, doc_id, items, *scope):
+        key = real(model_name, instructions, doc_id, items, *scope)
         keys.append(key)
         return key
 
@@ -2921,6 +2921,9 @@ def test_folder_less_cache_key_is_the_pre_folder_key():
     assert key == "pageindex-b0ab095344ee8f89"
     assert local_chat._conversation_cache_key(
         "m", "sys", "d1", items, "f-1") != key
+    assert local_chat._conversation_cache_key(
+        "m", "sys", None, items, None, "c-1") != local_chat._conversation_cache_key(
+        "m", "sys", None, items, None, "c-2")
 
 
 @needs_agents
@@ -6180,6 +6183,104 @@ def test_folder_id_is_cloud_only(client):
         client.chat_completions("q", folder_id="f-1")
 
 
+def test_targeting_block_scopes_one_collection(bridge_client, monkeypatch):
+    """The collection block names the collection as the tools address it,
+    by its quoted name; the collection scopes the chat alone, so a
+    document or a folder beside it raises ("root" is no folder)."""
+    from pageindex.agent_tools import targeting_block
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
+        {"id": "c-1", "name": 'Q3 "final"', "description": "filings",
+         "metadata_schema": None, "document_count": 2}]})
+    block = targeting_block(client, None, None, "c-1")
+    assert block == (
+        'The user has specified collection: Q3 "final"\n'
+        'Collection metadata: {"id": "c-1", "name": "Q3 \\"final\\"", '
+        '"description": "filings"}\n'
+        'Discover its documents with list_documents(collection="Q3 '
+        '\\"final\\"") or search_documents(questions, collection="Q3 '
+        '\\"final\\"").')
+    assert targeting_block(client, None, "root", "c-1") == block
+    for doc_id, folder_id in (("pi-a", None), (None, "f-1")):
+        with pytest.raises(PageIndexAPIError, match="without doc_id and"):
+            targeting_block(client, doc_id, folder_id, "c-1")
+    with pytest.raises(PageIndexAPIError, match="not found"):
+        targeting_block(client, None, None, "c-9")
+
+
+@needs_agents
+def test_bridge_collection_id_leads_the_openai_lanes(bridge_client, fake_model,
+                                                     monkeypatch):
+    """chat(collection_id=) opens the conversation with the collection block
+    on the answer lane, its stream and the Responses lane."""
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
+        {"id": "c-1", "name": "Q3"}]})
+    fake = fake_model([[_msg_item("ok")]] * 3)
+    client.chat("q", collection_id="c-1")
+    "".join(client.chat("q", stream=True, show_process=False,
+                        collection_id="c-1"))
+    client.chat("q", protocol="responses", collection_id="c-1")
+    assert len(fake.inputs) == 3
+    for first, question in (inputs[:2] for inputs in fake.inputs):
+        assert first["content"].startswith(
+            "The user has specified collection: Q3\n")
+        assert question == {"role": "user", "content": "q"}
+
+
+@needs_anthropic
+def test_bridge_collection_id_reaches_the_messages_lane(bridge_client,
+                                                        fake_anthropic,
+                                                        monkeypatch):
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
+        {"id": "c-1", "name": "Q3"}]})
+    calls = fake_anthropic([
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.chat("q", protocol="messages", model="claude-test",
+                collection_id="c-1")
+    first, second = calls[0]["messages"][:2]
+    assert first["content"].startswith(
+        "The user has specified collection: Q3\n")
+    assert second == {"role": "user", "content": "q"}
+
+
+def test_claude_code_lanes_carry_collection_id(monkeypatch):
+    from types import SimpleNamespace
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def spy(client, doc_id, folder_id=None, collection_id=None):
+        seen.append(collection_id)
+        raise Stop
+
+    monkeypatch.setattr(local_chat, "targeting_block", spy)
+    client = SimpleNamespace(chat_model="claude-code/haiku",
+                             _local_doc_scope=lambda doc_id: None)
+    for run in (local_chat.run_chat_completions, local_chat.run_chat_stream):
+        with pytest.raises(Stop):
+            run(client, [{"role": "user", "content": "q"}],
+                collection_id="c-1")
+    assert seen == ["c-1", "c-1"]
+
+
+@needs_agents
+def test_collection_id_refusals(client, monkeypatch):
+    """collection_id is cloud own-model chat's: a local library, the
+    managed endpoint and extra_body each refuse it before any request."""
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        client.chat_completions("q", collection_id="c-1")
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: pytest.fail("sent"))
+    with pytest.raises(PageIndexAPIError, match="takes doc_id and folder_id"):
+        cloud.chat("q", collection_id="c-1")
+    with pytest.raises(PageIndexAPIError, match="use collection_id= instead"):
+        cloud.chat("q", extra_body={"collection_id": "c-1"})
+
+
 def test_bridge_gate_and_citations(monkeypatch):
     from pageindex import PageIndexClient
     client = PageIndexClient(api_key="pi-k", chat_model="m")
@@ -6832,6 +6933,8 @@ def _citing(bridge):
             "type": "text", "text": f"CITATIONS — {fmt}"}}]
 
     bridge.get_prompt = get_prompt
+    bridge.prompt_argument_values = lambda prompt, argument: [
+        "markdown", "cite", "cite_with_boxes"]
 
 
 @needs_agents
@@ -6873,11 +6976,17 @@ def test_chat_citations_on_protocol_lanes(bridge_client, monkeypatch):
         {"type": "text", "text": "CITATIONS — cite"}, *blocks]
     client.chat("q", protocol="messages", model="claude-x", citations=True)
     assert seen[-1]["system"] == "CITATIONS — cite"
+    client.chat("q", protocol="responses", citations="cite_with_boxes")
+    assert seen[-1]["instructions"] == "CITATIONS — cite_with_boxes"
+    assert bridge.prompts[-1] == ("cited_answer", {"format": "cite_with_boxes"})
+    with pytest.raises(PageIndexAPIError, match="True, False or a citations"):
+        client.chat("q", protocol="responses", citations=1)
 
 
 def test_chat_citations_managed(monkeypatch):
     """Managed chat: citations=True is the endpoint's enable_citations; a
-    format name raises rather than silently meaning True."""
+    format name raises rather than silently meaning True, since the
+    endpoint cites in its own markup."""
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     seen = []
     monkeypatch.setattr(
@@ -6893,14 +7002,14 @@ def test_chat_citations_managed(monkeypatch):
     assert seen[-1]["enable_citations"] is False
     cloud.chat("q", protocol="chat_completions", citations=True)
     assert seen[-1]["enable_citations"] is True
-    with pytest.raises(PageIndexAPIError, match="True or False"):
+    with pytest.raises(PageIndexAPIError, match="its own markup"):
         cloud.chat("q", citations="cite")
 
 
 def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch):
     """Local documents: the frozen copy joins the system prompt the same
-    way (pages are all local content has); a format name raises rather
-    than silently meaning cite."""
+    way (pages are all local content has), by format name too; a format
+    the copy lacks raises."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
     seen = []
     monkeypatch.setattr(
@@ -6912,8 +7021,11 @@ def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch)
                            LOCAL_CITATION_PROMPTS["cite"] + "\n\nanalyst"}
     client.chat("q")
     assert seen[-1][0]["role"] == "user"
-    with pytest.raises(PageIndexAPIError, match="True or False"):
-        client.chat("q", citations="markdown")
+    client.chat("q", citations="markdown")
+    assert seen[-1][0] == {"role": "system", "content":
+                           LOCAL_CITATION_PROMPTS["markdown"]}
+    with pytest.raises(PageIndexAPIError, match="not one of markdown, cite"):
+        client.chat("q", citations="cite_with_boxes")
 
 
 def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):

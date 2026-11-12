@@ -2200,6 +2200,43 @@ def test_parse_citations_mirrors_the_cloud_parser():
     assert _parse_citations("no tags, just [a.pdf, p. 3] prose") == []
 
 
+def test_parse_citations_keep_a_box():
+    """box="x0,y0,x1,y1" rides as PageIndex chat's renderer takes it: four
+    fractions from 0 to 1, each start before its end; a box that is not
+    leaves the page citation, and each distinct box is its own citation."""
+    from pageindex.client import _parse_citations
+    text = ('<cite doc="a.pdf" page="2" box="0.1,0.2,0.5,0.4"/> '
+            '<cite doc="a.pdf" page="2" box="0.1, 0.2, 0.5, 0.4"/> '
+            '<cite doc="a.pdf" page="2" box="0.1,0.6,0.5,0.8"/> '
+            '<cite doc="b.pdf" page="1" box="0.5,0.2,0.1,0.4"/> '
+            '<cite doc="b.pdf" page="3" box="0,0,1,1.5"/> '
+            '<cite doc="b.pdf" page="4" box="0.1,0.2,0.3"/> '
+            '<cite doc="b.pdf" page="5" box="nan,0,1,1"/>')
+    assert _parse_citations(text) == [
+        {"document": "a.pdf", "page": 2, "box": [0.1, 0.2, 0.5, 0.4]},
+        {"document": "a.pdf", "page": 2, "box": [0.1, 0.6, 0.5, 0.8]},
+        {"document": "b.pdf", "page": 1},
+        {"document": "b.pdf", "page": 3},
+        {"document": "b.pdf", "page": 4},
+        {"document": "b.pdf", "page": 5},
+    ]
+
+
+def test_resolve_citations_number_each_box(monkeypatch):
+    from pageindex import PageIndexClient
+    client = PageIndexClient(api_key="pi-k")
+    monkeypatch.setattr(client, "get_document",
+                        lambda doc_id: {"name": "a.pdf"})
+    answer = ('X <cite doc="a.pdf" page="2" box="0.1,0.2,0.5,0.4"/> '
+              'Y <cite doc="a.pdf" page="2" box="0.1,0.6,0.5,0.8"/>')
+    resolved = client.resolve_citations(answer, doc_id="d-1")
+    assert resolved["answer"] == ("X [[1]](#pageindex-citation-01) "
+                                  "Y [[2]](#pageindex-citation-02)")
+    assert [(c["doc_id"], c["page"], c["box"])
+            for c in resolved["citations"]] == [
+        ("d-1", 2, [0.1, 0.2, 0.5, 0.4]), ("d-1", 2, [0.1, 0.6, 0.5, 0.8])]
+
+
 def test_parse_citations_scans_in_linear_time():
     """An unterminated '<cite ' followed by whitespace, or a tag whose body
     is one long word, is caller-supplied text; the scan must stay linear,
