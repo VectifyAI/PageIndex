@@ -56,6 +56,7 @@ class _Type3Detected(Exception):
 _worker_pdf = None
 _worker_pdf_doc = None
 _worker_font_maps: dict = {}
+_worker_form_tokens: dict = {}
 
 
 _window_lock = threading.Lock()
@@ -97,7 +98,7 @@ def _anonymous_main():
 
 
 def _init_worker(kind: str, payload) -> None:
-    global _worker_pdf, _worker_pdf_doc, _worker_font_maps
+    global _worker_pdf, _worker_pdf_doc, _worker_font_maps, _worker_form_tokens
     # Open the document exactly as parse_charlevel_meta does, including
     # the guarded PyPDF2 open and its separate bytes copy.
     if kind == "path":
@@ -113,12 +114,14 @@ def _init_worker(kind: str, payload) -> None:
     except Exception:
         _worker_pdf_doc = None
     _worker_font_maps = {}
+    _worker_form_tokens = {}
 
 
 def _run_page(page_idx: int):
     type3_ext: dict = {}
     page, raw_chars, page_vb, page_rot = _page_pass1(
-        _worker_pdf, _worker_pdf_doc, page_idx, type3_ext, _worker_font_maps)
+        _worker_pdf, _worker_pdf_doc, page_idx, type3_ext, _worker_font_maps,
+        _worker_form_tokens)
     try:
         if type3_ext:
             raise _Type3Detected(page_idx)
