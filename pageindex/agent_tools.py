@@ -1538,10 +1538,14 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     cloud by ``_local_doc_scope``. A dict passed as ``annotations``
     receives each annotated tool's MCP annotations by name: the server's
     on cloud, the contract's locally. ``collection`` is the cloud chat's
-    collection, by name: every tool that takes one is held to it."""
+    collection, by name: every tool that takes one is held to it, and the
+    folder-tree tools are left out."""
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
+        if collection is not None:
+            tools_meta = [meta for meta in tools_meta if meta.get("name") not in
+                          ("browse_documents", "get_folder_structure")]
         if not tools_meta:
             raise PageIndexAPIError(
                 "The MCP server returned no tools — a zero-tool agent would "

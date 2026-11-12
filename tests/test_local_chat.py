@@ -6270,6 +6270,20 @@ def test_bridge_collection_id_reaches_the_messages_lane(bridge_client,
         ("get_document", {"doc_name": "r.pdf"})]
 
 
+def test_a_collection_chat_leaves_out_the_folder_tree_tools(bridge_client):
+    """browse_documents and get_folder_structure stay out of a collection chat."""
+    from pageindex.agent_tools import _tool_specs
+    client, bridge = bridge_client
+    folder_tools = [{"name": name, "inputSchema": {"type": "object"}}
+                    for name in ("browse_documents", "get_folder_structure")]
+    bridge.list_tools = lambda: folder_tools + _COLLECTION_TOOLS
+    assert [spec[0] for spec in _tool_specs(client, collection="Q3")] == [
+        "search_documents", "get_document"]
+    assert [spec[0] for spec in _tool_specs(client)] == [
+        "browse_documents", "get_folder_structure", "search_documents",
+        "get_document"]
+
+
 def test_claude_code_lanes_carry_collection_id(monkeypatch):
     from types import SimpleNamespace
     import pageindex.integrations.claude_agent_sdk as claude_agent_sdk
