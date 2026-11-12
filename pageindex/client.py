@@ -1387,12 +1387,12 @@ class PageIndexClient:
                 (``folder_context``), ahead of the document block.
                 ``"root"`` is the whole library.
                 Keep it identical across a conversation's calls.
-            collection_id: Collection ID to steer discovery toward that
-                collection's documents. Cloud own-model chat only, and
-                prompted like ``folder_id``: the conversation opens with
-                the collection's targeting text. Not with ``doc_id`` or
-                ``folder_id``. Keep it identical across a conversation's
-                calls.
+            collection_id: Collection ID to keep discovery in that
+                collection's documents. Cloud own-model chat only: the
+                conversation opens with the collection's targeting text,
+                and every tool that takes a collection searches this one.
+                Not with ``doc_id`` or ``folder_id``. Keep it identical
+                across a conversation's calls.
             stream: Answer lane: return a ``ChatStream`` — iterate it for
                 the answer as text chunks as they are produced
                 (``show_process`` is on by default, so the run's process
@@ -1831,7 +1831,7 @@ class PageIndexClient:
                 leads the conversation with the folder's targeting text,
                 ahead of the document block.
                 ``"root"`` is the whole library.
-            collection_id: Collection ID to steer discovery toward that
+            collection_id: Collection ID to keep discovery in that
                 collection's documents, as in ``chat()``: cloud own-model
                 chat only, not with ``doc_id`` or ``folder_id``.
             temperature: Sampling temperature, passed through to the model.
@@ -2022,9 +2022,9 @@ class PageIndexClient:
                 documents (cloud-only), as the leading targeting text
                 ahead of the document block. ``"root"`` is the whole
                 library.
-            collection_id: Collection ID to steer discovery toward that
-                collection's documents (cloud-only), as the leading
-                targeting text; not with ``doc_id`` or ``folder_id``.
+            collection_id: Collection ID to keep discovery in that
+                collection's documents (cloud-only), as in ``chat()``;
+                not with ``doc_id`` or ``folder_id``.
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
             max_turns: Cap on agent turns per call.
@@ -2136,9 +2136,9 @@ class PageIndexClient:
                 documents (cloud-only), as the leading targeting text
                 ahead of the document block. ``"root"`` is the whole
                 library.
-            collection_id: Collection ID to steer discovery toward that
-                collection's documents (cloud-only), as the leading
-                targeting text; not with ``doc_id`` or ``folder_id``.
+            collection_id: Collection ID to keep discovery in that
+                collection's documents (cloud-only), as in ``chat()``;
+                not with ``doc_id`` or ``folder_id``.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the

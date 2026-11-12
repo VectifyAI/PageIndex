@@ -2846,7 +2846,7 @@ def test_citation_prompt_cloud(monkeypatch):
             self.prompts = []
 
         def prompt_argument_values(self, prompt, argument):
-            return ["markdown", "cite"]
+            pytest.fail("a frozen format is asked about")
 
         def get_prompt(self, name, arguments=None):
             self.prompts.append((name, arguments))
@@ -2890,10 +2890,10 @@ def test_citation_prompt_empty_raises(monkeypatch):
 ])
 def test_citation_prompt_cloud_takes_the_servers_formats(monkeypatch, served,
                                                          allowed):
-    """A cloud format is one the server completes for cited_answer's format
-    argument, the frozen formats where it completes none; the server serves
-    its default for a name it does not know, so another name raises before
-    any prompt is fetched."""
+    """A cloud format beyond the frozen ones is one the server completes for
+    cited_answer's format argument; the server serves its default for a
+    name it does not know, so another name raises before any prompt is
+    fetched."""
     import pageindex.mcp_bridge as mcp_bridge
     fetched = []
 

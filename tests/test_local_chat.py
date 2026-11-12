@@ -6113,15 +6113,15 @@ def test_targeting_block_orders_folder_before_documents(bridge_client,
         {"id": "f-1", "name": "Team", "description": None}]})
     monkeypatch.setattr(client, "get_document",
                         lambda doc_id: {"name": "r.pdf", "status": "completed"})
-    both = targeting_block(client, "pi-a", "f-1")
-    assert both is not None
+    both, collection = targeting_block(client, "pi-a", "f-1")
+    assert both is not None and collection is None
     folder, doc = both.split("\n\n")
     assert folder.startswith("The user has specified folder: Team\n")
     assert 'Folder metadata: {"id": "f-1", "name": "Team"}\n' in folder
     assert doc.startswith("The user has specified document: r.pdf\n")
-    assert targeting_block(client, "pi-a", "root") == doc
-    assert targeting_block(client, None, "f-1") == folder
-    assert targeting_block(client, None, None) is None
+    assert targeting_block(client, "pi-a", "root") == (doc, None)
+    assert targeting_block(client, None, "f-1") == (folder, None)
+    assert targeting_block(client, None, None) == (None, None)
 
 
 @needs_agents
@@ -6185,14 +6185,16 @@ def test_folder_id_is_cloud_only(client):
 
 def test_targeting_block_scopes_one_collection(bridge_client, monkeypatch):
     """The collection block names the collection as the tools address it,
-    by its quoted name; the collection scopes the chat alone, so a
-    document or a folder beside it raises ("root" is no folder)."""
+    by its quoted name, and the name comes back for the tools; the
+    collection scopes the chat alone, so a document or a folder beside it
+    raises ("root" is no folder)."""
     from pageindex.agent_tools import targeting_block
     client, _ = bridge_client
     monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
         {"id": "c-1", "name": 'Q3 "final"', "description": "filings",
          "metadata_schema": None, "document_count": 2}]})
-    block = targeting_block(client, None, None, "c-1")
+    block, collection = targeting_block(client, None, None, "c-1")
+    assert collection == 'Q3 "final"'
     assert block == (
         'The user has specified collection: Q3 "final"\n'
         'Collection metadata: {"id": "c-1", "name": "Q3 \\"final\\"", '
@@ -6200,7 +6202,7 @@ def test_targeting_block_scopes_one_collection(bridge_client, monkeypatch):
         'Discover its documents with list_documents(collection="Q3 '
         '\\"final\\"") or search_documents(questions, collection="Q3 '
         '\\"final\\"").')
-    assert targeting_block(client, None, "root", "c-1") == block
+    assert targeting_block(client, None, "root", "c-1") == (block, collection)
     for doc_id, folder_id in (("pi-a", None), (None, "f-1")):
         with pytest.raises(PageIndexAPIError, match="without doc_id and"):
             targeting_block(client, doc_id, folder_id, "c-1")
@@ -6208,34 +6210,54 @@ def test_targeting_block_scopes_one_collection(bridge_client, monkeypatch):
         targeting_block(client, None, None, "c-9")
 
 
+_COLLECTION_TOOLS = [
+    {"name": "search_documents", "description": "Cloud search_documents",
+     "inputSchema": {"type": "object", "properties": {
+         "questions": {"type": "array", "items": {"type": "string"}},
+         "collection": {"type": "string"}}}},
+    *FakeBridge().list_tools()]
+
+
 @needs_agents
 def test_bridge_collection_id_leads_the_openai_lanes(bridge_client, fake_model,
                                                      monkeypatch):
     """chat(collection_id=) opens the conversation with the collection block
-    on the answer lane, its stream and the Responses lane."""
-    client, _ = bridge_client
+    on the answer lane, its stream and the Responses lane, and a tool that
+    takes a collection searches that one."""
+    client, bridge = bridge_client
+    bridge.list_tools = lambda: _COLLECTION_TOOLS
     monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
         {"id": "c-1", "name": "Q3"}]})
-    fake = fake_model([[_msg_item("ok")]] * 3)
+    search = _call_item("search_documents", {"questions": ["q"]})
+    fake = fake_model([[search], [_msg_item("ok")]] * 3)
     client.chat("q", collection_id="c-1")
     "".join(client.chat("q", stream=True, show_process=False,
                         collection_id="c-1"))
     client.chat("q", protocol="responses", collection_id="c-1")
-    assert len(fake.inputs) == 3
+    assert len(fake.inputs) == 6
     for first, question in (inputs[:2] for inputs in fake.inputs):
         assert first["content"].startswith(
             "The user has specified collection: Q3\n")
         assert question == {"role": "user", "content": "q"}
+    assert bridge.calls == [("search_documents",
+                             {"questions": ["q"], "collection": "Q3"})] * 3
 
 
 @needs_anthropic
 def test_bridge_collection_id_reaches_the_messages_lane(bridge_client,
                                                         fake_anthropic,
                                                         monkeypatch):
-    client, _ = bridge_client
+    """The chat's collection replaces the model's; other tools run as written."""
+    client, bridge = bridge_client
+    bridge.list_tools = lambda: _COLLECTION_TOOLS
     monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
         {"id": "c-1", "name": "Q3"}]})
     calls = fake_anthropic([
+        _anthropic_message([
+            {"type": "tool_use", "id": "tu_1", "name": "search_documents",
+             "input": {"questions": ["q"], "collection": "Other"}},
+            {"type": "tool_use", "id": "tu_2", "name": "get_document",
+             "input": {"doc_name": "r.pdf"}}], "tool_use"),
         _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
     client.chat("q", protocol="messages", model="claude-test",
                 collection_id="c-1")
@@ -6243,10 +6265,14 @@ def test_bridge_collection_id_reaches_the_messages_lane(bridge_client,
     assert first["content"].startswith(
         "The user has specified collection: Q3\n")
     assert second == {"role": "user", "content": "q"}
+    assert bridge.calls == [
+        ("search_documents", {"questions": ["q"], "collection": "Q3"}),
+        ("get_document", {"doc_name": "r.pdf"})]
 
 
 def test_claude_code_lanes_carry_collection_id(monkeypatch):
     from types import SimpleNamespace
+    import pageindex.integrations.claude_agent_sdk as claude_agent_sdk
     seen = []
 
     class Stop(Exception):
@@ -6254,16 +6280,21 @@ def test_claude_code_lanes_carry_collection_id(monkeypatch):
 
     def spy(client, doc_id, folder_id=None, collection_id=None):
         seen.append(collection_id)
+        return None, "Q3"
+
+    def tool_server(client, **kwargs):
+        seen.append(kwargs["collection"])
         raise Stop
 
     monkeypatch.setattr(local_chat, "targeting_block", spy)
+    monkeypatch.setattr(claude_agent_sdk, "tool_server", tool_server)
     client = SimpleNamespace(chat_model="claude-code/haiku",
                              _local_doc_scope=lambda doc_id: None)
     for run in (local_chat.run_chat_completions, local_chat.run_chat_stream):
         with pytest.raises(Stop):
             run(client, [{"role": "user", "content": "q"}],
                 collection_id="c-1")
-    assert seen == ["c-1", "c-1"]
+    assert seen == ["c-1", "Q3", "c-1", "Q3"]
 
 
 @needs_agents

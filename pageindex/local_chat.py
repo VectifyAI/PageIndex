@@ -883,7 +883,8 @@ def _refuse_skeleton(extra_body) -> None:
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None, cache_key=None,
                   reasoning=None, reasoning_effort=None, extra_body=None,
-                  max_tokens=None, backend=None, extra_headers=None):
+                  max_tokens=None, backend=None, extra_headers=None,
+                  collection=None):
     _refuse_skeleton(extra_body)
     from agents import Agent, ModelSettings
     from openai.types.shared import Reasoning
@@ -967,7 +968,8 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
     return Agent(
         name="PageIndex",
         instructions=instructions,
-        tools=build_openai_tools(client, doc_ids=doc_ids),
+        tools=build_openai_tools(client, doc_ids=doc_ids,
+                                 collection=collection),
         model=_openai_model(protocol, model_name, conn or None),
         model_settings=settings,
     )
@@ -1314,7 +1316,8 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     messages = list(messages)
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id, collection_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
     managed = _managed_instructions(client, system_texts)
@@ -1326,7 +1329,7 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
                           reasoning_effort=reasoning_effort,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
-                          extra_headers=extra_headers)
+                          extra_headers=extra_headers, collection=collection)
     return agent, items, model_name, _keep_reply_fields(agent, messages)
 
 
@@ -1874,7 +1877,8 @@ def run_responses(client, input, model: Optional[str] = None,
         raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id, collection_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
@@ -1889,7 +1893,7 @@ def run_responses(client, input, model: Optional[str] = None,
                           reasoning=reasoning, extra_body=extra_body,
                           max_tokens=max_output_tokens,
                           backend=_merged_backend(client, backend),
-                          extra_headers=extra_headers)
+                          extra_headers=extra_headers, collection=collection)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
@@ -2283,7 +2287,8 @@ def run_messages(client, messages, model: str, route: str,
         raise PageIndexAPIError("messages must be a non-empty string or a "
                                 "list of message dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id, collection_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     prepared = [dict(message) for message in messages]
     if block:
         prepared = [{"role": "user", "content": block}] + prepared
@@ -2307,7 +2312,8 @@ def run_messages(client, messages, model: str, route: str,
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
     failures: list = []
-    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures)
+    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures,
+                                  collection=collection)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged, route)
     # Close only a per-call construction: cached clients stay open for
@@ -2511,7 +2517,8 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         claude_code_messages, claude_code_options, tool_server)
     system_texts, history = _split_chat_messages(messages, text_only=model_name)
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id, collection_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     blocks = [{"type": "text", "text": block}] if block else []
     blocks += [{"type": "text", "text": f'<turn role="{m["role"]}">\n'
                 f'{m["content"].replace("</turn>", "</ turn>")}\n</turn>'}
@@ -2523,7 +2530,8 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         model_name, reasoning_effort,
         system_prompt=_managed_instructions(client, [_TURNS_NOTE, *system_texts]),
         mcp_servers={"pageindex": tool_server(client, doc_ids=scope,
-                                              failures=failures)},
+                                              failures=failures,
+                                              collection=collection)},
         allowed_tools=["mcp__pageindex"],
         max_turns=max_turns if max_turns is not None else 10,
         include_partial_messages=partial)
