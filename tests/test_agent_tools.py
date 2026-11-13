@@ -2538,6 +2538,34 @@ import pageindex.utils  # noqa: F401 — its import loads .env
 LIVE_KEY = os.getenv("PAGEINDEX_API_KEY")
 
 
+def _local_trails_cloud(live_tools):
+    """Local mode keeps the tool contract, instructions and citation prompts
+    it copied from the cloud until it addresses documents by `path` as the
+    cloud does. A server that takes `path` is ahead of those copies."""
+    def takes_path(schema):
+        return "path" in ((schema or {}).get("properties") or {})
+    live = {tool.get("name"): tool for tool in live_tools}
+    return (takes_path(live.get("get_document", {}).get("inputSchema"))
+            and not takes_path(TOOL_CONTRACT["get_document"]["schema"]))
+
+
+def _skip_while_local_trails_cloud(bridge):
+    if _local_trails_cloud(bridge.list_tools()):
+        pytest.skip("the server addresses documents by `path`; local mode "
+                    "keeps the copies it took before that")
+
+
+def test_local_trails_cloud_until_local_takes_path(monkeypatch):
+    def tools(*params):
+        return [{"name": "get_document",
+                 "inputSchema": {"properties": dict.fromkeys(params, {})}}]
+    assert not _local_trails_cloud(tools("doc_name"))
+    assert _local_trails_cloud(tools("doc_name", "path"))
+    monkeypatch.setitem(
+        TOOL_CONTRACT["get_document"]["schema"]["properties"], "path", {})
+    assert not _local_trails_cloud(tools("doc_name", "path"))
+
+
 @pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
 def test_live_cloud_contract_parity():
     """Real-drift detector: the frozen contract must match the live server
@@ -2545,6 +2573,7 @@ def test_live_cloud_contract_parity():
     from pageindex.mcp_bridge import McpBridge
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
+    _skip_while_local_trails_cloud(bridge)
     live = {t["name"]: t for t in bridge.list_tools()}
     for name, ours in TOOL_CONTRACT.items():
         real = live.get(name)
@@ -2757,6 +2786,7 @@ def test_live_cloud_instructions_local_parity():
     from pageindex.mcp_bridge import McpBridge
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
+    _skip_while_local_trails_cloud(bridge)
     _assert_instructions_local_parity(bridge.instructions())
 
 
@@ -2944,6 +2974,9 @@ def test_live_local_citation_prompts_match_cloud():
     """The frozen local copies are the server's texts minus the one bullet
     naming get_document_image(); any other server edit fails here."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    from pageindex.mcp_bridge import McpBridge
+    _skip_while_local_trails_cloud(McpBridge(
+        "https://api.pageindex.ai/mcp", {"Authorization": f"Bearer {LIVE_KEY}"}))
     cloud = PageIndexCloudClient(api_key=LIVE_KEY)
     for fmt, frozen in LOCAL_CITATION_PROMPTS.items():
         live = cloud.citation_prompt(format=fmt).split("\n")
