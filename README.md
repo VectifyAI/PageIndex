@@ -102,6 +102,30 @@ print(answer)
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
 
+For MiniMax, use the Flash model first for local indexing and use M3 for chat when you want a separate answer model. MiniMax's OpenAI-compatible global endpoint is `https://api.minimax.io/v1`; the China endpoint is `https://api.minimaxi.com/v1`. Configure the endpoint and credential through the backend mapping so credentials stay out of the model name:
+
+```python
+client = PageIndexClient(
+    index={
+        "model": "minimax/MiniMax-M3.1-Flash",
+        "summary_model": "minimax/MiniMax-M3.1-Flash",
+        "backend": {
+            "api_key": "your_minimax_key",
+            "api_base": "https://api.minimax.io/v1",
+        },
+    },
+    chat={
+        "model": "minimax/MiniMax-M3",
+        "backend": {
+            "api_key": "your_minimax_key",
+            "api_base": "https://api.minimax.io/v1",
+        },
+    },
+)
+```
+
+Flash uses the provider's adaptive thinking default. The client does not send `reasoning_effort="none"` for Flash summaries, while explicit backend reasoning settings remain available.
+
 **Have a Claude subscription?** PageIndex can use your subscription to call Claude models through Claude Code: usage is covered by your plan, no API key needed. Install with `pip install -U "pageindex[claude]"`, then prefix model names with `claude-code/`, e.g., `index="claude-code/haiku"`, `chat="claude-code/opus"` (see [example](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex-claude-subscription.py)).
 
 ### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
