@@ -1381,8 +1381,83 @@ def _raise_account_limit(blocks: list) -> None:
     raise PageIndexAPIError(message, status_code=status)
 
 
+# The tools whose results attach page pictures, by the field naming those pages.
+_PICTURE_PAGES = {"view_pages": "returned_pages",
+                  "get_page_content": "picture_pages", "zoom_page": "page"}
+_CITE_OPEN_RE = re.compile(r"<cite\s[^<>]*>")
+_TAG_ATTR_RE = re.compile(r"""\b(\w+)\s*=\s*(["'])(.*?)\2""", re.S)
+_BOX_ATTR_RE = re.compile(r"""\s+box\s*=\s*("[^"]*"|'[^']*')""")
+
+
+class _SeenPages:
+    """The pages one chat call's tools pictured; strip() drops boxes elsewhere."""
+
+    def __init__(self):
+        self.pages: set = set()
+
+    def record(self, name: str, blocks: list) -> None:
+        field = _PICTURE_PAGES.get(name)
+        if field is None or not any(isinstance(block, dict)
+                                    and block.get("type") == "image"
+                                    for block in blocks):
+            return
+        try:
+            result = json.loads(blocks[0]["text"])
+            pictured = result[field]
+            pages = ([pictured] if isinstance(pictured, int)
+                     else _expand_pages(pictured))
+        except (LookupError, TypeError, ValueError):
+            return
+        for ref in (result.get("path"), result.get("doc_name")):
+            if isinstance(ref, str) and ref:
+                for doc in (ref, ref.rsplit("/", 1)[-1]):
+                    self.pages.update((doc, page) for page in pages)
+
+    def strip(self, text: str) -> str:
+        return _CITE_OPEN_RE.sub(self._tag, text) if "box" in text else text
+
+    def _tag(self, match: re.Match) -> str:
+        tag = match.group(0)
+        attrs = {name: value for name, _, value in _TAG_ATTR_RE.findall(tag)}
+        try:
+            page = int(attrs.get("page", "").split("-")[0])
+        except ValueError:
+            return tag
+        if "box" not in attrs or (attrs.get("doc", "").strip(),
+                                  page) in self.pages:
+            return tag
+        return _BOX_ATTR_RE.sub("", tag, count=1)
+
+    def stream(self) -> "_HeldTags":
+        return _HeldTags(self)
+
+
+class _HeldTags:
+    """strip() over a text's pieces: a tag open at a piece's end waits."""
+
+    def __init__(self, seen: _SeenPages):
+        self.seen, self.held = seen, ""
+
+    def feed(self, piece: str) -> str:
+        text = self.held + piece
+        start = text.rfind("<")
+        tail = text[start:] if start >= 0 else ""
+        opening = ">" not in tail and (
+            "<cite".startswith(tail) if len(tail) <= 5
+            else tail.startswith("<cite") and tail[5].isspace())
+        cut = start if start >= 0 and opening else len(text)
+        self.held = text[cut:]
+        return self.seen.strip(text[:cut])
+
+    def flush(self) -> str:
+        """The text's end: a tag never closed goes out as written."""
+        rest, self.held = self.held, ""
+        return rest
+
+
 def _bridge_invoker(bridge, name: str, schema: dict,
                     collection: Optional[str] = None,
+                    seen: Optional[_SeenPages] = None,
                     ) -> "Callable[[dict], tuple[list, bool]]":
     """One cloud tool call proxied over MCP: string booleans are coerced
     (same as call_tool), None-valued arguments are dropped (None ≡ omitted,
@@ -1420,6 +1495,8 @@ def _bridge_invoker(bridge, name: str, schema: dict,
             return [{"type": "text", "text": _dumps(payload)}], True
         if is_error:
             _raise_account_limit(blocks)
+        elif seen is not None:
+            seen.record(name, blocks)
         return blocks, is_error
     return _invoke
 
@@ -1529,6 +1606,7 @@ def _require_doc_selection(doc_ids) -> None:
 def _tool_specs(client, include_management: bool = False, doc_ids=None,
                 annotations: Optional[dict] = None,
                 collection: Optional[str] = None,
+                seen: Optional[_SeenPages] = None,
                 ) -> "list[tuple[str, str, dict, Callable[[dict], tuple[list, bool]]]]":
     """(name, description, schema, invoke) per tool, for adapters that take
     the wire schema verbatim. ``invoke`` returns (content blocks, is_error):
@@ -1539,7 +1617,8 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
     receives each annotated tool's MCP annotations by name: the server's
     on cloud, the contract's locally. ``collection`` is the cloud chat's
     collection, by name: every tool that takes one is held to it, and the
-    folder-tree tools are left out."""
+    folder-tree tools are left out. ``seen`` records the pages the cloud
+    tools picture."""
     if getattr(client, "api_key", None):
         bridge = _cloud_bridge(client, gated=not include_management)
         tools_meta = bridge.list_tools()
@@ -1560,7 +1639,8 @@ def _tool_specs(client, include_management: bool = False, doc_ids=None,
                  copy.deepcopy(meta.get("inputSchema"))
                  or {"type": "object", "properties": {}},
                  _bridge_invoker(bridge, str(meta.get("name") or "tool"),
-                                 meta.get("inputSchema") or {}, collection))
+                                 meta.get("inputSchema") or {}, collection,
+                                 seen))
                 for meta in tools_meta]
 
     def local_invoke(name: str) -> "Callable[[dict], tuple[list, bool]]":

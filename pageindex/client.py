@@ -1469,7 +1469,9 @@ class PageIndexClient:
                 cloud document has blocks; ``"cite_with_boxes"`` adds
                 ``box="x0,y0,x1,y1"`` to a tag with no block, the part of
                 the page as fractions of its width and height from the top
-                left, and has the model look at each page it cites;
+                left, and has the model look at each page it cites (a box
+                on a page whose picture the call's tools never attached is
+                dropped, leaving the page citation);
                 ``"markdown"`` writes ``[doc, p. N]``. A format the server
                 does not serve raises. The guidance joins the system prompt
                 after the managed prompt and before ``instructions``; local
