@@ -1424,8 +1424,9 @@ class _SeenPages:
             page = int(attrs.get("page", "").split("-")[0])
         except ValueError:
             return tag
-        if "box" not in attrs or (html.unescape(attrs.get("doc", "")).strip(),
-                                  page) in self.pages:
+        doc = attrs.get("doc", "").strip()
+        if "box" not in attrs or (doc, page) in self.pages \
+                or (html.unescape(doc), page) in self.pages:
             return tag
         return _BOX_ATTR_RE.sub("", tag, count=1)
 
