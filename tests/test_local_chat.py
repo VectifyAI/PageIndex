@@ -3271,7 +3271,7 @@ def _responses_turn(response_id, item, status="completed"):
             "usage": _RESPONSES_USAGE if status == "completed" else None}
 
 
-def _responses_sse(response_id, item):
+def _responses_sse(response_id, item, size=None):
     """One turn as the Responses API streams it: lifecycle, item, deltas."""
     opening = _responses_turn(response_id, item, "in_progress")
     events = [{"type": "response.created", "response": opening},
@@ -3292,20 +3292,23 @@ def _responses_sse(response_id, item):
     else:
         part = {"type": "output_text", "text": "", "annotations": [],
                 "logprobs": []}
+        text = item["content"][0]["text"]
+        pieces = ([text[i:i + size] for i in range(0, len(text), size)]
+                  if size else ("The ", "answer"))
         events.append({"type": "response.content_part.added",
                        "item_id": item["id"], "output_index": 0,
                        "content_index": 0, "part": part})
         events += [{"type": "response.output_text.delta",
                     "item_id": item["id"], "output_index": 0,
                     "content_index": 0, "delta": piece, "logprobs": []}
-                   for piece in ("The ", "answer")]
+                   for piece in pieces]
         events += [
             {"type": "response.output_text.done", "item_id": item["id"],
-             "output_index": 0, "content_index": 0, "text": "The answer",
+             "output_index": 0, "content_index": 0, "text": text,
              "logprobs": []},
             {"type": "response.content_part.done", "item_id": item["id"],
              "output_index": 0, "content_index": 0,
-             "part": {**part, "text": "The answer"}}]
+             "part": {**part, "text": text}}]
     events += [{"type": "response.output_item.done", "output_index": 0,
                 "item": item},
                {"type": "response.completed",
@@ -3372,6 +3375,76 @@ def test_responses_conforms_to_the_official_sdk(client, store_path):
     assert Response.model_validate(terminal).output_text == "The answer"
 
 
+_OPEN_TAIL = " <cite doc"
+
+
+@needs_agents
+def test_responses_wire_drops_boxes_on_pages_never_seen(bridge_client):
+    client, bridge = bridge_client
+    _viewing(bridge)
+    call_item = {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+                 "name": "view_pages",
+                 "arguments": '{"doc_name": "r.pdf", "pages": "2"}',
+                 "status": "completed"}
+    message_item = {"type": "message", "id": "msg_1", "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text",
+                                 "text": _BOXED + _OPEN_TAIL,
+                                 "annotations": [], "logprobs": []}]}
+
+    def call(stream):
+        turns = [("resp_1", call_item), ("resp_2", copy.deepcopy(message_item))]
+
+        def handler(request):
+            response_id, item = turns.pop(0)
+            if json.loads(request.content).get("stream"):
+                return httpx.Response(
+                    200, content=_responses_sse(response_id, item, 5).encode(),
+                    headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json=_responses_turn(response_id, item))
+
+        backend = {"http_client": httpx.AsyncClient(
+                       transport=httpx.MockTransport(handler)),
+                   "api_key": "test", "base_url": "http://responses.test/v1"}
+        return client.chat("q", protocol="responses", model="gpt-test",
+                           stream=stream, backend=backend)
+
+    expected = _UNSEEN_DROPPED + _OPEN_TAIL
+    assert call(False)["output"][-1]["content"][0]["text"] == expected
+    events = list(call(True))
+    assert "".join(event["delta"] for event in events
+                   if event["type"] == "response.output_text.delta") == expected
+    texts = {event["type"]: event for event in events}
+    assert texts["response.output_text.done"]["text"] == expected
+    assert texts["response.content_part.done"]["part"]["text"] == expected
+    assert texts["response.output_item.done"]["item"]["content"][0][
+        "text"] == expected
+    assert events[-1]["response"]["output"][-1]["content"][0][
+        "text"] == expected
+
+
+@needs_agents
+def test_litellm_stream_drops_boxes_on_pages_never_seen(bridge_client,
+                                                        monkeypatch):
+    pytest.importorskip("litellm")
+    client, bridge = bridge_client
+    _viewing(bridge)
+    call = {"index": 0, "id": "call_1", "type": "function",
+            "function": {"name": "view_pages",
+                         "arguments": '{"doc_name": "r.pdf", "pages": "2"}'}}
+    text = _BOXED + _OPEN_TAIL
+    _mock_litellm(monkeypatch, [
+        _litellm_chunks({"tool_calls": [call]}),
+        _litellm_chunks(*({"content": text[i:i + 5]}
+                          for i in range(0, len(text), 5)), finish="stop")])
+    chunks = list(client.chat("q", model="gpt-test",
+                              protocol="chat_completions", stream=True))
+    expected = _UNSEEN_DROPPED + _OPEN_TAIL
+    assert "".join(chunk["choices"][0]["delta"].get("content") or ""
+                   for chunk in chunks if chunk["choices"]) == expected
+    assert chunks[-1]["messages"][-1]["content"] == expected
+
+
 # ── messages (Anthropic engine) ──
 
 try:
@@ -3402,7 +3475,7 @@ def _anthropic_message(content, stop_reason):
     }
 
 
-def _anthropic_sse(message):
+def _anthropic_sse(message, size=None):
     """Render text, thinking and tool turns for a real streaming parser."""
     events = [{"type": "message_start", "message": {
         **message, "content": [], "stop_reason": None}}]
@@ -3422,7 +3495,10 @@ def _anthropic_sse(message):
                            "signature": block["signature"]})
         else:
             initial = {**block, "text": ""}
-            deltas = [{"type": "text_delta", "text": block["text"]}]
+            text = block["text"]
+            deltas = [{"type": "text_delta", "text": text[i:i + size]}
+                      for i in range(0, len(text), size)] if size else [
+                          {"type": "text_delta", "text": text}]
         events.extend([
             {"type": "content_block_start", "index": index,
              "content_block": initial},
@@ -4720,7 +4796,9 @@ def test_responses_cut_short_still_returns_the_envelope(store_path):
                    "total_tokens": 15}},
         {"id": "resp_2", "status": "incomplete",
          "incomplete_details": {"reason": "max_output_tokens"},
-         "output": [_msg_item("The range was").model_dump()],
+         "output": [_msg_item(
+             'The range was <cite doc="report.pdf" page="1" box="0,0,1,1"/>'
+         ).model_dump()],
          "usage": {**details, "input_tokens": 40, "output_tokens": 99,
                    "total_tokens": 139}}]
     common = {"object": "response", "created_at": 0, "model": "gpt-test",
@@ -4737,7 +4815,8 @@ def test_responses_cut_short_still_returns_the_envelope(store_path):
     assert envelope["status"] == "incomplete"
     assert [item["type"] for item in envelope["messages"]] == [
         "function_call", "function_call_output", "message"]
-    assert envelope["output"][-1]["content"][0]["text"] == "The range was"
+    assert envelope["output"][-1]["content"][0]["text"] == (
+        'The range was <cite doc="report.pdf" page="1"/>')
     usage = envelope["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
@@ -6514,6 +6593,41 @@ def test_bridge_messages_lane_runs_cloud_tools(bridge_client, fake_anthropic):
     assert "PERSISTENCE" not in system_text
 
 
+@needs_anthropic
+def test_messages_drops_boxes_on_pages_never_seen(bridge_client,
+                                                  fake_anthropic):
+    client, bridge = bridge_client
+    _viewing(bridge)
+    view = _anthropic_message([{"type": "tool_use", "id": "t1",
+                                "name": "view_pages", "input": {
+                                    "doc_name": "r.pdf", "pages": "2"}}],
+                              "tool_use")
+    answer = _anthropic_message([{"type": "text",
+                                  "text": _BOXED + _OPEN_TAIL}], "end_turn")
+    expected = _UNSEEN_DROPPED + _OPEN_TAIL
+    fake_anthropic([view, answer])
+    result = client.chat("q", protocol="messages", model="claude-test")
+    assert result["content"][0]["text"] == expected
+    assert result["messages"][-1]["content"][0]["text"] == expected
+    fake_anthropic([_anthropic_sse(view), _anthropic_sse(answer, 5)])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    events = list(stream)
+    assert "".join(event["delta"]["text"] for event in events
+                   if event["type"] == "content_block_delta"
+                   and event["delta"]["type"] == "text_delta") == expected
+    texts = [event for event in events if event["type"] == "text"]
+    assert "".join(event["text"] for event in texts) == expected
+    assert texts[-1]["snapshot"] == expected
+    stops = [event for event in events if event["type"] == "content_block_stop"]
+    assert stops[-1]["content_block"]["text"] == expected
+    message = [event for event in events if event["type"] == "message_stop"]
+    assert message[-1]["message"]["content"][0]["text"] == expected
+    final = stream.get_final_message()
+    assert final["content"][0]["text"] == expected
+    assert final["messages"][-1]["content"][0]["text"] == expected
+
+
 @needs_agents
 def test_bridge_openai_agent_config_carries_configured_model(bridge_client):
     """A bridge client's openai_agent_config carries its chat_model —
@@ -7026,6 +7140,61 @@ def test_chat_citations_on_protocol_lanes(bridge_client, monkeypatch):
     assert bridge.prompts[-1] == ("cited_answer", {"format": "cite_with_boxes"})
     with pytest.raises(PageIndexAPIError, match="True, False or a citations"):
         client.chat("q", protocol="responses", citations=1)
+
+
+_BOXED = ('A <cite doc="Reports/r.pdf" page="2" box="0.1,0.2,0.3,0.4"/> '
+          'B <cite doc="r.pdf" page="3" box="0.5,0.6,0.7,0.8"/>.')
+_UNSEEN_DROPPED = _BOXED.replace(' box="0.5,0.6,0.7,0.8"', "")
+
+
+def _viewing(bridge):
+    """view_pages pictures page 2 of Reports/r.pdf."""
+    bridge.list_tools = lambda: [{
+        "name": "view_pages", "description": "Cloud view_pages",
+        "inputSchema": {"type": "object", "properties": {
+            "doc_name": {"type": "string"}, "pages": {"type": "string"}}}}]
+    bridge.call_tool = lambda name, arguments: ([
+        {"type": "text", "text": json.dumps({
+            "doc_name": "r.pdf", "path": "Reports/r.pdf",
+            "returned_pages": "2"})},
+        {"type": "image", "mimeType": "image/jpeg", "data": "AAAA"}], False)
+    return _call_item("view_pages", {"doc_name": "r.pdf", "pages": "2"})
+
+
+@needs_agents
+def test_chat_drops_boxes_on_pages_the_run_never_saw(bridge_client,
+                                                      fake_model):
+    client, bridge = bridge_client
+    view = _viewing(bridge)
+    pieces = [_BOXED[i:i + 7] for i in range(0, len(_BOXED), 7)]
+
+    def run(**kwargs):
+        fake = fake_model([[view], [_msg_item(_BOXED)]])
+        fake.pieces = pieces
+        return client.chat("q", **kwargs)
+
+    assert run() == _UNSEEN_DROPPED
+    assert "".join(run(stream=True, show_process=False)) == _UNSEEN_DROPPED
+    assert "".join(event["delta"] for event in run(stream=True).events
+                   if event["type"] == "answer") == _UNSEEN_DROPPED
+    result = run(protocol="chat_completions")
+    assert result["messages"][-1]["content"] == _UNSEEN_DROPPED
+    chunks = list(run(protocol="chat_completions", stream=True))
+    assert "".join(chunk["choices"][0]["delta"].get("content") or ""
+                   for chunk in chunks if chunk["choices"]) == _UNSEEN_DROPPED
+    assert chunks[-1]["messages"][-1]["content"] == _UNSEEN_DROPPED
+    envelope = run(protocol="responses")
+    assert envelope["output"][-1]["content"][0]["text"] == _UNSEEN_DROPPED
+    events = list(run(protocol="responses", stream=True))
+    assert "".join(event["delta"] for event in events
+                   if event["type"] == "response.output_text.delta"
+                   ) == _UNSEEN_DROPPED
+    final = events[-1]["response"]
+    assert final["output"][-1]["content"][0]["text"] == _UNSEEN_DROPPED
+    assert final["messages"][-1]["content"][0]["text"] == _UNSEEN_DROPPED
+    fake_model([[_msg_item(_BOXED)]])
+    assert client.chat("q") == _UNSEEN_DROPPED.replace(
+        ' box="0.1,0.2,0.3,0.4"', "")
 
 
 def test_chat_citations_managed(monkeypatch):

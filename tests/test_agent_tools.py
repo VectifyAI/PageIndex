@@ -3780,3 +3780,59 @@ def test_render_prompt_text_flattens_messages():
         {"role": "user"},
     ]) == "a\nb\n[image/png content omitted: ~1 KB]"
     assert render_prompt_text([]) == ""
+
+
+def _pictured(payload, image=True):
+    return [{"type": "text", "text": json.dumps(payload)},
+            *([{"type": "image", "mimeType": "image/jpeg", "data": "AAAA"}]
+              if image else [])]
+
+
+def test_seen_pages_keep_only_boxes_on_pictured_pages():
+    from pageindex.agent_tools import _bridge_invoker, _SeenPages
+
+    class Bridge:
+        def call_tool(self, name, arguments):
+            if name == "zoom_page":
+                return _pictured({"error": "nope"}), True
+            return {
+                "view_pages": _pictured({"doc_name": "Reports/a.pdf",
+                                         "path": "Reports/a.pdf",
+                                         "returned_pages": "1-2"}),
+                "get_page_content": _pictured({"doc_name": "b.pdf",
+                                               "picture_pages": "5"}),
+                "get_document_image": _pictured({"doc_name": "c.pdf",
+                                                 "page": 9}),
+            }[name], False
+
+    seen = _SeenPages()
+    for name in ("view_pages", "get_page_content", "get_document_image",
+                 "zoom_page"):
+        _bridge_invoker(Bridge(), name, {}, seen=seen)({})
+    seen.record("zoom_page", _pictured({"doc_name": "d.pdf", "page": 4}))
+    seen.record("zoom_page", _pictured({"doc_name": "Q&A's.pdf", "page": 7}))
+    seen.record("zoom_page", _pictured({"doc_name": "Release&notes.pdf",
+                                        "page": 8}))
+    seen.record("view_pages", _pictured({"doc_name": "e.pdf",
+                                         "returned_pages": "3"}, image=False))
+
+    def cite(doc, page):
+        return f'<cite doc="{doc}" page="{page}" box="0.1,0.2,0.3,0.4"/>'
+
+    kept = [cite("Reports/a.pdf", 2), cite("a.pdf", 1), cite("b.pdf", 5),
+            cite("d.pdf", 4), cite("Q&amp;A&apos;s.pdf", 7),
+            cite("Release&notes.pdf", 8), '<cite doc="x.pdf" page="1"/>']
+    for tag in kept:
+        assert seen.strip(tag) == tag
+    for doc, page in (("a.pdf", 3), ("Other/a.pdf", 1), ("c.pdf", 9),
+                      ("e.pdf", 3), ("b.pdf", 6)):
+        assert seen.strip(cite(doc, page)) == f'<cite doc="{doc}" page="{page}"/>'
+    text = ("x < y " + cite("a.pdf", 1) + " then " + cite("a.pdf", 3)
+            + "<cite doc='f.pdf' page='2' box = '0,0,1,1'>z</cite> <ci")
+    whole = seen.strip(text)
+    assert "box" not in whole.split("then")[1]
+    for size in range(1, 12):
+        held = seen.stream()
+        out = "".join(held.feed(text[i:i + size])
+                      for i in range(0, len(text), size)) + held.flush()
+        assert out == whole
