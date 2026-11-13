@@ -2574,7 +2574,8 @@ def test_live_cloud_envelope_field_parity(tmp_path):
                        {"Authorization": f"Bearer {LIVE_KEY}"})
 
     def call(name, arguments):
-        return json.loads(render_text(bridge.call_tool(name, arguments)[0]))
+        # The envelope is the first block; a picture page adds blocks after it.
+        return json.loads(render_text(bridge.call_tool(name, arguments)[0][:1]))
 
     cloud_browse = call("browse_documents", {"limit": 2})
     assert cloud_browse.get("success") is True and cloud_browse["documents"]
@@ -2612,12 +2613,14 @@ def test_live_cloud_envelope_field_parity(tmp_path):
     cloud_doc = cloud_browse["documents"][0]
     assert set(local_doc) - set(cloud_doc) <= {"metadata"}
 
-    local_nodes = local["get_document_structure"]["structure"]
     cloud_nodes = cloud["get_document_structure"]["structure"]
-    local_node = local_nodes[0] if isinstance(local_nodes, list) else local_nodes
-    cloud_node = cloud_nodes[0] if isinstance(cloud_nodes, list) else cloud_nodes
-    assert (set(local_node)
-            <= set(cloud_node) | {"page_index", "prefix_summary"})
+    # The cloud outline is becoming text, which has no node keys to compare.
+    if not isinstance(cloud_nodes, str):
+        local_nodes = local["get_document_structure"]["structure"]
+        local_node = local_nodes[0] if isinstance(local_nodes, list) else local_nodes
+        cloud_node = cloud_nodes[0] if isinstance(cloud_nodes, list) else cloud_nodes
+        assert (set(local_node)
+                <= set(cloud_node) | {"page_index", "prefix_summary"})
 
     assert (set(local["get_page_content"]["content"][0])
             <= set(cloud["get_page_content"]["content"][0]))
