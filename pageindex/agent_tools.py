@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import html
 import inspect
 import json
 import re
@@ -1423,7 +1424,7 @@ class _SeenPages:
             page = int(attrs.get("page", "").split("-")[0])
         except ValueError:
             return tag
-        if "box" not in attrs or (attrs.get("doc", "").strip(),
+        if "box" not in attrs or (html.unescape(attrs.get("doc", "")).strip(),
                                   page) in self.pages:
             return tag
         return _BOX_ATTR_RE.sub("", tag, count=1)

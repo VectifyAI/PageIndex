@@ -3810,6 +3810,7 @@ def test_seen_pages_keep_only_boxes_on_pictured_pages():
                  "zoom_page"):
         _bridge_invoker(Bridge(), name, {}, seen=seen)({})
     seen.record("zoom_page", _pictured({"doc_name": "d.pdf", "page": 4}))
+    seen.record("zoom_page", _pictured({"doc_name": "Q&A's.pdf", "page": 7}))
     seen.record("view_pages", _pictured({"doc_name": "e.pdf",
                                          "returned_pages": "3"}, image=False))
 
@@ -3817,7 +3818,8 @@ def test_seen_pages_keep_only_boxes_on_pictured_pages():
         return f'<cite doc="{doc}" page="{page}" box="0.1,0.2,0.3,0.4"/>'
 
     kept = [cite("Reports/a.pdf", 2), cite("a.pdf", 1), cite("b.pdf", 5),
-            cite("d.pdf", 4), '<cite doc="x.pdf" page="1"/>']
+            cite("d.pdf", 4), cite("Q&amp;A&apos;s.pdf", 7),
+            '<cite doc="x.pdf" page="1"/>']
     for tag in kept:
         assert seen.strip(tag) == tag
     for doc, page in (("a.pdf", 3), ("Other/a.pdf", 1), ("c.pdf", 9),

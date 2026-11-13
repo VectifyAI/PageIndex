@@ -988,10 +988,8 @@ def _strip_output(items, seen: _SeenPages) -> None:
 
 def _drop_unseen_boxes(model, seen: _SeenPages) -> None:
     """Strips each reply, streamed or not, before openai-agents reads it."""
-    get_response = getattr(model, "get_response", None)
-    stream_response = getattr(model, "stream_response", None)
-    if get_response is None or stream_response is None:
-        return
+    get_response = model.get_response
+    stream_response = model.stream_response
 
     async def getting(*args, **kwargs):
         response = await get_response(*args, **kwargs)
