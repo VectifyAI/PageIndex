@@ -6,8 +6,9 @@ class PageIndexAPIError(Exception):
     the protocol's usage shape with each call listed (claude-code/: the
     run's total only, None on a tool failure or if the run ends before
     Claude Code reports it); None on any other error. partial_answer is
-    the text a non-streamed chat() answer reached before it was cut short
-    (a stream has already delivered its text); None otherwise."""
+    the text a non-streamed chat() answer, or a Messages stream's
+    get_final_text(), reached before it was cut short (a stream has already
+    delivered its text); None otherwise."""
 
     def __init__(self, *args: object, status_code: int | None = None,
                  rpc_error: dict | None = None) -> None:

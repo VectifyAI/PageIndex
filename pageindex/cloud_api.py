@@ -1,12 +1,15 @@
 """Cloud mode of the PageIndex SDK, based on the 0.2.8 client."""
+import os
 import requests
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, Iterator
 import json
 import urllib.parse
 
+from .chat_stream import ChatObject
 from .errors import PageIndexAPIError
 from .naming import sanitize_filename, validate_folder_name
+from .retry import cloud_session
 
 
 def _enc(value: str) -> str:
@@ -21,6 +24,14 @@ class CloudAPI:
 
     def __init__(self, client):
         self._client = client
+        self._session, self._pid = cloud_session(), os.getpid()
+
+    @property
+    def _http(self):
+        # a forked process would read replies off the sockets its parent pooled
+        if self._pid != os.getpid():
+            self._session, self._pid = cloud_session(), os.getpid()
+        return self._session
 
     @property
     def BASE_URL(self) -> str:
@@ -44,12 +55,12 @@ class CloudAPI:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Upload a PDF document for processing. The system will automatically process both tree generation and OCR.
+        Upload a PDF document for processing; the tree is built in the background.
         Immediately returns a document identifier (`doc_id`) for subsequent operations.
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): Processing mode (e.g., "mcp"). Defaults to None.
+            mode (str, optional): None (default), the OCR-based cloud pipeline, or "flash".
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
@@ -61,9 +72,16 @@ class CloudAPI:
                 (a taken name gains a numeric suffix), when the server
                 returns it.
         """
+        if mode not in (None, "flash"):
+            raise PageIndexAPIError(
+                f"Failed to submit document: unknown cloud processing mode {mode!r}. "
+                "Cloud supports only 'flash'."
+            )
         data: Dict[str, Any] = {'if_retrieval': True}
-        if mode is not None:
-            data['mode'] = mode
+        if mode == "flash":
+            # The server rejects if_retrieval alongside algorithm=flash, and
+            # keeps node text for Flash trees by default.
+            data = {'algorithm': 'flash'}
         if beta_headers is not None:
             data['beta_headers'] = json.dumps(beta_headers)
         if folder_id is not None:
@@ -72,7 +90,7 @@ class CloudAPI:
             data['metadata'] = json.dumps(metadata)
 
         with open(file_path, "rb") as f:
-            response = requests.post(
+            response = self._http.post(
                 f"{self.BASE_URL}/doc/",
                 headers=self._headers(),
                 files={'file': (sanitize_filename(Path(file_path).name), f)},
@@ -101,7 +119,7 @@ class CloudAPI:
         if format not in ["page", "node", "raw"]:
             raise ValueError("Format parameter must be 'page', 'node', or 'raw'")
 
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=ocr&format={format}",
             headers=self._headers(),
             timeout=30
@@ -128,7 +146,7 @@ class CloudAPI:
                 height (0-1000), origin top-left. A 404 means the
                 document has no such block.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/block/{_enc(block_id)}/",
             headers=self._headers(),
             timeout=30
@@ -149,7 +167,7 @@ class CloudAPI:
         Returns:
             str: A presigned URL to the page image (JPEG).
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/s3/{_enc(doc_id)}/images",
             headers=self._headers(),
             params={"start": page, "end": page},
@@ -175,7 +193,7 @@ class CloudAPI:
         Returns:
             str: A presigned URL to the image.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/image/{_enc(img_id)}/",
             headers=self._headers(),
             timeout=30
@@ -203,7 +221,7 @@ class CloudAPI:
         Returns:
             dict: API response with status and, if ready, tree structure.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=tree&summary={node_summary}"
             f"&include_text={str(include_text).lower()}",
             headers=self._headers(),
@@ -234,7 +252,7 @@ class CloudAPI:
             "query": query,
             "thinking": thinking
         }
-        response = requests.post(
+        response = self._http.post(
             f"{self.BASE_URL}/retrieval/",
             headers=self._headers(),
             json=payload,
@@ -256,7 +274,7 @@ class CloudAPI:
         Returns:
             dict: Retrieval status and results.
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/retrieval/{_enc(retrieval_id)}/",
             headers=self._headers(),
             timeout=30
@@ -279,14 +297,14 @@ class CloudAPI:
         enable_citations: bool = False,
         extra_body: Optional[Dict[str, Any]] = None,
         folder_id: Optional[str] = None,
-    ) -> Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
+    ) -> Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
         """
-        PageIndex Chat Completions. Optionally scoped to specific PageIndex documents.
+        PageIndex Chat Completions. Optionally targeted at specific PageIndex documents.
 
         Args:
             messages (List[Dict[str, str]]): Conversation messages with 'role' and 'content' keys.
             stream (bool, optional): Enable streaming responses. Default is False.
-            doc_id (Optional[Union[str, List[str]]], optional): Document ID(s) to scope the conversation. Can be a single ID or a list of IDs.
+            doc_id (Optional[Union[str, List[str]]], optional): Document ID(s) the conversation targets, in its prompt only: the chat's tools reach every document the api_key can. Can be a single ID or a list of IDs.
             temperature (Optional[float], optional): Sampling temperature. Default is None (uses API default).
             stream_metadata (bool, optional): If True and stream=True, return raw chunks with metadata instead of just text. Default is False.
             enable_citations (bool, optional): Enable citation instructions in responses. Default is False.
@@ -294,10 +312,12 @@ class CloudAPI:
             folder_id (Optional[str], optional): Folder ID to steer discovery toward one folder; "root" means the whole library.
 
         Returns:
-            Union[Dict[str, Any], Iterator[str], Iterator[Dict[str, Any]]]:
+            Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
                 - If stream=False: Complete response dictionary
                 - If stream=True and stream_metadata=False: Iterator of text content chunks
                 - If stream=True and stream_metadata=True: Iterator of raw response chunks with metadata
+            Each ChatObject is the response dict, which also reads by
+            attribute as the openai SDK's ChatCompletion / ChatCompletionChunk.
         """
         payload = {
             "messages": messages,
@@ -318,7 +338,7 @@ class CloudAPI:
 
         payload.update(extra_body or {})
 
-        response = requests.post(
+        response = self._http.post(
             f"{self.BASE_URL}/chat/completions/",
             headers=self._headers(),
             json=payload,
@@ -335,46 +355,17 @@ class CloudAPI:
             if stream_metadata:
                 return self._stream_chat_response_raw(response)
             else:
-                return self._stream_chat_response(response)
+                from .local_chat import _text_only
+                return _text_only(self._stream_chat_response_raw(response))
         else:
-            return response.json()
+            from .local_chat import _ChatCompletion
+            body = response.json()
+            # a body that isn't an object keeps reaching chat()'s own check
+            return _ChatCompletion(body) if isinstance(body, dict) else body
 
-    def _stream_chat_response(self, response: requests.Response) -> Iterator[str]:
-        """
-        Parse streaming chat completion response.
-
-        Args:
-            response: Streaming HTTP response
-
-        Yields:
-            str: Content chunks from the streaming response
-        """
-        try:
-            for line in response.iter_lines():
-                if line:
-                    line = line.decode('utf-8')
-                    if line.startswith('data: '):
-                        data = line[6:]
-                        if data == '[DONE]':
-                            break
-
-                        try:
-                            chunk = json.loads(data)
-                            if chunk.get("error"):
-                                raise PageIndexAPIError(
-                                    "Chat completion failed mid-stream: "
-                                    f"{chunk['error']}")
-                            choices = chunk.get("choices") or [{}]
-                            content = choices[0].get("delta", {}).get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
-        finally:
-            response.close()
-
-    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[Dict[str, Any]]:
+    def _stream_chat_response_raw(self, response: requests.Response) -> Iterator[ChatObject]:
         """Streaming chat completion with full metadata, including citation events."""
+        from .local_chat import _ChatCompletionChunk
         try:
             for line in response.iter_lines():
                 if line:
@@ -390,7 +381,7 @@ class CloudAPI:
                                 raise PageIndexAPIError(
                                     "Chat completion failed mid-stream: "
                                     f"{chunk['error']}")
-                            yield chunk
+                            yield _ChatCompletionChunk(chunk)
                         except json.JSONDecodeError:
                             continue
         finally:
@@ -416,7 +407,7 @@ class CloudAPI:
                 - folderId (str | None): Containing folder ID
                 - metadata (dict | None): Your own tags from submit_document
         """
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",
             headers=self._headers(),
             timeout=30
@@ -437,7 +428,7 @@ class CloudAPI:
         Returns:
             dict: API response.
         """
-        response = requests.delete(
+        response = self._http.delete(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/",
             headers=self._headers(),
             timeout=30
@@ -480,7 +471,7 @@ class CloudAPI:
         if recursive:
             params["recursive"] = recursive
 
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/docs/",
             headers=self._headers(),
             params=params,
@@ -523,7 +514,7 @@ class CloudAPI:
         if parent_folder_id is not None:
             payload["parent_folder_id"] = parent_folder_id
 
-        response = requests.post(
+        response = self._http.post(
             f"{self.BASE_URL}/folder/",
             headers=self._headers(),
             json=payload,
@@ -552,7 +543,7 @@ class CloudAPI:
         if parent_folder_id is not None:
             params["parent_folder_id"] = parent_folder_id
 
-        response = requests.get(
+        response = self._http.get(
             f"{self.BASE_URL}/folders/",
             headers=self._headers(),
             params=params,
@@ -561,5 +552,89 @@ class CloudAPI:
         if response.status_code != 200:
             raise PageIndexAPIError(
                 f"Failed to list folders: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def create_metadata_schema(
+        self,
+        folder_id: str,
+        fields: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Declare the metadata fields of a top-level folder (workspace).
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root" for the account-level
+                schema used where a top-level folder declares none.
+            fields (dict): Field name to spec, e.g.
+                {"year": {"type": "number", "description": "Fiscal year"}};
+                type is "string", "number" or "boolean".
+
+        Returns:
+            dict: Created schema containing:
+                - folder_id (str): The folder ID, or "root"
+                - schema (dict): {"fields": ...} as stored
+        """
+        response = self._http.put(
+            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            headers=self._headers(),
+            json={"fields": fields},
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to create metadata schema: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def get_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
+        """
+        Get the metadata fields that apply to a folder's documents.
+
+        Args:
+            folder_id (str): Any folder ID, or "root" for the account-level
+                schema.
+
+        Returns:
+            dict: Effective schema containing:
+                - folder_id (str): The folder ID asked for
+                - workspace_id (str): The folder's top-level folder, or
+                  "root"
+                - inherited (bool): True when the schema comes from a
+                  parent folder or the account
+                - schema (dict | None): {"fields": ...}, or None when no
+                  schema is declared
+        """
+        response = self._http.get(
+            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get metadata schema: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def delete_metadata_schema(self, folder_id: str) -> Dict[str, Any]:
+        """
+        Delete the metadata fields declared on a top-level folder
+        (workspace), or on the account with folder_id "root". Documents keep
+        their metadata.
+
+        Args:
+            folder_id (str): Top-level folder ID, or "root".
+
+        Returns:
+            dict: {"folder_id": ..., "deleted": True}
+        """
+        response = self._http.delete(
+            f"{self.BASE_URL}/folder/{_enc(folder_id)}/metadata/schema/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to delete metadata schema: {response.text}",
                 status_code=response.status_code)
         return response.json()

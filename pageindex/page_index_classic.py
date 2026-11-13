@@ -5,6 +5,7 @@ import math
 import random
 import re
 from .utils import *
+from .utils import _is_unrecoverable
 from .naming import sanitize_filename as sanitize_upload_filename
 from .tree_optimize import add_intro_nodes, merge_tree
 import os
@@ -161,6 +162,8 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for item, result in zip(valid_items, results):
         if isinstance(result, Exception):
+            if _is_unrecoverable(result):
+                raise result
             if logger:
                 logger.error(f"Error checking start for {item['title']}: {result}")
             item['appear_start'] = 'no'
@@ -1008,6 +1011,8 @@ async def fix_incorrect_toc(toc_with_page_number, page_list, incorrect_results, 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for item, result in zip(incorrect_results, results):
         if isinstance(result, Exception):
+            if _is_unrecoverable(result):
+                raise result
             print(f"Processing item {item} generated an exception: {result}")
             continue
     results = [result for result in results if not isinstance(result, Exception)]
@@ -1107,6 +1112,8 @@ async def verify_toc(page_list, list_result, start_index=1, N=None, model=None):
     incorrect_results = []
     for result in results:
         if isinstance(result, BaseException):
+            if _is_unrecoverable(result):
+                raise result
             continue
         if result['answer'] == 'yes':
             correct_count += 1
@@ -1272,7 +1279,8 @@ def page_index_main(doc, opt=None, logger=None, page_list=None):
         if opt.if_add_node_text == 'yes':
             add_node_text(structure, page_list)
         if opt.if_add_node_summary == 'yes':
-            await summarize_tree(structure, page_list, model=getattr(opt, 'summary_model', None) or opt.model)
+            await summarize_tree(structure, page_list, model=getattr(opt, 'summary_model', None) or opt.model,
+                                 concurrency=64)
             if opt.if_add_doc_description == 'yes':
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure, top_level_only=True)

@@ -1,5 +1,6 @@
 """SDK surface tests: PageIndexClient in local and cloud mode."""
 import asyncio
+import contextlib
 import importlib
 import inspect
 import json
@@ -11,6 +12,7 @@ import sys
 import types
 from pathlib import Path
 
+import httpx
 import pytest
 
 import pageindex.flash
@@ -938,7 +940,7 @@ def test_submit_shows_an_explained_llm_failure_alone(local_client, sample_pdf,
                                                      monkeypatch, status):
     """An exhausted ladder with a status (a claude-code/ login included)
     names its cause, so the traceback shows the submit error alone; one
-    without, such as a bug the ladder retried, keeps its chain. Neither
+    without, such as a bug, keeps its chain. Neither
     carries run_off_loop's no-running-loop RuntimeError."""
     def fail(pdf, **kwargs):
         raise pageindex.utils.LLMRetriesExhausted("LLM call failed",
@@ -1347,6 +1349,45 @@ def test_summarize_tree_child_unrecoverable_raises(monkeypatch):
     with pytest.raises(Denied):
         asyncio.run(pageindex.utils.summarize_tree(
             structure, pdf_pages, small_node_tokens=0))
+
+
+@pytest.mark.parametrize("fatal", [True, False], ids=["out-of-retries", "400"])
+@pytest.mark.parametrize("check", ["start", "verify", "fix"])
+def test_standard_checks_stop_on_a_call_out_of_retries(monkeypatch, check, fatal):
+    """A standard-mode check whose call ran out of retries stops the run,
+    as summaries do: taken as a "no" or skipped, it kept a section on a
+    page no check confirmed. A 400 (a prompt over the context) stays that
+    item's own miss, as there."""
+    import logging
+    from pageindex import page_index_classic as classic
+
+    class Refused(Exception):
+        status_code = 400
+
+    async def failing(model, prompt):
+        if fatal:
+            raise pageindex.utils.LLMRetriesExhausted(
+                "LLM completion failed after 10 attempts: rate limited",
+                status_code=429)
+        raise Refused("context_length_exceeded")
+    monkeypatch.setattr(classic, "llm_acompletion", failing)
+    pages = [("Alpha starts here", 4), ("Beta starts here", 4)]
+    toc = [{"title": "Alpha", "physical_index": 1},
+           {"title": "Beta", "physical_index": 2}]
+    run = {
+        "start": lambda: classic.check_title_appearance_in_start_concurrent(
+            toc, pages),
+        "verify": lambda: classic.verify_toc(pages, toc),
+        "fix": lambda: classic.fix_incorrect_toc(
+            toc, pages, [{"list_index": 1, "title": "Beta",
+                          "physical_index": 1}],
+            logger=logging.getLogger(__name__)),
+    }[check]
+    if fatal:
+        with pytest.raises(pageindex.utils.LLMRetriesExhausted):
+            asyncio.run(run())
+    else:
+        asyncio.run(run())
 
 
 def test_summarize_tree_fails_loud_when_every_model_call_fails(monkeypatch):
@@ -1837,6 +1878,12 @@ def test_folders_are_cloud_only(local_client):
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.list_folders()
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.create_metadata_schema("f", {"year": {"type": "number"}})
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.get_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.delete_metadata_schema("f")
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
         local_client.folder_context("f")
     assert local_client.folder_context("root") == ""  # the library itself
 
@@ -1848,16 +1895,6 @@ def test_retrieval_endpoints_cloud_only(local_client):
         local_client.submit_query("any", "q")
     with pytest.raises(PageIndexAPIError, match=r"use chat\(\)"):
         local_client.get_retrieval("any")
-
-
-def test_chat_completions_local_needs_openai_agents(local_client, monkeypatch):
-    """Local chat is implemented (see test_local_chat.py); without
-    openai-agents installed it raises the actionable install error."""
-    import sys
-    monkeypatch.setitem(sys.modules, "agents", None)
-    with pytest.raises(PageIndexAPIError, match="pip install openai-agents"):
-        local_client.chat_completions(
-            messages=[{"role": "user", "content": "q"}])
 
 
 # ── cloud mode: request wiring ──
@@ -1882,14 +1919,11 @@ class FakeResponse:
 
 
 def _patch_requests(monkeypatch, handler):
-    """Replace cloud_api's requests module with per-verb fakes."""
-    fake = types.SimpleNamespace(
-        post=lambda url, **kw: handler("POST", url, kw),
-        get=lambda url, **kw: handler("GET", url, kw),
-        delete=lambda url, **kw: handler("DELETE", url, kw),
-        Response=FakeResponse,
-    )
-    monkeypatch.setattr("pageindex.cloud_api.requests", fake)
+    """Replace cloud_api's session verbs with per-verb fakes."""
+    import requests
+    for verb in ("get", "post", "put", "delete"):
+        monkeypatch.setattr(requests.Session, verb,
+                            lambda self, url, _verb=verb.upper(), **kw: handler(_verb, url, kw))
 
 
 @pytest.fixture
@@ -1918,6 +1952,14 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     client.submit_document(sample_pdf, metadata={"project": "alpha"})
     assert calls[-1]["data"]["metadata"] == json.dumps({"project": "alpha"})
 
+    client.submit_document(sample_pdf, mode="flash", folder_id="f-1")
+    assert calls[-1]["data"] == {"algorithm": "flash", "folder_id": "f-1"}
+    sent = len(calls)
+    for bad in ("Flash", " flash", "standard", "mcp"):
+        with pytest.raises(PageIndexAPIError, match="unknown cloud processing mode"):
+            client.submit_document(sample_pdf, mode=bad)
+    assert len(calls) == sent
+
     fake.payload = {"status": "processing", "retrieval_ready": False}
     client.get_tree("pi-1", node_summary=True)
     assert calls[-1]["url"].endswith("/doc/pi-1/?type=tree&summary=True&include_text=true")
@@ -1926,6 +1968,25 @@ def test_cloud_request_wiring(cloud, sample_pdf):
 
     client.get_ocr("pi/../1")
     assert "/doc/pi%2F..%2F1/" in calls[-1]["url"]
+
+    fields = {"year": {"type": "number", "description": "Fiscal year"}}
+    fake.payload = {"folder_id": "f/1", "schema": {"fields": fields}}
+    assert client.create_metadata_schema("f/1", fields) == fake.payload
+    assert calls[-1]["method"] == "PUT"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
+    assert calls[-1]["json"] == {"fields": fields}
+    assert calls[-1]["timeout"] == 30
+
+    fake.payload = {"folder_id": "f/1", "workspace_id": "f/1",
+                    "inherited": False, "schema": {"fields": fields}}
+    assert client.get_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "GET"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
+
+    fake.payload = {"folder_id": "f/1", "deleted": True}
+    assert client.delete_metadata_schema("f/1") == fake.payload
+    assert calls[-1]["method"] == "DELETE"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/folder/f%2F1/metadata/schema/"
 
     client.BASE_URL = "https://staging.example"
     client.api_key = "other"
@@ -2031,6 +2092,9 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.list_documents(),
         lambda: client.create_folder("f"),
         lambda: client.list_folders(),
+        lambda: client.create_metadata_schema("f", {}),
+        lambda: client.get_metadata_schema("f"),
+        lambda: client.delete_metadata_schema("f"),
         lambda: client.folder_context("f"),
     ]
     for attempt in attempts:
@@ -2371,6 +2435,28 @@ def test_cloud_chat_stream_parsing(cloud, monkeypatch):
         messages=[{"role": "user", "content": "q"}], stream=True,
         stream_metadata=True))
     assert {"object": "chat.completion.citations", "citations": []} in chunks
+    # the managed endpoint's chunks read by attribute too, as the openai SDK
+    # reads that JSON: fields it doesn't send read None
+    assert chunks[1].choices[0].delta.content == "Hi"
+    assert chunks[2].citations == [] and chunks[2].choices is None
+    assert chunks[0].model is None
+
+
+def test_cloud_chat_envelope_reads_by_key_and_by_attribute(cloud):
+    client, calls, fake = cloud
+    fake.payload = {"id": "c", "object": "chat.completion", "created": 1,
+                    "choices": [{"index": 0, "finish_reason": "stop",
+                                 "message": {"role": "assistant",
+                                             "content": "ok"}}]}
+    result = client.chat_completions("q")
+    assert result == fake.payload and json.loads(json.dumps(result)) == result
+    assert result.choices[0].message.content == "ok"
+    assert result.model is None  # the endpoint sends none
+    import yaml  # a 0.2.x caller's yaml dump still writes a plain mapping
+    assert yaml.safe_load(yaml.safe_dump(result)) == fake.payload
+    assert yaml.safe_load(yaml.dump(result)) == fake.payload
+    fake.payload = ["not", "an", "object"]  # passes through as before
+    assert client.chat_completions("q") == ["not", "an", "object"]
 
 
 def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
@@ -2394,6 +2480,27 @@ def test_cloud_chat_stream_error_chunk_raises(cloud, monkeypatch):
         assert first in ("Partial",
                          {"choices": [{"delta": {"content": "Partial"}}]})
         with pytest.raises(PageIndexAPIError, match="boom"):
+            list(it)
+
+
+@pytest.mark.parametrize("finish", ["max_tokens", "refusal",
+                                    "model_context_window_exceeded"])
+def test_cloud_chat_text_stream_raises_on_a_cut_answer(cloud, monkeypatch, finish):
+    """The endpoint ends a cut or refused answer with that stop reason as
+    its finish_reason, then [DONE]."""
+    client, calls, fake = cloud
+    lines = [
+        b'data: {"choices": [{"delta": {"content": "Partial"}}]}',
+        ("data: " + json.dumps({"choices": [{"delta": {},
+                                             "finish_reason": finish}]})).encode(),
+        b"data: [DONE]",
+    ]
+    _patch_requests(monkeypatch, lambda m, url, kw: FakeResponse(lines=lines))
+    for stream in (lambda: client.chat_completions("q", stream=True),
+                   lambda: client.chat("q", stream=True)):
+        it = stream()
+        assert next(it) == "Partial"
+        with pytest.raises(PageIndexAPIError, match=finish):
             list(it)
 
 
@@ -2550,8 +2657,8 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
     api = LocalAPI(storage_path=str(tmp_path / "s"), model="m",
                    summary_model="s",
                    index_backend={"api_key": "ik", "api_base": "http://b"})
-    assert api._with_backend(None, _llm_backend.get) == {"api_key": "ik",
-                                                         "api_base": "http://b"}
+    assert api._with_backend(None, ("m", "s"), _llm_backend.get) == {
+        "api_key": "ik", "api_base": "http://b"}
     assert _llm_backend.get() is None
 
     reply = SimpleNamespace(choices=[SimpleNamespace(
@@ -2565,7 +2672,7 @@ def test_backend_scopes_the_index_lane(tmp_path, monkeypatch):
                         ("gpt-4o", "openai/gpt-4o"),
                         ("my-finetune-v2", "openai/my-finetune-v2")):
         captured.clear()
-        api._with_backend(None, lambda: llm_completion(model, "p"))
+        api._with_backend(None, (model,), lambda: llm_completion(model, "p"))
         assert captured["model"] == wire
         assert captured["api_key"] == "ik"
         assert captured["api_base"] == "http://b"
@@ -2591,23 +2698,25 @@ def test_index_lane_makes_no_key_prejudgment(monkeypatch):
 
 
 def test_llm_completion_surfaces_litellms_credential_verdict(monkeypatch):
-    """LiteLLM's own missing-credentials error (a retryable-shaped 500)
-    rides the retry loop and lands verbatim in the terminal error."""
+    """LiteLLM's own missing-credentials error (a 500 raised before any
+    request) fails on the first attempt, verbatim in the terminal error."""
     pytest.importorskip("litellm")
     import litellm  # noqa: F401 — first import may load a .env; delenv after
     from pageindex.utils import llm_completion
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    slept = []
+    monkeypatch.setattr("pageindex.utils.time.sleep", slept.append)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         llm_completion("gpt-4o", "probe")
 
-    async def _nosleep(s):
-        pass
+    async def _asleep(s):
+        slept.append(s)
 
-    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _asleep)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "probe"))
+    assert slept == []
 
 
 def test_litellm_model_normalizes_without_key_prejudgment(monkeypatch):
@@ -2794,6 +2903,593 @@ def test_llm_acompletion_400_skips_the_retry_ladder(monkeypatch):
     with pytest.raises(Rejected):
         asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))
     assert calls["n"] == 1
+
+
+_BILLED = {"litellm_provider": "openai", "mode": "chat",
+           "supports_prompt_cache_breakpoint": True,
+           "input_cost_per_token": 1e-7, "cache_creation_input_token_cost": 1.25e-7}
+_CACHE_OFF = {"mode": "explicit"}
+
+
+@pytest.fixture
+def cache_map(monkeypatch):
+    """LiteLLM's map with test entries, and no cache-write decision yet."""
+    litellm = pytest.importorskip("litellm")
+    monkeypatch.setattr(litellm, "model_cost", {**litellm.model_cost,
+        "gpt-test-billed": _BILLED,
+        "gpt-test-no-write-price": {**_BILLED, "cache_creation_input_token_cost": None},
+        "gpt-test-unflagged": {**_BILLED, "supports_prompt_cache_breakpoint": None},
+        "azure/gpt-test-billed": {**_BILLED, "litellm_provider": "azure",
+                                  "supports_prompt_cache_breakpoint": None},
+        "azure_ai/gpt-test-billed": {**_BILLED, "litellm_provider": "azure_ai",
+                                     "supports_prompt_cache_breakpoint": False}})
+    return litellm
+
+
+def _ok(**kw):
+    return types.SimpleNamespace(choices=[types.SimpleNamespace(
+        message=types.SimpleNamespace(content="ok"), finish_reason="stop")])
+
+
+def test_indexing_writes_no_cache_a_model_bills_above_input(cache_map, monkeypatch):
+    """A model LiteLLM's map flags for prompt_cache_options and prices a cache
+    write above input indexes with no cache writes, on any route: the id's
+    own flag answers first, then its bare name's. A backend's own option
+    wins."""
+    sent = []
+
+    def reply(**kw):
+        sent.append(kw.get("prompt_cache_options"))
+        return _ok()
+
+    async def areply(**kw):
+        return reply(**kw)
+    monkeypatch.setattr(cache_map, "completion", reply)
+    monkeypatch.setattr(cache_map, "acompletion", areply)
+    for model, expected in (("gpt-test-billed", _CACHE_OFF),
+                            ("openai/gpt-test-billed", _CACHE_OFF),
+                            ("openrouter/openai/gpt-test-billed:nitro", _CACHE_OFF),
+                            ("azure/gpt-test-billed", _CACHE_OFF),
+                            ("azure_ai/gpt-test-billed", None),
+                            ("gpt-test-no-write-price", None),
+                            ("gpt-test-unflagged", None),
+                            ("anthropic/claude-test-unmapped", None)):
+        sent.clear()
+        asyncio.run(pageindex.utils.llm_acompletion(model, "p"))
+        pageindex.utils.llm_completion(model, "p")
+        assert sent == [expected, expected], model
+
+    implicit = {"mode": "implicit"}
+    for backend, expected in (({"prompt_cache_options": implicit}, implicit),
+                              ({"extra_body": {"prompt_cache_options": implicit}}, None)):
+        sent.clear()
+        token = pageindex.utils._llm_backend.set(backend)
+        try:
+            asyncio.run(pageindex.utils.llm_acompletion("gpt-test-billed", "p"))
+            pageindex.utils.llm_completion("gpt-test-billed", "p")
+        finally:
+            pageindex.utils._llm_backend.reset(token)
+        assert sent == [expected, expected], backend
+
+
+def test_a_model_newer_than_the_map_is_tried_without_a_download(
+        cache_map, monkeypatch):
+    """A saving never waits on the published map. A model the loaded map
+    lacks is tried where LiteLLM's name rule calls it GPT-5.6 on, on any
+    route; any other keeps its caching until an entry learned elsewhere
+    (chat, flash) lists its premium."""
+    fetched = []
+    monkeypatch.setattr(httpx, "get", lambda url, timeout: fetched.append(url))
+    monkeypatch.setattr(pageindex.utils, "_published", None)
+    monkeypatch.setattr(pageindex.utils, "_MAP_SET_BY_USER", False)
+    off = {"prompt_cache_options": _CACHE_OFF}
+    for model, expected in (("openai/gpt-9.9-test-newer", off),
+                            ("openrouter/openai/gpt-9.9-test-newer:nitro", off),
+                            ("openai/gpt-5.5-test-newer", {}),
+                            ("openai/gpt-test-newer", {}),
+                            ("openrouter/vendor/model-test-newer", {})):
+        assert pageindex.utils._cache_off(model, {}) == expected, model
+    cache_map.model_cost["gpt-test-newer"] = _BILLED
+    assert pageindex.utils._cache_off("openai/gpt-test-newer", {}) == off
+    assert not fetched
+
+
+def test_a_server_refusing_the_cache_option_indexes_without_it(
+        cache_map, monkeypatch, caplog):
+    """A 400 to prompt_cache_options, or a 422, sends the prompt again at
+    once without it; once that goes through, that server never gets it
+    again (one warning) while another server for the model still does. A
+    400 the prompt gets without the option too refuses nothing, and a
+    prompt too long for the model, or one a content filter stopped, is
+    never sent again."""
+    class Rejected(Exception):
+        status_code = 400
+
+    calls, refused = [], {"option"}
+
+    def reply(**kw):
+        calls.append("prompt_cache_options" in kw)
+        if "prompt" in refused or ("option" in refused and calls[-1]):
+            raise Rejected("bad request")
+        return _ok()
+
+    async def areply(**kw):
+        return reply(**kw)
+    monkeypatch.setattr(cache_map, "completion", reply)
+    monkeypatch.setattr(cache_map, "acompletion", areply)
+
+    def acomplete():
+        assert asyncio.run(pageindex.utils.llm_acompletion("gpt-test-billed", "p")) == "ok"
+
+    def complete():
+        assert pageindex.utils.llm_completion("gpt-test-billed", "p") == "ok"
+
+    def index(base, *runs):
+        token = pageindex.utils._llm_backend.set({"api_base": base})
+        try:
+            for run in runs:
+                run()
+        finally:
+            pageindex.utils._llm_backend.reset(token)
+
+    index("http://a", acomplete, acomplete)
+    index("http://b", complete, complete, acomplete)
+    assert calls == [True, False, False, True, False, False, False]
+    assert sum("refused prompt_cache_options" in r.getMessage()
+               for r in caplog.records) == 2
+
+    refused = {"prompt"}
+    calls.clear()
+    for _ in range(2):
+        with pytest.raises(Rejected):
+            asyncio.run(pageindex.utils.llm_acompletion("gpt-test-billed", "p",
+                                                        api_base="http://c"))
+    assert calls == [True, False, True, False]
+
+    # servers that reject an unknown field with a 422
+    Rejected.status_code, refused = 422, {"option"}
+    calls.clear()
+    index("http://d", complete, acomplete)
+    assert calls == [True, False, False]
+
+    from litellm.exceptions import ContentPolicyViolationError, ContextWindowExceededError
+    for error in (ContextWindowExceededError, ContentPolicyViolationError):
+        def stopped(**kw):
+            calls.append("prompt_cache_options" in kw)
+            raise error(message="stopped", model="m", llm_provider="openai")
+        monkeypatch.setattr(cache_map, "completion", stopped)
+        calls.clear()
+        with pytest.raises(error):
+            pageindex.utils.llm_completion("gpt-test-billed", "p")
+        assert calls == [True], error
+
+
+def test_indexing_cache_choice_follows_litellms_own_rule(cache_map):
+    """LiteLLM's own rule decides, read for the route: its name rule where
+    the map's flag is unset (gpt-5.6-cyber, a dated Azure id), the route's
+    own price where it has one (Perplexity bills no writes); a base_model
+    reads as LiteLLM prices the call; a cache choice of the caller's own,
+    at the top level or in extra_body, wins."""
+    from pageindex.utils import _billed_cache_writes, _cache_off
+    explicit = {"prompt_cache_options": _CACHE_OFF}
+    assert _billed_cache_writes("openai/gpt-5.6-cyber")
+    assert _billed_cache_writes("azure/gpt-6-luna-2026-09-22")
+    assert not _billed_cache_writes("perplexity/openai/gpt-6-luna")
+    assert _cache_off("azure/my-deploy", {}) == {}
+    assert _cache_off("azure/my-deploy", {"base_model": "azure/gpt-6-luna-2026-09-22"}) == explicit
+    for choice in ({"prompt_cache_key": "doc"}, {"prompt_cache_retention": "24h"},
+                   {"extra_body": {"prompt_cache_key": "doc"}}):
+        assert _cache_off("openai/gpt-6-luna", choice) == {}, choice
+    assert _cache_off("openai/gpt-6-luna", {}) == explicit
+
+
+class _LLMError(Exception):
+    """A LiteLLM-shaped error: a server reply unless `cause` says otherwise."""
+
+    def __init__(self, status, headers=None, cause=None):
+        super().__init__(f"HTTP {status}")
+        request = httpx.Request("POST", "https://llm.example/v1/chat/completions")
+        response = httpx.Response(status, headers=headers, request=request)
+        self.status_code = status
+        self.litellm_response_headers = response.headers
+        self.__cause__ = cause if cause is not None else httpx.HTTPStatusError(
+            "reply", request=request, response=response)
+
+
+@pytest.mark.parametrize("make, retry", [
+    *[(lambda s=s: _LLMError(s), True) for s in (408, 409, 429, 500, 503, 529)],
+    *[(lambda s=s: _LLMError(s), False) for s in (402, 413, 422)],
+    (lambda: _LLMError(503, {"x-should-retry": "false"}), False),
+    (lambda: _LLMError(422, {"x-should-retry": "true"}), True),
+    (lambda: _LLMError(500, cause=httpx.ConnectError("refused")), True),
+    (lambda: _LLMError(408, cause=httpx.ReadTimeout("slow")), True),
+    (lambda: _LLMError(500, cause=ValueError("Missing credentials")), False),
+    (lambda: _LLMError(500, cause=httpx.LocalProtocolError("Illegal header value b'sk-x\\n'")), False),
+    (lambda: _LLMError(500, cause=httpx.UnsupportedProtocol("Request URL is missing an 'http://' or 'https://' protocol.")), False),
+    # LiteLLM's error for a 200 whose body is only an error (OpenRouter), with the body's code
+    *[(lambda s=s: _LLMError(s, cause=Exception("Provider returned error")), True) for s in (429, 502)],
+], ids=["408", "409", "429", "500", "503", "529", "402", "413", "422",
+        "header-no", "header-yes", "connect", "timeout", "local", "bad-header", "no-scheme",
+        "body-429", "body-502"])
+def test_llm_retry_follows_the_official_sdk_rule(make, retry):
+    from pageindex.retry import should_retry
+    assert should_retry(make()) is retry
+
+
+@pytest.mark.parametrize("headers, wait", [
+    ({"retry-after": "7"}, 7),
+    ({"retry-after-ms": "1500", "retry-after": "7"}, 1.5),
+    ({"retry-after": "120"}, None),
+    ({"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"}, None),
+    ({}, None),
+])
+def test_retry_waits_as_the_server_asks(headers, wait):
+    from pageindex import retry
+    headers = httpx.Headers(headers)
+    if wait is not None:
+        assert retry.delay(3, headers, retry.INDEX_MAX_DELAY) == wait
+        return
+    for cap, budget in ((retry.INDEX_MAX_DELAY, retry.INDEX_RETRIES),
+                        (retry.SDK_MAX_DELAY, retry.SDK_RETRIES)):
+        caps = [min(cap, 2 ** i) for i in range(budget)]
+        slept = [retry.delay(i, headers, cap) for i in range(budget)]
+        assert all(c / 2 <= s <= c for s, c in zip(slept, caps))
+        assert any(s < c for s, c in zip(slept, caps))
+    assert sum(retry.delay(i, headers, retry.INDEX_MAX_DELAY)
+               for i in range(retry.INDEX_RETRIES)) > 60
+
+
+@pytest.mark.parametrize("make, calls, slept", [
+    (lambda: _LLMError(429, {"retry-after": "7"}), 10, [7] * 9),
+    (lambda: _LLMError(500, cause=ValueError("Missing credentials")), 1, []),
+], ids=["rate-limited", "local"])
+def test_llm_retry_ladder(monkeypatch, make, calls, slept):
+    pytest.importorskip("litellm")
+    import litellm
+    sent, waits = [], []
+
+    def fail(**kw):
+        sent.append(1)
+        raise make()
+
+    async def afail(**kw):
+        fail()
+
+    async def _asleep(s):
+        waits.append(s)
+    monkeypatch.setattr(litellm, "completion", fail)
+    monkeypatch.setattr(litellm, "acompletion", afail)
+    monkeypatch.setattr("pageindex.utils.time.sleep", waits.append)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _asleep)
+    for run in (lambda: pageindex.utils.llm_completion("gpt-4o", "p"),
+                lambda: asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))):
+        sent.clear()
+        waits.clear()
+        with pytest.raises(pageindex.utils.LLMRetriesExhausted) as err:
+            run()
+        assert (len(sent), waits, err.value.status_code) == (calls, slept, make().status_code)
+
+
+def test_llm_ladder_retries_a_reply_without_choices(monkeypatch):
+    """A 200 with no choices is tried again: standard mode's gathers swallow
+    the error, so a page the check never confirmed would stay in the tree."""
+    pytest.importorskip("litellm")
+    import litellm
+    sent = []
+
+    def answer(**kw):
+        sent.append(1)
+        return litellm.ModelResponse(choices=[] if len(sent) == 1 else
+                                     [{"message": {"role": "assistant", "content": "ok"}}])
+
+    async def aanswer(**kw):
+        return answer()
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr(litellm, "completion", answer)
+    monkeypatch.setattr(litellm, "acompletion", aanswer)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    for run in (lambda: pageindex.utils.llm_completion("gpt-4o", "p"),
+                lambda: asyncio.run(pageindex.utils.llm_acompletion("gpt-4o", "p"))):
+        sent.clear()
+        assert (run(), len(sent)) == ("ok", 2)
+
+
+def test_retry_budgets_follow_the_constants(monkeypatch):
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.retry import cloud_session
+    sent = []
+
+    def fail(**kw):
+        sent.append(1)
+        raise _LLMError(429, {"retry-after": "7"})
+    monkeypatch.setattr(litellm, "completion", fail)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.retry.INDEX_RETRIES", 1)
+    monkeypatch.setattr("pageindex.retry.SDK_RETRIES", 0)
+    with pytest.raises(pageindex.utils.LLMRetriesExhausted, match="after 2 attempts"):
+        pageindex.utils.llm_completion("gpt-4o", "p")
+    with _flaky_server(fails=2) as (url, seen):
+        assert cloud_session().get(url).status_code == 503
+    assert (len(sent), len(seen)) == (2, 1)
+
+
+@contextlib.contextmanager
+def _flaky_server(fails, status=503, retry_after="0.01", stall=0.0):
+    """A loopback server answering `status` (with Retry-After), after `stall` seconds, `fails` times, then 200."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    hits = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def _answer(self):
+            self.rfile.read(int(self.headers.get("content-length") or 0))
+            hits.append(self.command)
+            failing = len(hits) <= fails
+            if failing and stall:
+                threading.Event().wait(stall)  # not time.sleep, which tests patch
+            self.send_response(status if failing else 200)
+            if failing:
+                self.send_header("Retry-After", retry_after)
+            self.send_header("content-length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+        do_GET = do_POST = do_PUT = do_DELETE = _answer
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/", hits
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("model, path", [("openai/gpt-x", "/v1"), ("anthropic/claude-x", "")])
+@pytest.mark.parametrize("status, hits", [(503, 3), (429, 3), (422, 1)])
+def test_litellm_errors_keep_the_shape_the_retry_rule_reads(monkeypatch, model, path,
+                                                            status, hits):
+    """Canary for LiteLLM upgrades: real server errors through real LiteLLM, sync and async."""
+    pytest.importorskip("litellm")
+    from pageindex import utils
+
+    async def _nosleep(s):
+        pass
+    monkeypatch.setattr("pageindex.retry.INDEX_RETRIES", 2)
+    monkeypatch.setattr("pageindex.utils.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.utils.asyncio.sleep", _nosleep)
+    for run in (utils.llm_completion,
+                lambda m, p: asyncio.run(utils.llm_acompletion(m, p))):
+        with _flaky_server(fails=9, status=status) as (url, seen):
+            token = utils._llm_backend.set({"api_base": url.rstrip("/") + path, "api_key": "x"})
+            try:
+                with pytest.raises(utils.LLMRetriesExhausted):
+                    run(model, "p")
+            finally:
+                utils._llm_backend.reset(token)
+        assert len(seen) == hits
+
+
+@pytest.mark.parametrize("method, status, hits", [
+    ("GET", 503, 3), ("PUT", 503, 3), ("DELETE", 503, 3),
+    ("POST", 503, 1), ("POST", 500, 1), ("POST", 429, 3)])
+def test_cloud_session_retries_what_is_safe_to_repeat(method, status, hits):
+    from pageindex.retry import cloud_session
+    with _flaky_server(fails=2, status=status) as (url, seen):
+        response = cloud_session().request(method, url)
+    assert (len(seen), response.status_code) == (hits, 200 if hits > 1 else status)
+
+
+def test_cloud_session_never_resends_a_post_after_a_tls_error():
+    from urllib3.exceptions import MaxRetryError, SSLError
+    from pageindex.retry import cloud_session
+    retry = cloud_session().get_adapter("https://api.pageindex.ai/").max_retries
+    with pytest.raises(MaxRetryError):
+        retry.increment("POST", "/chat/completions/", error=SSLError("bad record mac"))
+
+
+@pytest.mark.parametrize("method, hits", [("GET", 3), ("POST", 1)])
+def test_cloud_session_replays_a_timed_out_read_only_when_idempotent(monkeypatch, method,
+                                                                     hits):
+    import requests
+    from pageindex.retry import cloud_session
+    monkeypatch.setattr("urllib3.util.retry.time.sleep", lambda s: None)
+    with _flaky_server(fails=2, stall=0.3) as (url, seen):
+        if hits > 1:
+            assert cloud_session().request(method, url, timeout=0.1).status_code == 200
+        else:
+            with pytest.raises(requests.ReadTimeout):
+                cloud_session().request(method, url, timeout=0.1)
+    assert len(seen) == hits
+
+
+@pytest.mark.parametrize("call, status, hits", [
+    (lambda c: c.get_document("pi-1"), 503, 3),
+    (lambda c: c.chat_completions([{"role": "user", "content": "q"}]), 503, 1),
+    (lambda c: c.chat_completions([{"role": "user", "content": "q"}]), 429, 3),
+    (lambda c: c.create_folder("f"), 503, 1)],
+    ids=["read", "chat-error", "chat-refused", "create"])
+def test_cloud_client_sends_through_its_retrying_session(monkeypatch, call, status, hits):
+    with _flaky_server(fails=2, status=status) as (url, seen):
+        client = PageIndexClient(api_key="k")
+        monkeypatch.setattr(client, "BASE_URL", url.rstrip("/"))
+        if hits > 1:
+            call(client)
+        else:
+            with pytest.raises(PageIndexAPIError):
+                call(client)
+    assert len(seen) == hits
+
+
+def test_cloud_client_pools_apart_from_its_forked_children(monkeypatch):
+    """A forked worker opens its own connections: on its parent's pooled ones, it would read a reply meant for
+    another process, another document's."""
+    from pageindex.retry import SDK_RETRIES, _CloudRetry
+    api = PageIndexClient(api_key="k")._api
+    parent = api._http
+    assert api._http is parent
+    monkeypatch.setattr("pageindex.cloud_api.os.getpid", lambda: -1)
+    child = api._http
+    assert child is not parent and api._http is child
+    retries = child.get_adapter("https://api.pageindex.ai/").max_retries
+    assert isinstance(retries, _CloudRetry) and retries.total == SDK_RETRIES
+
+
+def test_a_fork_waits_for_the_litellm_preload(monkeypatch, tmp_path):
+    """A worker forked while a client imports litellm in the background
+    would wait forever on that import's lock, held by a thread it lacks: the
+    fork waits for the import instead."""
+    import time
+    import litellm  # noqa: F401  # waits out a real preload still importing it
+    import pageindex.client as client_mod
+    from conftest import exit_code_in_forked_child
+    (tmp_path / "litellm.py").write_text("import time\ntime.sleep(0.5)\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "litellm")  # the real one comes back after
+    monkeypatch.setattr(client_mod, "_litellm_preload_started", False)
+    client_mod._preload_litellm()
+    deadline = time.monotonic() + 5
+    while "litellm" not in sys.modules and time.monotonic() < deadline:
+        time.sleep(0.01)  # until the import has begun
+    assert exit_code_in_forked_child(lambda: importlib.import_module("litellm")) == 0
+
+
+@pytest.mark.parametrize("retry_after, bounds", [
+    ("7", [(7, 7), (7, 7)]), ("120", [(0.5, 1), (1, 2)])])
+def test_cloud_session_waits_as_the_server_asks(monkeypatch, retry_after, bounds):
+    from pageindex.retry import cloud_session
+    waits = []
+    monkeypatch.setattr("urllib3.util.retry.time.sleep", waits.append)
+    with _flaky_server(fails=2, status=429, retry_after=retry_after) as (url, seen):
+        assert cloud_session().get(url).status_code == 200
+    assert len(waits) == len(bounds)
+    assert all(low <= w <= high for w, (low, high) in zip(waits, bounds))
+
+
+def test_claude_none_sends_the_models_own_off_switch(monkeypatch):
+    """reasoning_effort "none", from the call or the backend, reaches LiteLLM
+    as a Claude model's own off switch, or its lowest effort where it has
+    none; a Claude model the table lacks tries disabled, or between_tools
+    where LiteLLM's map says it always thinks; a model is Claude where its
+    id says so, as LiteLLM tells one, and a table name matches only where
+    no further version follows it; other models and routes, other levels
+    and a caller's own thinking pass as sent."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    sent = []
+
+    def reply(**kw):
+        sent.append({k: kw[k] for k in ("reasoning_effort", "thinking") if k in kw})
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content="ok"), finish_reason="stop")])
+
+    async def areply(**kw):
+        return reply(**kw)
+    monkeypatch.setattr(litellm, "completion", reply)
+    monkeypatch.setattr(litellm, "acompletion", areply)
+
+    none, low = {"reasoning_effort": "none"}, {"reasoning_effort": "low"}
+    off, between = {"thinking": {"type": "disabled"}}, {"thinking": {"type": "between_tools"}}
+    for model, expected in (("anthropic/claude-haiku-5-5", off),
+                            ("anthropic/claude-sonnet-5", off),
+                            ("anthropic/claude-opus-5", off),
+                            ("anthropic/claude-sonnet-5-5", between),
+                            ("anthropic/claude-opus-5-5", low),
+                            ("anthropic/claude-fable-5-1", low),
+                            ("bedrock/global.anthropic.claude-sonnet-5-5", between),
+                            ("bedrock/invoke/global.anthropic.claude-haiku-5-5", off),
+                            ("vertex_ai/claude-opus-5", off),
+                            ("azure_ai/claude-haiku-5-5", off),
+                            ("azure_ai/claude-opus-5-5-fast", low),
+                            ("databricks/databricks-claude-sonnet-5", off),
+                            ("anthropic/claude-opus-6", off),
+                            ("bedrock/global.anthropic.claude-opus-6", off),
+                            ("anthropic/claude-opus-5-6", off),
+                            ("anthropic/claude-fable-5-2", between),
+                            ("anthropic/claude-fable-6", between),
+                            ("anthropic/claude-opus-5-5-20261001", low),
+                            ("bedrock/anthropic.claude-sonnet-5-20261001-v1:0", off),
+                            ("vertex_ai/claude-opus-4-7@20260416", off),
+                            ("bedrock/global.anthropic.claude-opus-4-8", off),
+                            ("azure_ai/my-claude", off),
+                            ("anthropic/claude-3-7-sonnet-20250219", off),
+                            ("vertex_ai/claude-3-7-sonnet@20250219", off),
+                            ("azure_ai/my-deployment", none),
+                            ("bedrock/arn:aws:bedrock:us-east-1:123456789012:"
+                             "application-inference-profile/test", none),
+                            ("litellm/anthropic/claude-haiku-5-5", off),
+                            ("anthropic/claude-opus-4-8", off),
+                            ("openrouter/anthropic/claude-haiku-5.5", none),
+                            ("openai/claude-haiku-5-5", none),
+                            ("gpt-6-luna", none)):
+        sent.clear()
+        asyncio.run(pageindex.utils.llm_acompletion(model, "p", reasoning_effort="none"))
+        token = pageindex.utils._llm_backend.set({"reasoning_effort": "none"})
+        try:
+            pageindex.utils.llm_completion(model, "p")
+        finally:
+            pageindex.utils._llm_backend.reset(token)
+        assert sent == [expected, expected], model
+
+    for params in ({"reasoning_effort": "low"},
+                   {"reasoning_effort": "none", "thinking": {"type": "adaptive"}}):
+        sent.clear()
+        asyncio.run(pageindex.utils.llm_acompletion("anthropic/claude-haiku-5-5", "p", **params))
+        assert sent == [params]
+
+
+def test_a_refusal_is_one_litellm_puts_on_no_cause_or_on_a_param():
+    """A 400, or a 422, counts against a field the request carries where
+    LiteLLM names no cause or names a param; never where it names another
+    cause, a subclass of its own for it (too long, a content filter, a
+    proxy's guardrail)."""
+    litellm = pytest.importorskip("litellm")
+    from litellm import exceptions
+    from pageindex.utils import LLMRetriesExhausted, _refusal
+    args = {"message": "m", "model": "m", "llm_provider": "openai"}
+    assert _refusal(exceptions.BadRequestError(**args))
+    assert _refusal(exceptions.UnsupportedParamsError(**args))
+    assert _refusal(LLMRetriesExhausted("unprocessable", status_code=422))
+    for named in (exceptions.ContextWindowExceededError(**args),
+                  exceptions.ContentPolicyViolationError(**args),
+                  exceptions.RejectedRequestError(**args, request_data={})):
+        assert not _refusal(named), type(named)
+    assert not _refusal(LLMRetriesExhausted("down", status_code=500))
+    assert not _refusal(litellm.AuthenticationError(**args))
+
+
+def test_litellm_still_drops_a_databricks_switch_beside_none():
+    """Fails once LiteLLM keeps a thinking switch sent beside
+    reasoning_effort "none" on Databricks, as it does on Claude's other
+    routes: then the fill hook (local_chat._register_fill) needn't take the
+    "none" off any more."""
+    pytest.importorskip("litellm")
+    from litellm.utils import get_optional_params
+    assert "thinking" not in get_optional_params(
+        model="databricks-claude-sonnet-5", custom_llm_provider="databricks",
+        reasoning_effort="none", thinking={"type": "disabled"})
+
+
+@pytest.mark.parametrize("model", ["claude-haiku-5-5", "claude-sonnet-5", "claude-opus-5",
+                                   "claude-sonnet-5-5"])
+def test_litellm_still_sends_claude_no_thinking_for_none(model):
+    """Fails once LiteLLM itself turns the model's thinking off for "none"
+    (BerriAI/litellm#47924, #44298), which can show only after the
+    litellm <1.106 cap is lifted: then the LiteLLM routes no longer need
+    _claude_none for it. Keep its _CLAUDE_NONE row: the Messages lane
+    still needs it, as Anthropic's effort takes no "none"."""
+    pytest.importorskip("litellm")
+    from litellm.utils import get_optional_params
+    assert "thinking" not in get_optional_params(
+        model=model, custom_llm_provider="anthropic", reasoning_effort="none",
+        drop_params=True)
 
 
 def test_parse_pages_keeps_whitespace_tolerance():
@@ -3212,7 +3908,7 @@ def test_retry_notice_logs_instead_of_stdout(monkeypatch, capsys, caplog):
     def flaky(**kwargs):
         if not attempts:
             attempts.append(1)
-            raise RuntimeError("boom")
+            raise httpx.ConnectError("boom")
         message = types.SimpleNamespace(content="ok")
         choice = types.SimpleNamespace(message=message, finish_reason="stop")
         return types.SimpleNamespace(choices=[choice])
@@ -3230,7 +3926,7 @@ def test_retry_notice_only_when_a_retry_follows(monkeypatch, caplog):
     from pageindex import utils
 
     def broken(**kwargs):
-        raise RuntimeError("boom")
+        raise httpx.ConnectError("boom")
 
     monkeypatch.setattr(litellm, "completion", broken)
     monkeypatch.setattr(utils.time, "sleep", lambda s: None)
@@ -3569,7 +4265,7 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
             ("gpt-5.1", False, None, None, "none"),
             ("gpt-5.1", "full", None, None, "none"),
             ("gpt-5.1", "full", None, {"reasoning_effort": "high"}, None),
-            ("gpt-5-mini", "full", None, None, None),
+            ("gpt-5-mini", "full", None, None, "minimal"),
             ("o4-mini", "full", "high", None, "high"),
             ("openrouter/openai/gpt-5.1", "full", None, None, "none"),
             ("gpt-9-preview", "full", None, None, "none"),
@@ -3586,16 +4282,167 @@ def test_flash_summaries_send_the_reasoning_effort_and_expand_does_not(tmp_path,
         assert bool(expands) == (optimize == "full")
         assert all("reasoning_effort" not in p for p in expands)
 
+    # a model LiteLLM's packaged map lacks is learned before the default
+    # reads it, its download started before the PDF is read; both weigh a
+    # chosen effort, judged after the read where the map decides it
+    # (test_flash_reads_the_pdf_while_the_map_decides_a_chosen_effort)
+    order, efforts = [], []
+    monkeypatch.setattr(pageindex.utils, "start_learning_if_effort_dropped",
+                        lambda model, effort=None: order.append("start") or efforts.append(effort))
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: order.append("read") or {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    monkeypatch.setattr(pageindex.utils, "learn_model_if_effort_dropped",
+                        lambda model, effort=None: order.append("learn") or efforts.append(effort))
+    monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
+                        lambda model: order.append("default"))
+    flash_api.page_index_flash(str(pdf), summary_model="m", optimize=False)
+    assert order == ["start", "read", "learn", "default"]
+    order.clear()
+    efforts.clear()
+    flash_api.page_index_flash(str(pdf), summary_model="m", optimize=False,
+                               summary_reasoning_effort=" high ")
+    assert order == ["start", "read", "learn"] and efforts == ["high", "high"]
+
+    order.clear()
     monkeypatch.setattr(pageindex.utils, "default_summary_reasoning_effort",
                         lambda model: pytest.fail("looked up with summaries off"))
     flash_api.page_index_flash(str(pdf), summary=False, optimize=False)
+    assert "start" not in order
+
+
+def test_summary_effort_ladder_follows_litellms_map(monkeypatch):
+    """Least thinking first: a level LiteLLM's map flags unsupported is
+    skipped (a server LiteLLM passes it to as is would refuse it),
+    "minimal" is tried only where the map flags it; a model the map lacks
+    tries "none", then "low"."""
+    pytest.importorskip("litellm")
+    import litellm
+    from pageindex.utils import summary_effort_ladder
+
+    def flags(none=None, minimal=None, low=None):
+        return {"supports_none_reasoning_effort": none,
+                "supports_minimal_reasoning_effort": minimal,
+                "supports_low_reasoning_effort": low}
+    infos = {"ladder-gpt-5": flags(none=False, minimal=True),
+             "ladder-sol": flags(none=False, minimal=False),
+             "ladder-pro": flags(none=False, minimal=False, low=False),
+             "ladder-luna": flags(none=True, minimal=False),
+             "ladder-silent": flags()}
+
+    def info(model):
+        return infos[model.rsplit("/", 1)[-1]]
+    monkeypatch.setattr(litellm, "get_model_info", info)
+    for model, ladder in (("openai/ladder-gpt-5", ["minimal", "low"]),
+                          ("openai/ladder-sol", ["low"]),
+                          ("openai/ladder-pro", []),
+                          ("openai/ladder-luna", ["none", "low"]),
+                          ("openai/ladder-silent", ["none", "low"]),
+                          ("openai/ladder-unmapped", ["none", "low"])):
+        assert summary_effort_ladder(model) == [{"reasoning_effort": level} for level in ladder], model
+
+
+def test_pageindexs_own_litellm_lookups_print_nothing(capsys, monkeypatch):
+    """The lookups PageIndex makes before any call (the summary ladder, the
+    Messages lane's Claude switch) keep LiteLLM's "Provider List" banner off
+    stdout, as its calls do, one with no model id too."""
+    litellm = pytest.importorskip("litellm")
+    from pageindex.utils import claude_none_switch, llm_completion, summary_effort_ladder
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    summary_effort_ladder("mistral/test-unknown-banner")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    claude_none_switch("claude-test-banner")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    with pytest.raises(litellm.BadRequestError):
+        llm_completion("", "p")
+    assert "Provider List" not in capsys.readouterr().out
+
+
+def test_summary_effort_ladder_is_what_litellm_would_send():
+    """On LiteLLM's real map: a level LiteLLM would drop is skipped, read
+    as LiteLLM reads it (azure/gpt-5-nano as gpt-5-nano); a model it
+    doesn't know on an OpenAI-format API gets the effort as is, on any
+    other none it would drop; no rung LiteLLM sends as thinking turned on
+    (off stays); a Claude model, as LiteLLM tells one, goes down Claude's own
+    switches, from its known one on, past disabled where LiteLLM's map says
+    it always thinks; a rung this process saw refused is left out."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import _refused, _rung_key, summary_effort_ladder
+
+    def efforts(*levels, forced=False):
+        return [{"reasoning_effort": level,
+                 **({"allowed_openai_params": ["reasoning_effort"]} if forced else {})}
+                for level in levels]
+    off, between = {"thinking": {"type": "disabled"}}, {"thinking": {"type": "between_tools"}}
+    low = {"reasoning_effort": "low"}
+    for model, ladder in (("openai/gpt-6-luna", efforts("none", "low")),
+                          ("openai/gpt-5-nano", efforts("minimal", "low")),
+                          ("azure/gpt-5-nano", efforts("minimal", "low")),
+                          ("openai/gpt-6.1-sol", efforts("low")),
+                          ("azure/my-gpt-deployment", efforts("none", "low", forced=True)),
+                          ("fireworks_ai/accounts/fireworks/models/test-unknown",
+                           efforts("none", "low", forced=True)),
+                          ("bedrock/qwen.test-unknown-v9", []),
+                          ("bedrock/arn:aws:bedrock:us-east-1:123456789012:"
+                           "application-inference-profile/test", []),
+                          ("bedrock/us.amazon.nova-2-lite-v1:0", []),
+                          ("deepseek/deepseek-chat", efforts("none")),
+                          ("anthropic/claude-3-7-sonnet-20250219", [off, between, low]),
+                          ("anthropic/claude-haiku-5-5", [off, between, low]),
+                          ("anthropic/claude-sonnet-5-5", [between, low]),
+                          ("anthropic/claude-opus-5-5", [low]),
+                          ("anthropic/claude-opus-6", [off, between, low]),
+                          ("anthropic/claude-fable-6", [between, low]),
+                          ("bedrock/global.anthropic.claude-opus-4-8", [off, between, low])):
+        assert summary_effort_ladder(model) == ladder, model
+    _refused("openai/gpt-6-luna", None).add(_rung_key({"reasoning_effort": "none"}))
+    assert summary_effort_ladder("openai/gpt-6-luna") == efforts("low")
+    token = pageindex.utils._llm_backend.set({"api_base": "http://other"})
+    try:  # another server's refusals are its own
+        assert summary_effort_ladder("openai/gpt-6-luna") == efforts("none", "low")
+    finally:
+        pageindex.utils._llm_backend.reset(token)
+
+
+def test_effort_checks_read_the_backend_as_the_call_carries_it():
+    """The index backend's base_model and allowed_openai_params count where
+    the summary ladder and a chosen effort ask LiteLLM: a deployment named
+    for nothing LiteLLM knows is known as its base_model, taking its ladder
+    and refusals, and the caller's own allowed_openai_params let a level
+    through."""
+    pytest.importorskip("litellm")
+    from pageindex.utils import _llm_backend, chosen_effort, summary_effort_ladder
+
+    def under(backend, check, *args):
+        token = _llm_backend.set(backend)
+        try:
+            return check(*args)
+        finally:
+            _llm_backend.reset(token)
+    nano = {"base_model": "azure/gpt-5-nano"}
+    assert under(nano, summary_effort_ladder, "azure/my-nano-deploy") == [
+        {"reasoning_effort": "minimal"}, {"reasoning_effort": "low"}]
+    with pytest.raises(ValueError, match="pass 'minimal', the least it takes"):
+        under(nano, chosen_effort, "azure/my-nano-deploy", "none")
+    assert under(nano, chosen_effort, "azure/my-nano-deploy", "minimal") == {
+        "reasoning_effort": "minimal"}
+    four = {"base_model": "azure/gpt-4o"}
+    assert under(four, summary_effort_ladder, "azure/my-4o-deploy") == []
+    with pytest.raises(ValueError, match="it takes no reasoning effort"):
+        under(four, chosen_effort, "azure/my-4o-deploy", "low")
+    with pytest.raises(ValueError, match="azure/gpt-4o takes no"):
+        chosen_effort("azure/gpt-4o", "low")
+    assert under({"allowed_openai_params": ["reasoning_effort"]}, chosen_effort,
+                 "azure/gpt-4o", "low") == {"reasoning_effort": "low"}
 
 
 def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monkeypatch):
-    """The default effort is dropped once a prompt refused with it (400)
-    goes through without it, calls refused after the drop included; a
-    prompt refused either way keeps it; another refusal or a chosen effort
-    is never resent without it."""
+    """A default effort refused (400 or 422) steps up the ladder, then to
+    none sent, once a prompt goes through a step up, calls refused after
+    the step included; a prompt refused at every step keeps it; another
+    refusal (a prompt too long for the model, or one a content filter
+    stopped) or a chosen effort
+    is never resent without it, nor is any on claude-code/, which checks
+    its effort up front (dropped, the calls would leave its workflow)."""
     from conftest import build_pdf
     import copy
     import pageindex.flash.api as flash_api
@@ -3613,8 +4460,11 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
             self.status_code = status_code
     sent = []
 
-    def run(optimize, refuse, effort=None, concurrency=1, status=400):
+    def run(optimize, refuse, effort=None, concurrency=1, status=400, model="gpt-9-preview",
+            remember=False, error=None):
         sent.clear()
+        if not remember:  # a document of its own process
+            monkeypatch.setattr(pageindex.utils, "_refusals", {})
 
         async def server(model, prompt, **params):
             if prompt.startswith("You are splitting"):
@@ -3622,12 +4472,12 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
             sent.append(params.get("reasoning_effort"))
             if refuse(params):
                 await asyncio.sleep(0.001 * len(sent))   # later refusals land after the drop
-                raise Refused(status)
+                raise error or Refused(status)
             return '{"summary": "ok"}'
         monkeypatch.setattr(pageindex.utils, "llm_acompletion", server)
         monkeypatch.setattr(tree_optimize, "llm_acompletion", server)
         return flash_api.page_index_flash(
-            str(pdf), summary_model="gpt-9-preview", optimize=optimize,
+            str(pdf), summary_model=model, optimize=optimize,
             summary_concurrency=concurrency, summary_reasoning_effort=effort)
 
     def summaries(nodes):
@@ -3635,18 +4485,183 @@ def test_flash_summaries_drop_a_default_effort_the_server_refuses(tmp_path, monk
 
     for optimize in (False, "full"):
         run(optimize, lambda params: "reasoning_effort" in params)
-        assert len(sent) > 3 and sent[:2] == ["none", None] and set(sent[2:]) == {None}
-        run(optimize, lambda params: len(sent) <= 2)
-        assert len(sent) > 3 and sent[:2] == ["none", None] and set(sent[2:]) == {"none"}
+        assert len(sent) > 3 and sent[:3] == ["none", "low", None] and set(sent[3:]) == {None}
+        run(optimize, lambda params: params.get("reasoning_effort") == "none")
+        assert len(sent) > 3 and sent[:2] == ["none", "low"] and set(sent[2:]) == {"low"}
+        run(optimize, lambda params: params.get("reasoning_effort") == "none", status=422)
+        assert len(sent) > 3 and sent[:2] == ["none", "low"] and set(sent[2:]) == {"low"}
+        from litellm.exceptions import ContentPolicyViolationError, ContextWindowExceededError
+        for error in (ContextWindowExceededError, ContentPolicyViolationError):
+            run(optimize, lambda params: len(sent) == 1,
+                error=error("stopped", "gpt-9-preview", "openai"))
+            assert len(sent) > 1 and set(sent) == {"none"}, error
+        run(optimize, lambda params: len(sent) <= 3)
+        assert len(sent) > 4 and sent[:3] == ["none", "low", None] and set(sent[3:]) == {"none"}
+        run(optimize, lambda params: "reasoning_effort" in params, model="gpt-5-nano")
+        assert len(sent) > 3 and sent[:3] == ["minimal", "low", None] and set(sent[3:]) == {None}
+        # a step refused later goes on from there, not from the ladder's top
+        run(optimize, lambda params: params.get("reasoning_effort") == "none" or (
+            params.get("reasoning_effort") == "low" and len(sent) > 3))
+        assert sent[:5] == ["none", "low", "low", "low", None] and set(sent[5:]) <= {None}
+        # the process remembers a refusal: its next document starts past it
+        run(optimize, lambda params: params.get("reasoning_effort") == "none")
+        run(optimize, lambda params: params.get("reasoning_effort") == "none", remember=True)
+        assert set(sent) == {"low"}
         answered = summaries(run(optimize, lambda params: False, concurrency=4)["structure"])
         dropped = run(optimize, lambda params: "reasoning_effort" in params, concurrency=4)
         assert sent.count("none") > 1 and summaries(dropped["structure"]) == answered
         with pytest.raises(Refused):
             run(optimize, lambda params: True, status=401)
         assert None not in sent
-        with pytest.raises(RuntimeError, match="Summary generation failed"):
+        # the error names the refusal instead of only pointing at context limits
+        with pytest.raises(RuntimeError,
+                           match="Summary generation failed.*first failure: unsupported value"):
             run(optimize, lambda params: "reasoning_effort" in params, effort="high")
         assert set(sent) == {"high"}
+        run(optimize, lambda params: len(sent) == 1, model="claude-code/haiku")
+        assert len(sent) > 2 and set(sent) == {"none"}
+
+
+def test_flash_refuses_a_chosen_effort_the_model_cannot_honor(tmp_path, monkeypatch):
+    """A chosen effort that can't reach the model as chosen raises before
+    any model call: a "none" on a model known not to turn its thinking
+    off, a level LiteLLM's map says the model doesn't take (naming the
+    least it takes), one LiteLLM drops even with allowed_openai_params. The
+    default there runs at what the model takes; a chosen "none" on a model
+    that can, or may, turn it off still runs, and a model LiteLLM doesn't
+    know on an OpenAI-format API gets it as is."""
+    from conftest import build_pdf
+    import copy
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    reads = []
+    monkeypatch.setattr(flash_api, "extract_toc", lambda pdf, **kw: reads.append(pdf) or {
+        "structure": copy.deepcopy(tree), "page_texts": list(pages)})
+    calls = []
+
+    async def capture(model, prompt, **params):
+        calls.append(params)
+        return '{"subsections": []}' if prompt.startswith("You are splitting") else '{"summary": "ok"}'
+    monkeypatch.setattr(pageindex.utils, "llm_acompletion", capture)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", capture)
+
+    for model in ("anthropic/claude-opus-5-5", "bedrock/global.anthropic.claude-fable-5-1",
+                  "claude-code/sonnet"):
+        with pytest.raises(ValueError, match="can't turn thinking off|takes no"):
+            flash_api.page_index_flash(str(pdf), summary_model=model,
+                                       summary_reasoning_effort="none")
+        assert not calls, model
+    for model, effort, match in (
+            ("gpt-5-nano", "none", "takes no summary_reasoning_effort='none'.*'minimal', the least"),
+            ("azure/gpt-5-nano", "none", "'minimal', the least"),
+            ("gpt-6.1-sol", "none", "'low', the least"),
+            ("gpt-5-nano", "xhigh", "pass a level it takes"),
+            ("gpt-5.5-pro", "none", "pass a level it takes"),
+            ("gpt-4o", "high", "it takes no reasoning effort"),
+            ("azure/gpt-5-mini-prod", "none", "LiteLLM drops it")):
+        with pytest.raises(ValueError, match=match):
+            flash_api.page_index_flash(str(pdf), summary_model=model,
+                                       summary_reasoning_effort=effort)
+        assert not calls and not reads, model  # before the PDF is read
+    # one read from the config too
+    real = pageindex.utils.ConfigLoader._load_yaml
+    with monkeypatch.context() as m:
+        m.setattr(pageindex.utils.ConfigLoader, "_load_yaml", staticmethod(
+            lambda path: {**real(path), "index_model": "anthropic/claude-opus-5-5"}))
+        with pytest.raises(ValueError, match="can't turn thinking off"):
+            flash_api.page_index_flash(str(pdf), summary_reasoning_effort="none")
+    assert not calls and not reads
+    forced = {"allowed_openai_params": ["reasoning_effort"]}
+    least = {"anthropic/claude-opus-5-5": "low", "gpt-5-nano": "minimal"}  # the defaults
+    for model, effort, summary in (("anthropic/claude-opus-5-5", None, {}),
+                                   ("gpt-5-nano", None, {}),
+                                   ("anthropic/claude-haiku-5-5", "none", {}),
+                                   ("anthropic/claude-opus-6", "none", {}),
+                                   ("gpt-6-luna", "none", {}),
+                                   ("gpt-5-nano", "minimal", {}),
+                                   ("azure/test-prod-deployment", "low", forced),
+                                   ("azure_ai/claude-test-deployment", "low", {}),
+                                   ("mistral/test-unmapped-mistral", "low", {})):
+        flash_api.page_index_flash(str(pdf), summary_model=model,
+                                   summary_reasoning_effort=effort)
+        assert {"reasoning_effort": effort or least[model], **summary} in calls, model
+        assert all(params.get("allowed_openai_params") == summary.get("allowed_openai_params")
+                   for params in calls if "reasoning_effort" in params), model
+        calls.clear()
+
+
+def test_flash_reads_the_pdf_while_the_map_decides_a_chosen_effort(tmp_path, monkeypatch):
+    """A chosen effort LiteLLM refuses for a model its packaged map lacks is
+    judged once the PDF is read, the published map downloading meanwhile:
+    "xhigh" goes to an Azure GPT-6 the map says takes it and raises for one
+    it says doesn't, still before any model call. A model the packaged map
+    knows is judged before the read, downloading nothing, as is one the
+    map, downloaded, still lacks."""
+    import copy
+    import threading
+    from conftest import build_pdf
+    import pageindex.flash.api as flash_api
+    import pageindex.tree_optimize as tree_optimize
+    from pageindex import utils
+
+    tree, pages, _ = _expand_fixture()
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf(["x"]))
+    reads, fetched, calls = [], [], []
+
+    def read(pdf, **kw):
+        reading.set()
+        reads.append(pdf)
+        return {"structure": copy.deepcopy(tree), "page_texts": list(pages)}
+
+    def get(url, timeout):  # the map arrives only once the PDF is being read
+        fetched.append(url)
+        reading.wait(5)
+        return httpx.Response(200, json=entries, request=httpx.Request("GET", url))
+
+    async def capture(model, prompt, **params):
+        calls.append(params)
+        return '{"subsections": []}' if prompt.startswith("You are splitting") else '{"summary": "ok"}'
+    monkeypatch.setattr(flash_api, "extract_toc", read)
+    monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(utils, "llm_acompletion", capture)
+    monkeypatch.setattr(tree_optimize, "llm_acompletion", capture)
+    monkeypatch.setattr(utils, "_MAP_SET_BY_USER", False)
+    monkeypatch.setattr(utils, "_MAP_WAIT", 1)
+    monkeypatch.setattr(utils, "_retry_published_at", float("inf"))
+    monkeypatch.setattr(utils, "_filled", False)
+
+    with pytest.raises(ValueError, match="'minimal', the least"):
+        flash_api.page_index_flash(str(pdf), summary_model="gpt-5-nano", optimize=False,
+                                   summary_reasoning_effort="none")
+    assert not reads and not fetched
+    for model, takes in (("azure/gpt-6.9-test-flash-takes", True),
+                         ("azure/gpt-6.9-test-flash-refuses", False)):
+        reading, entries = threading.Event(), {model: {
+            "litellm_provider": "azure", "mode": "chat", "supports_reasoning": True,
+            "supports_xhigh_reasoning_effort": takes}}
+        monkeypatch.setattr(utils, "_published", None)
+        reads.clear(), fetched.clear(), calls.clear()
+        if takes:
+            flash_api.page_index_flash(str(pdf), summary_model=model,
+                                       summary_reasoning_effort="xhigh")
+            assert {p.get("reasoning_effort") for p in calls} == {None, "xhigh"}  # expand, summaries
+        else:
+            with pytest.raises(ValueError, match="LiteLLM's model map says"):
+                flash_api.page_index_flash(str(pdf), summary_model=model,
+                                           summary_reasoning_effort="xhigh")
+            assert not calls  # expand's neither
+        assert len(reads) == 1 and len(fetched) == 1, model
+    # the map in, a deployment name it can't know is judged before the read
+    reads.clear(), fetched.clear(), calls.clear()
+    with pytest.raises(ValueError, match="LiteLLM drops it"):
+        flash_api.page_index_flash(str(pdf), summary_model="azure/gpt-5-mini-prod",
+                                   summary_reasoning_effort="none")
+    assert not reads and not fetched and not calls
 
 
 def test_summary_max_words_reaches_the_local_indexer():
@@ -3658,6 +4673,85 @@ def test_summary_max_words_reaches_the_local_indexer():
     assert PageIndexLocalClient()._api._summary_max_words is None
     with pytest.raises(PageIndexAPIError, match=r'index\["summary_max_words"\] must be a'):
         PageIndexLocalClient(index={"summary_max_words": "80"})
+
+
+def test_an_index_backend_effort_reaches_the_model_as_chosen(tmp_path, sample_pdf,
+                                                             monkeypatch):
+    """A reasoning_effort in index_backend reaches the indexing calls as
+    chosen: a level LiteLLM's map says a model the submit calls doesn't
+    take fails it before any model call (flash calls the summary model
+    alone, standard the index model too), and a model LiteLLM doesn't know
+    on an OpenAI-format API gets it as is, beside the caller's own allowed
+    params."""
+    pytest.importorskip("litellm")
+    from pageindex import PageIndexLocalClient
+    seen = []
+    monkeypatch.setattr(pageindex.flash, "page_index_flash",
+                        lambda p, **kw: seen.append(pageindex.utils._call_kwargs(
+                            kw["summary_model"], {})) or {
+                            "structure": [{"title": "T", "start_index": 1,
+                                           "end_index": 1, "summary": "s", "nodes": []}]})
+    monkeypatch.setattr(pageindex.utils, "llm_completion",
+                        lambda model, prompt, **kw: "d.")
+    monkeypatch.chdir(tmp_path)  # the default .pageindex store lands here
+    with pytest.raises(PageIndexAPIError,
+                       match=r"takes no index_backend\[\"reasoning_effort\"\]='none'.*'minimal'"):
+        PageIndexLocalClient(index_model="gpt-5-nano", index_backend={
+            "reasoning_effort": "none"}).submit_document(sample_pdf)
+    assert not seen
+    for backend, allowed in (({"reasoning_effort": "low"}, ["reasoning_effort"]),
+                             ({"reasoning_effort": "low", "allowed_openai_params": ["seed"]},
+                              ["seed", "reasoning_effort"])):
+        PageIndexLocalClient(index_model="azure/test-prod-deployment",
+                             index_backend=backend).submit_document(sample_pdf)
+        assert seen.pop() == {**backend, "allowed_openai_params": allowed}
+    PageIndexLocalClient(index_model="gpt-6-luna", index_backend={
+        "reasoning_effort": "none"}).submit_document(sample_pdf)
+    assert seen.pop() == {"reasoning_effort": "none"}
+    legacy = PageIndexLocalClient(index_model="gpt-4o", summary_model="gpt-5-nano",
+                                  index_backend={"reasoning_effort": "minimal"})
+    legacy.submit_document(sample_pdf)
+    assert seen.pop() == {"reasoning_effort": "minimal"}
+    with pytest.raises(PageIndexAPIError, match="openai/gpt-4o takes no"):
+        legacy.submit_document(sample_pdf, mode="standard")
+
+
+def test_index_backend_kwargs_reach_each_model_as_its_own(tmp_path, monkeypatch):
+    """What carries index_backend's reasoning_effort to one model stays off
+    the other model's calls (standard mode calls both), and a call's own
+    allowed_openai_params join the backend's instead of replacing them."""
+    pytest.importorskip("litellm")
+    import litellm
+    from types import SimpleNamespace
+    from pageindex.local_api import LocalAPI
+    from pageindex.utils import llm_acompletion, llm_completion
+
+    captured = {}
+
+    def completion(**kw):
+        captured[kw["model"]] = kw
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content="ok"), finish_reason="stop")])
+
+    async def acompletion(**kw):
+        return completion(**kw)
+    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    azure, claude = "azure/test-prod-deployment", "anthropic/claude-haiku-5-5"
+    api = LocalAPI(storage_path=str(tmp_path / "s"), model=azure, summary_model=claude,
+                   index_backend={"api_key": "k", "reasoning_effort": "low"})
+    api._with_backend(None, (azure, claude),
+                      lambda: [llm_completion(model, "p") for model in (azure, claude)])
+    assert captured[azure]["allowed_openai_params"] == ["reasoning_effort"]
+    assert captured[claude]["reasoning_effort"] == "low"
+    assert "allowed_openai_params" not in captured[claude]
+    api = LocalAPI(storage_path=str(tmp_path / "s"), model=azure, summary_model=azure,
+                   index_backend={"service_tier": "flex",
+                                  "allowed_openai_params": ["service_tier"]})
+    api._with_backend(None, (azure,), lambda: asyncio.run(llm_acompletion(
+        azure, "p", reasoning_effort="none", allowed_openai_params=["reasoning_effort"])))
+    assert captured[azure]["service_tier"] == "flex"
+    assert captured[azure]["allowed_openai_params"] == ["service_tier", "reasoning_effort"]
 
 
 def test_flash_knobs_reach_the_local_indexer(tmp_path, sample_pdf, monkeypatch):

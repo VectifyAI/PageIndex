@@ -30,7 +30,8 @@
 <details open>
 <summary><h2>Updates</h2></summary>
 
-- [Aug '26] 🔥 [**PageIndex SDK**](#quickstart): **local** and **cloud** modes — one client to index, retrieve, and chat on your machine (with your own LLM API key) or on [PageIndex Cloud](https://developer.pageindex.ai/).
+- [Oct '26] 🔥 [**Page Search API**](https://search.pageindex.ai): find the pages that answer each question in about a second, and send your LLM only those. *Cut 97% token cost on document question answering*; more accurate and faster than vector search ([benchmark](https://github.com/VectifyAI/page-search-benchmark)).
+- [Aug '26] [**PageIndex SDK**](#quickstart): **local** and **cloud** modes — one client to index, retrieve, and chat on your machine (with your own LLM API key) or on [PageIndex Cloud](https://developer.pageindex.ai/).
 - [Aug '26] ⚡ [**PageIndex Flash**](https://pageindex.ai/blog/pageindex-flash): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [PageIndex App](https://app.pageindex.ai): a human-like document analysis agent for long professional documents.<!-- Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer). -->
@@ -162,17 +163,15 @@ Indexing time also scales predictably with document length. In the same local se
 
 ### Query cost and accuracy
 
-[**PageIndex-OSS-Benchmark**](https://github.com/VectifyAI/PageIndex-OSS-Benchmark) measures exactly the setup in the quickstart above (`PageIndexClient()` in local mode, flash indexing, no OCR) on 62 lookup questions over 34 PDFs (1,945 pages) drawn from [MMLongBench-Doc-V2](https://github.com/VectifyAI/MMLongBench-Doc-V2). Every question's answer is a fact stated in running text, so a wrong answer is a **retrieval or reading failure**, not a reasoning one.
+[**PageIndex Financial QA Benchmark**](https://github.com/VectifyAI/pageindex-benchmarks/tree/main/financial-qa) compares the accuracy and query cost of 34 configurations of 19 LLMs answering 100 questions over 40 Form 10-K filings from 8 companies, with PageIndex doing the retrieval. Cost is measured per 100-question run and excludes one-time indexing.
 
 <div align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/results-dark.png">
-  <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/results-light.png" width="75%" alt="Accuracy against average cost per question. Each model forms a near-vertical reasoning-effort ladder; moving between models costs an order of magnitude a step.">
-</picture>
+<a href="https://github.com/VectifyAI/pageindex-benchmarks/tree/main/financial-qa">
+  <img src="https://raw.githubusercontent.com/VectifyAI/pageindex-benchmarks/main/financial-qa/results/accuracy_vs_cost.png" width="90%" alt="PageIndex Financial QA Benchmark: question answering accuracy versus cost per 100-question run across 19 models on 40 Form 10-K filings from 8 companies.">
+</a>
 </div>
 
-
-Full results, data, and the runner are in the [benchmark repo](https://github.com/VectifyAI/PageIndex-OSS-Benchmark).
+Full results, data, and reproduction instructions are in the [benchmark repo](https://github.com/VectifyAI/pageindex-benchmarks/tree/main/financial-qa).
 
 ### Cost per query vs. native PDF input
 
@@ -229,7 +228,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Storage | Local directory | Cloud storage |
 | Citations | Page-level | Block-level |
 | OCR & image understanding | — | ✓ |
-| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata-cloud) | — | ✓ |
+| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata) | — | ✓ |
 | [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
 | [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
 
