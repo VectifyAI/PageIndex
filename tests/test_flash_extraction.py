@@ -1067,6 +1067,36 @@ def test_title_printed_again_on_the_next_slides_continues_its_section(tmp_path, 
     assert (series_node["start_index"], series_node["end_index"], series_node.get("nodes", [])) == (6, 8, [])
 
 
+def test_coarse_bookmarks_sharing_a_page_keep_one_copy_of_each_heading():
+    """Coarse bookmarks frame the detected headings, and several chapters can
+    open on one page. A detected heading that is any of those chapters'
+    own heading, not only the last one's, dissolves into that chapter, with
+    its detected children; a new heading on the page still goes under the
+    last chapter opened there."""
+    from pageindex.flash.embedded_toc import merge_bookmark_skeleton
+
+    entries = [{"title": "1. Scope", "level": 1, "page": 1},
+               {"title": "2. Results", "level": 1, "page": 2},
+               {"title": "3. Conformance", "level": 1, "page": 2},
+               {"title": "4. References", "level": 1, "page": 2},
+               {"title": "5. Approval", "level": 1, "page": 3}]
+    detected = [{"title": "2. Results", "start_index": 2, "end_index": 2, "nodes": [
+                    {"title": "2.1 Assay", "start_index": 2, "end_index": 2, "nodes": []}]},
+                {"title": "3. Conformance", "start_index": 2, "end_index": 2, "nodes": []},
+                {"title": "Batch notes", "start_index": 2, "end_index": 2, "nodes": []},
+                {"title": "4. References", "start_index": 2, "end_index": 2, "nodes": []},
+                {"title": "5. Approval", "start_index": 3, "end_index": 3, "nodes": []}]
+    tree = merge_bookmark_skeleton(detected, entries, 3)
+    children = {node["title"]: [child["title"] for child in node.get("nodes") or []]
+                for node in tree}
+    assert list(children) == ["1. Scope", "2. Results", "3. Conformance",
+                              "4. References", "5. Approval"]
+    assert children["2. Results"] == ["2.1 Assay"]
+    assert children["3. Conformance"] == []
+    assert children["4. References"] == ["Batch notes"]
+    assert children["5. Approval"] == []
+
+
 def test_bookmark_title_printed_a_page_after_its_target_is_no_child():
     """A bookmark can target the page before its title is printed: a detected
     heading with exactly the bookmark's title on the next page is the
