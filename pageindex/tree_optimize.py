@@ -640,10 +640,19 @@ def merge(structure, routing, log, frozen, progress=False):
 def merge_tree(structure):
     """Deterministic merge over a structure list; the no-LLM default path.
 
-    One bottom-up pass reaches the fixpoint: every decision is made after the
-    subtree below it is final.
+    Use the same consolidation seams as optimize(): equal-range frontier
+    siblings before cost-based merging, and again when a subtree collapses.
+    Repeat until stable, since consolidation can change an ancestor's cost.
+    Every successful pass removes nodes; no model calls are made here.
     """
-    merge(structure, ROUTING_COST, [], set())
+    log, frozen = [], set()
+    while True:
+        same_page = merge_same_page(structure, log)
+        merged = merge(structure, ROUTING_COST, log, frozen)
+        if merged:
+            same_page = merge_same_page(structure, log) or same_page
+        if not (same_page or merged):
+            break
     return structure
 
 
