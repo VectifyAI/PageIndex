@@ -1087,6 +1087,75 @@ def test_get_ocr(local_client, indexed_doc):
         local_client.get_ocr(indexed_doc, format="bogus")
 
 
+def _seed_page_cache(tmp_path, pages, page_num=2):
+    from pageindex.local_store import DocStore
+    meta = {
+        "id": "cached", "name": "cached.pdf", "description": None,
+        "status": "completed", "createdAt": "2026-11-04T00:00:00",
+        "pageNum": page_num, "folderId": None, "metadata": None,
+        "mode": "standard",
+    }
+    tree = [{"title": "First", "node_id": "0000",
+             "start_index": 1, "end_index": 1}]
+    DocStore(str(tmp_path / "store")).save_document("cached", meta, tree, pages)
+
+
+def test_tree_text_follows_page_index_when_cache_is_out_of_order(
+        local_client, tmp_path):
+    _seed_page_cache(tmp_path, [
+        {"page_index": 2, "markdown": "SECOND FACT"},
+        {"page_index": 1, "markdown": "FIRST FACT"},
+    ])
+
+    assert local_client.get_tree("cached")["result"][0]["text"] == "FIRST FACT"
+    assert local_client.get_page_content("cached", "1")[0]["markdown"] == "FIRST FACT"
+
+
+@pytest.mark.parametrize("pages", [
+    [{"page_index": 1, "markdown": "FIRST FACT"}],
+    [{"page_index": 1, "markdown": "FIRST FACT"},
+     {"page_index": 1, "markdown": "FIRST FACT"}],
+])
+def test_incomplete_or_duplicate_page_cache_fails_loud(
+        local_client, tmp_path, pages):
+    _seed_page_cache(tmp_path, pages)
+
+    with pytest.raises(PageIndexAPIError, match="stored document page cache"):
+        local_client.get_tree("cached")
+    with pytest.raises(PageIndexAPIError, match="stored document page cache"):
+        local_client.get_tree("cached", include_text=False)
+    with pytest.raises(PageIndexAPIError, match="stored document page cache"):
+        local_client.get_ocr("cached")
+    assert local_client.is_retrieval_ready("cached") is False
+
+
+@pytest.mark.parametrize("page,page_num", [
+    ({"page_index": 0, "markdown": "ZERO"}, 1),
+    ({"page_index": True, "markdown": "BOOL"}, 1),
+    ({"page_index": "1", "markdown": "STRING"}, 1),
+    ({"page_index": 3, "markdown": "THIRD"}, 2),
+    ({"page_index": 1, "markdown": 5}, 1),
+])
+def test_page_cache_rejects_invalid_indices_and_text(
+        local_client, tmp_path, page, page_num):
+    _seed_page_cache(tmp_path, [page], page_num=page_num)
+
+    with pytest.raises(PageIndexAPIError, match="stored document page cache"):
+        local_client.get_ocr("cached")
+
+
+def test_complete_page_cache_keeps_blank_pages(local_client, tmp_path):
+    _seed_page_cache(tmp_path, [
+        {"page_index": 1, "markdown": "FIRST FACT"},
+        {"page_index": 2, "markdown": ""},
+    ])
+
+    result = local_client.get_ocr("cached")
+    assert result["retrieval_ready"] is True
+    assert result["result"][1] == {"page_index": 2, "markdown": ""}
+    assert local_client.get_tree("cached")["result"][0]["text"] == "FIRST FACT"
+
+
 def test_document_management(local_client, indexed_doc):
     assert indexed_doc.startswith("pi-")
     doc = local_client.get_document(indexed_doc)
