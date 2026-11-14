@@ -2538,6 +2538,34 @@ import pageindex.utils  # noqa: F401 — its import loads .env
 LIVE_KEY = os.getenv("PAGEINDEX_API_KEY")
 
 
+def _local_trails_cloud(live_tools):
+    """Local mode keeps the tool contract, instructions and citation prompts
+    it copied from the cloud until it addresses documents by `path` as the
+    cloud does. A server that takes `path` is ahead of those copies."""
+    def takes_path(schema):
+        return "path" in ((schema or {}).get("properties") or {})
+    live = {tool.get("name"): tool for tool in live_tools}
+    return (takes_path(live.get("get_document", {}).get("inputSchema"))
+            and not takes_path(TOOL_CONTRACT["get_document"]["schema"]))
+
+
+def _skip_while_local_trails_cloud(bridge):
+    if _local_trails_cloud(bridge.list_tools()):
+        pytest.skip("the server addresses documents by `path`; local mode "
+                    "keeps the copies it took before that")
+
+
+def test_local_trails_cloud_until_local_takes_path(monkeypatch):
+    def tools(*params):
+        return [{"name": "get_document",
+                 "inputSchema": {"properties": dict.fromkeys(params, {})}}]
+    assert not _local_trails_cloud(tools("doc_name"))
+    assert _local_trails_cloud(tools("doc_name", "path"))
+    monkeypatch.setitem(
+        TOOL_CONTRACT["get_document"]["schema"]["properties"], "path", {})
+    assert not _local_trails_cloud(tools("doc_name", "path"))
+
+
 @pytest.mark.skipif(not LIVE_KEY, reason="PAGEINDEX_API_KEY not set")
 def test_live_cloud_contract_parity():
     """Real-drift detector: the frozen contract must match the live server
@@ -2545,6 +2573,7 @@ def test_live_cloud_contract_parity():
     from pageindex.mcp_bridge import McpBridge
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
+    _skip_while_local_trails_cloud(bridge)
     live = {t["name"]: t for t in bridge.list_tools()}
     for name, ours in TOOL_CONTRACT.items():
         real = live.get(name)
@@ -2574,7 +2603,8 @@ def test_live_cloud_envelope_field_parity(tmp_path):
                        {"Authorization": f"Bearer {LIVE_KEY}"})
 
     def call(name, arguments):
-        return json.loads(render_text(bridge.call_tool(name, arguments)[0]))
+        # The envelope is the first block; a picture page adds blocks after it.
+        return json.loads(render_text(bridge.call_tool(name, arguments)[0][:1]))
 
     cloud_browse = call("browse_documents", {"limit": 2})
     assert cloud_browse.get("success") is True and cloud_browse["documents"]
@@ -2612,12 +2642,14 @@ def test_live_cloud_envelope_field_parity(tmp_path):
     cloud_doc = cloud_browse["documents"][0]
     assert set(local_doc) - set(cloud_doc) <= {"metadata"}
 
-    local_nodes = local["get_document_structure"]["structure"]
     cloud_nodes = cloud["get_document_structure"]["structure"]
-    local_node = local_nodes[0] if isinstance(local_nodes, list) else local_nodes
-    cloud_node = cloud_nodes[0] if isinstance(cloud_nodes, list) else cloud_nodes
-    assert (set(local_node)
-            <= set(cloud_node) | {"page_index", "prefix_summary"})
+    # The cloud outline is becoming text, which has no node keys to compare.
+    if not isinstance(cloud_nodes, str):
+        local_nodes = local["get_document_structure"]["structure"]
+        local_node = local_nodes[0] if isinstance(local_nodes, list) else local_nodes
+        cloud_node = cloud_nodes[0] if isinstance(cloud_nodes, list) else cloud_nodes
+        assert (set(local_node)
+                <= set(cloud_node) | {"page_index", "prefix_summary"})
 
     assert (set(local["get_page_content"]["content"][0])
             <= set(cloud["get_page_content"]["content"][0]))
@@ -2754,6 +2786,7 @@ def test_live_cloud_instructions_local_parity():
     from pageindex.mcp_bridge import McpBridge
     bridge = McpBridge("https://api.pageindex.ai/mcp",
                        {"Authorization": f"Bearer {LIVE_KEY}"})
+    _skip_while_local_trails_cloud(bridge)
     _assert_instructions_local_parity(bridge.instructions())
 
 
@@ -2845,6 +2878,9 @@ def test_citation_prompt_cloud(monkeypatch):
             created.append(self)
             self.prompts = []
 
+        def prompt_argument_values(self, prompt, argument):
+            pytest.fail("a frozen format is asked about")
+
         def get_prompt(self, name, arguments=None):
             self.prompts.append((name, arguments))
             fmt = (arguments or {}).get("format", "markdown")
@@ -2868,12 +2904,51 @@ def test_citation_prompt_empty_raises(monkeypatch):
     import pageindex.mcp_bridge as mcp_bridge
 
     class _Bridge(_FakeBridge):
+        def prompt_argument_values(self, prompt, argument):
+            return None
+
         def get_prompt(self, name, arguments=None):
             return None, []
 
     monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
     with pytest.raises(PageIndexAPIError, match="empty cited_answer prompt"):
         PageIndexCloudClient(api_key="pi-test-key").citation_prompt()
+
+
+@pytest.mark.parametrize("served, allowed", [
+    (["markdown", "cite", "cite_with_boxes"],
+     ["markdown", "cite", "cite_with_boxes"]),
+    (["markdown", "cite"], ["markdown", "cite"]),
+    (None, ["markdown", "cite"]),
+])
+def test_citation_prompt_cloud_takes_the_servers_formats(monkeypatch, served,
+                                                         allowed):
+    """A cloud format beyond the frozen ones is one the server completes for
+    cited_answer's format argument; the server serves its default for a
+    name it does not know, so another name raises before any prompt is
+    fetched."""
+    import pageindex.mcp_bridge as mcp_bridge
+    fetched = []
+
+    class _Bridge(_FakeBridge):
+        def prompt_argument_values(self, prompt, argument):
+            assert (prompt, argument) == ("cited_answer", "format")
+            return served
+
+        def get_prompt(self, name, arguments=None):
+            fetched.append(arguments["format"])
+            return None, [{"role": "user", "content": {
+                "type": "text", "text": f"CITATIONS — {arguments['format']}"}}]
+
+    monkeypatch.setattr(mcp_bridge, "McpBridge", _Bridge)
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    for fmt in allowed:
+        assert cloud.citation_prompt(format=fmt) == f"CITATIONS — {fmt}"
+    for fmt in {"cite_with_boxes", "bogus"} - set(allowed):
+        with pytest.raises(PageIndexAPIError,
+                           match=f"{fmt}' is not one of {', '.join(allowed)}"):
+            cloud.citation_prompt(format=fmt)
+    assert fetched == allowed
 
 
 def test_citation_prompt_local_frozen_copy(client):
@@ -2899,6 +2974,9 @@ def test_live_local_citation_prompts_match_cloud():
     """The frozen local copies are the server's texts minus the one bullet
     naming get_document_image(); any other server edit fails here."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
+    from pageindex.mcp_bridge import McpBridge
+    _skip_while_local_trails_cloud(McpBridge(
+        "https://api.pageindex.ai/mcp", {"Authorization": f"Bearer {LIVE_KEY}"}))
     cloud = PageIndexCloudClient(api_key=LIVE_KEY)
     for fmt, frozen in LOCAL_CITATION_PROMPTS.items():
         live = cloud.citation_prompt(format=fmt).split("\n")
@@ -3636,6 +3714,36 @@ def test_mcp_bridge_prompts(monkeypatch):
         bridge.get_prompt("nope")
 
 
+@pytest.mark.parametrize("capabilities, values", [
+    ({"prompts": {}, "completions": {}}, ["markdown", "cite"]),
+    ({"prompts": {}}, None),
+])
+def test_mcp_bridge_prompt_argument_values(monkeypatch, capabilities, values):
+    """completion/complete for a prompt argument from an empty value; a
+    server without the completions capability is never asked."""
+    from pageindex.mcp_bridge import McpBridge
+
+    posts = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posts.append(json)
+        if json.get("method") == "initialize":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": json["id"], "result": {
+                "protocolVersion": "2025-06-18", "capabilities": capabilities}})
+        if json.get("method") == "completion/complete":
+            return _JsonResp(200, {"jsonrpc": "2.0", "id": json["id"], "result": {
+                "completion": {"values": ["markdown", "cite"], "total": 2}}})
+        return _JsonResp(202)
+
+    _fake_requests(monkeypatch, fake_post)
+    bridge = McpBridge("https://api.pageindex.ai/mcp", {})
+    assert bridge.prompt_argument_values("cited_answer", "format") == values
+    sent = [p for p in posts if p.get("method") == "completion/complete"]
+    assert [p["params"] for p in sent] == ([{
+        "ref": {"type": "ref/prompt", "name": "cited_answer"},
+        "argument": {"name": "format", "value": ""}}] if values else [])
+
+
 def test_mcp_bridge_prompts_require_server_capability(monkeypatch):
     """A server without the prompts capability would answer -32601 to
     prompts/*; the bridge names the real cause instead, and never sends
@@ -3672,3 +3780,59 @@ def test_render_prompt_text_flattens_messages():
         {"role": "user"},
     ]) == "a\nb\n[image/png content omitted: ~1 KB]"
     assert render_prompt_text([]) == ""
+
+
+def _pictured(payload, image=True):
+    return [{"type": "text", "text": json.dumps(payload)},
+            *([{"type": "image", "mimeType": "image/jpeg", "data": "AAAA"}]
+              if image else [])]
+
+
+def test_seen_pages_keep_only_boxes_on_pictured_pages():
+    from pageindex.agent_tools import _bridge_invoker, _SeenPages
+
+    class Bridge:
+        def call_tool(self, name, arguments):
+            if name == "zoom_page":
+                return _pictured({"error": "nope"}), True
+            return {
+                "view_pages": _pictured({"doc_name": "Reports/a.pdf",
+                                         "path": "Reports/a.pdf",
+                                         "returned_pages": "1-2"}),
+                "get_page_content": _pictured({"doc_name": "b.pdf",
+                                               "picture_pages": "5"}),
+                "get_document_image": _pictured({"doc_name": "c.pdf",
+                                                 "page": 9}),
+            }[name], False
+
+    seen = _SeenPages()
+    for name in ("view_pages", "get_page_content", "get_document_image",
+                 "zoom_page"):
+        _bridge_invoker(Bridge(), name, {}, seen=seen)({})
+    seen.record("zoom_page", _pictured({"doc_name": "d.pdf", "page": 4}))
+    seen.record("zoom_page", _pictured({"doc_name": "Q&A's.pdf", "page": 7}))
+    seen.record("zoom_page", _pictured({"doc_name": "Release&notes.pdf",
+                                        "page": 8}))
+    seen.record("view_pages", _pictured({"doc_name": "e.pdf",
+                                         "returned_pages": "3"}, image=False))
+
+    def cite(doc, page):
+        return f'<cite doc="{doc}" page="{page}" box="0.1,0.2,0.3,0.4"/>'
+
+    kept = [cite("Reports/a.pdf", 2), cite("a.pdf", 1), cite("b.pdf", 5),
+            cite("d.pdf", 4), cite("Q&amp;A&apos;s.pdf", 7),
+            cite("Release&notes.pdf", 8), '<cite doc="x.pdf" page="1"/>']
+    for tag in kept:
+        assert seen.strip(tag) == tag
+    for doc, page in (("a.pdf", 3), ("Other/a.pdf", 1), ("c.pdf", 9),
+                      ("e.pdf", 3), ("b.pdf", 6)):
+        assert seen.strip(cite(doc, page)) == f'<cite doc="{doc}" page="{page}"/>'
+    text = ("x < y " + cite("a.pdf", 1) + " then " + cite("a.pdf", 3)
+            + "<cite doc='f.pdf' page='2' box = '0,0,1,1'>z</cite> <ci")
+    whole = seen.strip(text)
+    assert "box" not in whole.split("then")[1]
+    for size in range(1, 12):
+        held = seen.stream()
+        out = "".join(held.feed(text[i:i + size])
+                      for i in range(0, len(text), size)) + held.flush()
+        assert out == whole

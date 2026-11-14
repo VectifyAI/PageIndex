@@ -2881,8 +2881,8 @@ def test_doc_id_conversations_get_distinct_cache_keys(client, store_path,
     keys = []
     real = local_chat._conversation_cache_key
 
-    def spy(model_name, instructions, doc_id, items, folder_id=None):
-        key = real(model_name, instructions, doc_id, items, folder_id)
+    def spy(model_name, instructions, doc_id, items, *scope):
+        key = real(model_name, instructions, doc_id, items, *scope)
         keys.append(key)
         return key
 
@@ -2921,6 +2921,9 @@ def test_folder_less_cache_key_is_the_pre_folder_key():
     assert key == "pageindex-b0ab095344ee8f89"
     assert local_chat._conversation_cache_key(
         "m", "sys", "d1", items, "f-1") != key
+    assert local_chat._conversation_cache_key(
+        "m", "sys", None, items, None, "c-1") != local_chat._conversation_cache_key(
+        "m", "sys", None, items, None, "c-2")
 
 
 @needs_agents
@@ -3268,7 +3271,7 @@ def _responses_turn(response_id, item, status="completed"):
             "usage": _RESPONSES_USAGE if status == "completed" else None}
 
 
-def _responses_sse(response_id, item):
+def _responses_sse(response_id, item, size=None):
     """One turn as the Responses API streams it: lifecycle, item, deltas."""
     opening = _responses_turn(response_id, item, "in_progress")
     events = [{"type": "response.created", "response": opening},
@@ -3289,20 +3292,23 @@ def _responses_sse(response_id, item):
     else:
         part = {"type": "output_text", "text": "", "annotations": [],
                 "logprobs": []}
+        text = item["content"][0]["text"]
+        pieces = ([text[i:i + size] for i in range(0, len(text), size)]
+                  if size else ("The ", "answer"))
         events.append({"type": "response.content_part.added",
                        "item_id": item["id"], "output_index": 0,
                        "content_index": 0, "part": part})
         events += [{"type": "response.output_text.delta",
                     "item_id": item["id"], "output_index": 0,
                     "content_index": 0, "delta": piece, "logprobs": []}
-                   for piece in ("The ", "answer")]
+                   for piece in pieces]
         events += [
             {"type": "response.output_text.done", "item_id": item["id"],
-             "output_index": 0, "content_index": 0, "text": "The answer",
+             "output_index": 0, "content_index": 0, "text": text,
              "logprobs": []},
             {"type": "response.content_part.done", "item_id": item["id"],
              "output_index": 0, "content_index": 0,
-             "part": {**part, "text": "The answer"}}]
+             "part": {**part, "text": text}}]
     events += [{"type": "response.output_item.done", "output_index": 0,
                 "item": item},
                {"type": "response.completed",
@@ -3369,6 +3375,76 @@ def test_responses_conforms_to_the_official_sdk(client, store_path):
     assert Response.model_validate(terminal).output_text == "The answer"
 
 
+_OPEN_TAIL = " <cite doc"
+
+
+@needs_agents
+def test_responses_wire_drops_boxes_on_pages_never_seen(bridge_client):
+    client, bridge = bridge_client
+    _viewing(bridge)
+    call_item = {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+                 "name": "view_pages",
+                 "arguments": '{"doc_name": "r.pdf", "pages": "2"}',
+                 "status": "completed"}
+    message_item = {"type": "message", "id": "msg_1", "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text",
+                                 "text": _BOXED + _OPEN_TAIL,
+                                 "annotations": [], "logprobs": []}]}
+
+    def call(stream):
+        turns = [("resp_1", call_item), ("resp_2", copy.deepcopy(message_item))]
+
+        def handler(request):
+            response_id, item = turns.pop(0)
+            if json.loads(request.content).get("stream"):
+                return httpx.Response(
+                    200, content=_responses_sse(response_id, item, 5).encode(),
+                    headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json=_responses_turn(response_id, item))
+
+        backend = {"http_client": httpx.AsyncClient(
+                       transport=httpx.MockTransport(handler)),
+                   "api_key": "test", "base_url": "http://responses.test/v1"}
+        return client.chat("q", protocol="responses", model="gpt-test",
+                           stream=stream, backend=backend)
+
+    expected = _UNSEEN_DROPPED + _OPEN_TAIL
+    assert call(False)["output"][-1]["content"][0]["text"] == expected
+    events = list(call(True))
+    assert "".join(event["delta"] for event in events
+                   if event["type"] == "response.output_text.delta") == expected
+    texts = {event["type"]: event for event in events}
+    assert texts["response.output_text.done"]["text"] == expected
+    assert texts["response.content_part.done"]["part"]["text"] == expected
+    assert texts["response.output_item.done"]["item"]["content"][0][
+        "text"] == expected
+    assert events[-1]["response"]["output"][-1]["content"][0][
+        "text"] == expected
+
+
+@needs_agents
+def test_litellm_stream_drops_boxes_on_pages_never_seen(bridge_client,
+                                                        monkeypatch):
+    pytest.importorskip("litellm")
+    client, bridge = bridge_client
+    _viewing(bridge)
+    call = {"index": 0, "id": "call_1", "type": "function",
+            "function": {"name": "view_pages",
+                         "arguments": '{"doc_name": "r.pdf", "pages": "2"}'}}
+    text = _BOXED + _OPEN_TAIL
+    _mock_litellm(monkeypatch, [
+        _litellm_chunks({"tool_calls": [call]}),
+        _litellm_chunks(*({"content": text[i:i + 5]}
+                          for i in range(0, len(text), 5)), finish="stop")])
+    chunks = list(client.chat("q", model="gpt-test",
+                              protocol="chat_completions", stream=True))
+    expected = _UNSEEN_DROPPED + _OPEN_TAIL
+    assert "".join(chunk["choices"][0]["delta"].get("content") or ""
+                   for chunk in chunks if chunk["choices"]) == expected
+    assert chunks[-1]["messages"][-1]["content"] == expected
+
+
 # ── messages (Anthropic engine) ──
 
 try:
@@ -3399,7 +3475,7 @@ def _anthropic_message(content, stop_reason):
     }
 
 
-def _anthropic_sse(message):
+def _anthropic_sse(message, size=None):
     """Render text, thinking and tool turns for a real streaming parser."""
     events = [{"type": "message_start", "message": {
         **message, "content": [], "stop_reason": None}}]
@@ -3419,7 +3495,10 @@ def _anthropic_sse(message):
                            "signature": block["signature"]})
         else:
             initial = {**block, "text": ""}
-            deltas = [{"type": "text_delta", "text": block["text"]}]
+            text = block["text"]
+            deltas = [{"type": "text_delta", "text": text[i:i + size]}
+                      for i in range(0, len(text), size)] if size else [
+                          {"type": "text_delta", "text": text}]
         events.extend([
             {"type": "content_block_start", "index": index,
              "content_block": initial},
@@ -4717,7 +4796,9 @@ def test_responses_cut_short_still_returns_the_envelope(store_path):
                    "total_tokens": 15}},
         {"id": "resp_2", "status": "incomplete",
          "incomplete_details": {"reason": "max_output_tokens"},
-         "output": [_msg_item("The range was").model_dump()],
+         "output": [_msg_item(
+             'The range was <cite doc="report.pdf" page="1" box="0,0,1,1"/>'
+         ).model_dump()],
          "usage": {**details, "input_tokens": 40, "output_tokens": 99,
                    "total_tokens": 139}}]
     common = {"object": "response", "created_at": 0, "model": "gpt-test",
@@ -4734,7 +4815,8 @@ def test_responses_cut_short_still_returns_the_envelope(store_path):
     assert envelope["status"] == "incomplete"
     assert [item["type"] for item in envelope["messages"]] == [
         "function_call", "function_call_output", "message"]
-    assert envelope["output"][-1]["content"][0]["text"] == "The range was"
+    assert envelope["output"][-1]["content"][0]["text"] == (
+        'The range was <cite doc="report.pdf" page="1"/>')
     usage = envelope["usage"]
     assert (usage["input_tokens"], usage["output_tokens"]) == (50, 104)
     assert len(usage["request_usage_entries"]) == 2
@@ -6110,15 +6192,15 @@ def test_targeting_block_orders_folder_before_documents(bridge_client,
         {"id": "f-1", "name": "Team", "description": None}]})
     monkeypatch.setattr(client, "get_document",
                         lambda doc_id: {"name": "r.pdf", "status": "completed"})
-    both = targeting_block(client, "pi-a", "f-1")
-    assert both is not None
+    both, collection = targeting_block(client, "pi-a", "f-1")
+    assert both is not None and collection is None
     folder, doc = both.split("\n\n")
     assert folder.startswith("The user has specified folder: Team\n")
     assert 'Folder metadata: {"id": "f-1", "name": "Team"}\n' in folder
     assert doc.startswith("The user has specified document: r.pdf\n")
-    assert targeting_block(client, "pi-a", "root") == doc
-    assert targeting_block(client, None, "f-1") == folder
-    assert targeting_block(client, None, None) is None
+    assert targeting_block(client, "pi-a", "root") == (doc, None)
+    assert targeting_block(client, None, "f-1") == (folder, None)
+    assert targeting_block(client, None, None) == (None, None)
 
 
 @needs_agents
@@ -6178,6 +6260,149 @@ def test_folder_id_is_cloud_only(client):
     call, like the folder methods."""
     with pytest.raises(PageIndexAPIError, match="cloud-only"):
         client.chat_completions("q", folder_id="f-1")
+
+
+def test_targeting_block_scopes_one_collection(bridge_client, monkeypatch):
+    """The collection block names the collection as the tools address it,
+    by its quoted name, and the name comes back for the tools; the
+    collection scopes the chat alone, so a document or a folder beside it
+    raises ("root" is no folder)."""
+    from pageindex.agent_tools import targeting_block
+    client, _ = bridge_client
+    monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
+        {"id": "c-1", "name": 'Q3 "final"', "description": "filings",
+         "metadata_schema": None, "document_count": 2}]})
+    block, collection = targeting_block(client, None, None, "c-1")
+    assert collection == 'Q3 "final"'
+    assert block == (
+        'The user has specified collection: Q3 "final"\n'
+        'Collection metadata: {"id": "c-1", "name": "Q3 \\"final\\"", '
+        '"description": "filings"}\n'
+        'Discover its documents with list_documents(collection="Q3 '
+        '\\"final\\"") or search_documents(questions, collection="Q3 '
+        '\\"final\\"").')
+    assert targeting_block(client, None, "root", "c-1") == (block, collection)
+    for doc_id, folder_id in (("pi-a", None), (None, "f-1")):
+        with pytest.raises(PageIndexAPIError, match="without doc_id and"):
+            targeting_block(client, doc_id, folder_id, "c-1")
+    with pytest.raises(PageIndexAPIError, match="not found"):
+        targeting_block(client, None, None, "c-9")
+
+
+_COLLECTION_TOOLS = [
+    {"name": "search_documents", "description": "Cloud search_documents",
+     "inputSchema": {"type": "object", "properties": {
+         "questions": {"type": "array", "items": {"type": "string"}},
+         "collection": {"type": "string"}}}},
+    *FakeBridge().list_tools()]
+
+
+@needs_agents
+def test_bridge_collection_id_leads_the_openai_lanes(bridge_client, fake_model,
+                                                     monkeypatch):
+    """chat(collection_id=) opens the conversation with the collection block
+    on the answer lane, its stream and the Responses lane, and a tool that
+    takes a collection searches that one."""
+    client, bridge = bridge_client
+    bridge.list_tools = lambda: _COLLECTION_TOOLS
+    monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
+        {"id": "c-1", "name": "Q3"}]})
+    search = _call_item("search_documents", {"questions": ["q"]})
+    fake = fake_model([[search], [_msg_item("ok")]] * 3)
+    client.chat("q", collection_id="c-1")
+    "".join(client.chat("q", stream=True, show_process=False,
+                        collection_id="c-1"))
+    client.chat("q", protocol="responses", collection_id="c-1")
+    assert len(fake.inputs) == 6
+    for first, question in (inputs[:2] for inputs in fake.inputs):
+        assert first["content"].startswith(
+            "The user has specified collection: Q3\n")
+        assert question == {"role": "user", "content": "q"}
+    assert bridge.calls == [("search_documents",
+                             {"questions": ["q"], "collection": "Q3"})] * 3
+
+
+@needs_anthropic
+def test_bridge_collection_id_reaches_the_messages_lane(bridge_client,
+                                                        fake_anthropic,
+                                                        monkeypatch):
+    """The chat's collection replaces the model's; other tools run as written."""
+    client, bridge = bridge_client
+    bridge.list_tools = lambda: _COLLECTION_TOOLS
+    monkeypatch.setattr(client, "list_collections", lambda: {"collections": [
+        {"id": "c-1", "name": "Q3"}]})
+    calls = fake_anthropic([
+        _anthropic_message([
+            {"type": "tool_use", "id": "tu_1", "name": "search_documents",
+             "input": {"questions": ["q"], "collection": "Other"}},
+            {"type": "tool_use", "id": "tu_2", "name": "get_document",
+             "input": {"doc_name": "r.pdf"}}], "tool_use"),
+        _anthropic_message([{"type": "text", "text": "ok"}], "end_turn")])
+    client.chat("q", protocol="messages", model="claude-test",
+                collection_id="c-1")
+    first, second = calls[0]["messages"][:2]
+    assert first["content"].startswith(
+        "The user has specified collection: Q3\n")
+    assert second == {"role": "user", "content": "q"}
+    assert bridge.calls == [
+        ("search_documents", {"questions": ["q"], "collection": "Q3"}),
+        ("get_document", {"doc_name": "r.pdf"})]
+
+
+def test_a_collection_chat_leaves_out_the_folder_tree_tools(bridge_client):
+    """browse_documents and get_folder_structure stay out of a collection chat."""
+    from pageindex.agent_tools import _tool_specs
+    client, bridge = bridge_client
+    folder_tools = [{"name": name, "inputSchema": {"type": "object"}}
+                    for name in ("browse_documents", "get_folder_structure")]
+    bridge.list_tools = lambda: folder_tools + _COLLECTION_TOOLS
+    assert [spec[0] for spec in _tool_specs(client, collection="Q3")] == [
+        "search_documents", "get_document"]
+    assert [spec[0] for spec in _tool_specs(client)] == [
+        "browse_documents", "get_folder_structure", "search_documents",
+        "get_document"]
+
+
+def test_claude_code_lanes_carry_collection_id(monkeypatch):
+    from types import SimpleNamespace
+    import pageindex.integrations.claude_agent_sdk as claude_agent_sdk
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def spy(client, doc_id, folder_id=None, collection_id=None):
+        seen.append(collection_id)
+        return None, "Q3"
+
+    def tool_server(client, **kwargs):
+        seen.append(kwargs["collection"])
+        raise Stop
+
+    monkeypatch.setattr(local_chat, "targeting_block", spy)
+    monkeypatch.setattr(claude_agent_sdk, "tool_server", tool_server)
+    client = SimpleNamespace(chat_model="claude-code/haiku",
+                             _local_doc_scope=lambda doc_id: None)
+    for run in (local_chat.run_chat_completions, local_chat.run_chat_stream):
+        with pytest.raises(Stop):
+            run(client, [{"role": "user", "content": "q"}],
+                collection_id="c-1")
+    assert seen == ["c-1", "Q3", "c-1", "Q3"]
+
+
+@needs_agents
+def test_collection_id_refusals(client, monkeypatch):
+    """collection_id is cloud own-model chat's: a local library, the
+    managed endpoint and extra_body each refuse it before any request."""
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        client.chat_completions("q", collection_id="c-1")
+    cloud = PageIndexCloudClient(api_key="pi-test-key")
+    monkeypatch.setattr(cloud._api, "chat_completions",
+                        lambda **kw: pytest.fail("sent"))
+    with pytest.raises(PageIndexAPIError, match="takes doc_id and folder_id"):
+        cloud.chat("q", collection_id="c-1")
+    with pytest.raises(PageIndexAPIError, match="use collection_id= instead"):
+        cloud.chat("q", extra_body={"collection_id": "c-1"})
 
 
 def test_bridge_gate_and_citations(monkeypatch):
@@ -6366,6 +6591,41 @@ def test_bridge_messages_lane_runs_cloud_tools(bridge_client, fake_anthropic):
     system_text = json.dumps(wire["system"])
     assert "CLOUD LIVE INSTRUCTIONS" in system_text
     assert "PERSISTENCE" not in system_text
+
+
+@needs_anthropic
+def test_messages_drops_boxes_on_pages_never_seen(bridge_client,
+                                                  fake_anthropic):
+    client, bridge = bridge_client
+    _viewing(bridge)
+    view = _anthropic_message([{"type": "tool_use", "id": "t1",
+                                "name": "view_pages", "input": {
+                                    "doc_name": "r.pdf", "pages": "2"}}],
+                              "tool_use")
+    answer = _anthropic_message([{"type": "text",
+                                  "text": _BOXED + _OPEN_TAIL}], "end_turn")
+    expected = _UNSEEN_DROPPED + _OPEN_TAIL
+    fake_anthropic([view, answer])
+    result = client.chat("q", protocol="messages", model="claude-test")
+    assert result["content"][0]["text"] == expected
+    assert result["messages"][-1]["content"][0]["text"] == expected
+    fake_anthropic([_anthropic_sse(view), _anthropic_sse(answer, 5)])
+    stream = client.chat("q", protocol="messages", model="claude-test",
+                         stream=True)
+    events = list(stream)
+    assert "".join(event["delta"]["text"] for event in events
+                   if event["type"] == "content_block_delta"
+                   and event["delta"]["type"] == "text_delta") == expected
+    texts = [event for event in events if event["type"] == "text"]
+    assert "".join(event["text"] for event in texts) == expected
+    assert texts[-1]["snapshot"] == expected
+    stops = [event for event in events if event["type"] == "content_block_stop"]
+    assert stops[-1]["content_block"]["text"] == expected
+    message = [event for event in events if event["type"] == "message_stop"]
+    assert message[-1]["message"]["content"][0]["text"] == expected
+    final = stream.get_final_message()
+    assert final["content"][0]["text"] == expected
+    assert final["messages"][-1]["content"][0]["text"] == expected
 
 
 @needs_agents
@@ -6832,6 +7092,8 @@ def _citing(bridge):
             "type": "text", "text": f"CITATIONS — {fmt}"}}]
 
     bridge.get_prompt = get_prompt
+    bridge.prompt_argument_values = lambda prompt, argument: [
+        "markdown", "cite", "cite_with_boxes"]
 
 
 @needs_agents
@@ -6873,11 +7135,72 @@ def test_chat_citations_on_protocol_lanes(bridge_client, monkeypatch):
         {"type": "text", "text": "CITATIONS — cite"}, *blocks]
     client.chat("q", protocol="messages", model="claude-x", citations=True)
     assert seen[-1]["system"] == "CITATIONS — cite"
+    client.chat("q", protocol="responses", citations="cite_with_boxes")
+    assert seen[-1]["instructions"] == "CITATIONS — cite_with_boxes"
+    assert bridge.prompts[-1] == ("cited_answer", {"format": "cite_with_boxes"})
+    with pytest.raises(PageIndexAPIError, match="True, False or a citations"):
+        client.chat("q", protocol="responses", citations=1)
+
+
+_BOXED = ('A <cite doc="Reports/r.pdf" page="2" box="0.1,0.2,0.3,0.4"/> '
+          'B <cite doc="r.pdf" page="3" box="0.5,0.6,0.7,0.8"/>.')
+_UNSEEN_DROPPED = _BOXED.replace(' box="0.5,0.6,0.7,0.8"', "")
+
+
+def _viewing(bridge):
+    """view_pages pictures page 2 of Reports/r.pdf."""
+    bridge.list_tools = lambda: [{
+        "name": "view_pages", "description": "Cloud view_pages",
+        "inputSchema": {"type": "object", "properties": {
+            "doc_name": {"type": "string"}, "pages": {"type": "string"}}}}]
+    bridge.call_tool = lambda name, arguments: ([
+        {"type": "text", "text": json.dumps({
+            "doc_name": "r.pdf", "path": "Reports/r.pdf",
+            "returned_pages": "2"})},
+        {"type": "image", "mimeType": "image/jpeg", "data": "AAAA"}], False)
+    return _call_item("view_pages", {"doc_name": "r.pdf", "pages": "2"})
+
+
+@needs_agents
+def test_chat_drops_boxes_on_pages_the_run_never_saw(bridge_client,
+                                                      fake_model):
+    client, bridge = bridge_client
+    view = _viewing(bridge)
+    pieces = [_BOXED[i:i + 7] for i in range(0, len(_BOXED), 7)]
+
+    def run(**kwargs):
+        fake = fake_model([[view], [_msg_item(_BOXED)]])
+        fake.pieces = pieces
+        return client.chat("q", **kwargs)
+
+    assert run() == _UNSEEN_DROPPED
+    assert "".join(run(stream=True, show_process=False)) == _UNSEEN_DROPPED
+    assert "".join(event["delta"] for event in run(stream=True).events
+                   if event["type"] == "answer") == _UNSEEN_DROPPED
+    result = run(protocol="chat_completions")
+    assert result["messages"][-1]["content"] == _UNSEEN_DROPPED
+    chunks = list(run(protocol="chat_completions", stream=True))
+    assert "".join(chunk["choices"][0]["delta"].get("content") or ""
+                   for chunk in chunks if chunk["choices"]) == _UNSEEN_DROPPED
+    assert chunks[-1]["messages"][-1]["content"] == _UNSEEN_DROPPED
+    envelope = run(protocol="responses")
+    assert envelope["output"][-1]["content"][0]["text"] == _UNSEEN_DROPPED
+    events = list(run(protocol="responses", stream=True))
+    assert "".join(event["delta"] for event in events
+                   if event["type"] == "response.output_text.delta"
+                   ) == _UNSEEN_DROPPED
+    final = events[-1]["response"]
+    assert final["output"][-1]["content"][0]["text"] == _UNSEEN_DROPPED
+    assert final["messages"][-1]["content"][0]["text"] == _UNSEEN_DROPPED
+    fake_model([[_msg_item(_BOXED)]])
+    assert client.chat("q") == _UNSEEN_DROPPED.replace(
+        ' box="0.1,0.2,0.3,0.4"', "")
 
 
 def test_chat_citations_managed(monkeypatch):
     """Managed chat: citations=True is the endpoint's enable_citations; a
-    format name raises rather than silently meaning True."""
+    format name raises rather than silently meaning True, since the
+    endpoint cites in its own markup."""
     cloud = PageIndexCloudClient(api_key="pi-test-key")
     seen = []
     monkeypatch.setattr(
@@ -6893,14 +7216,14 @@ def test_chat_citations_managed(monkeypatch):
     assert seen[-1]["enable_citations"] is False
     cloud.chat("q", protocol="chat_completions", citations=True)
     assert seen[-1]["enable_citations"] is True
-    with pytest.raises(PageIndexAPIError, match="True or False"):
+    with pytest.raises(PageIndexAPIError, match="its own markup"):
         cloud.chat("q", citations="cite")
 
 
 def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch):
     """Local documents: the frozen copy joins the system prompt the same
-    way (pages are all local content has); a format name raises rather
-    than silently meaning cite."""
+    way (pages are all local content has), by format name too; a format
+    the copy lacks raises."""
     from pageindex.agent_tools import LOCAL_CITATION_PROMPTS
     seen = []
     monkeypatch.setattr(
@@ -6912,8 +7235,11 @@ def test_chat_citations_local_documents_use_the_frozen_copy(client, monkeypatch)
                            LOCAL_CITATION_PROMPTS["cite"] + "\n\nanalyst"}
     client.chat("q")
     assert seen[-1][0]["role"] == "user"
-    with pytest.raises(PageIndexAPIError, match="True or False"):
-        client.chat("q", citations="markdown")
+    client.chat("q", citations="markdown")
+    assert seen[-1][0] == {"role": "system", "content":
+                           LOCAL_CITATION_PROMPTS["markdown"]}
+    with pytest.raises(PageIndexAPIError, match="not one of markdown, cite"):
+        client.chat("q", citations="cite_with_boxes")
 
 
 def test_chat_answer_lane_forwards_the_promoted_knobs(client, monkeypatch):

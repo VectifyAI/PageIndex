@@ -1888,6 +1888,19 @@ def test_folders_are_cloud_only(local_client):
     assert local_client.folder_context("root") == ""  # the library itself
 
 
+def test_collections_are_cloud_only(local_client, sample_pdf):
+    for call in (lambda: local_client.create_collection("papers"),
+                 local_client.list_collections,
+                 lambda: local_client.delete_collection("c"),
+                 lambda: local_client.get_metadata_schema(collection_id="c")):
+        with pytest.raises(PageIndexAPIError, match="cloud-only"):
+            call()
+    for call in (lambda: local_client.submit_document(sample_pdf, collection_id="c"),
+                 lambda: local_client.list_documents(collection_id="c")):
+        with pytest.raises(PageIndexAPIError, match="collections are not supported"):
+            call()
+
+
 # ── local: retrieval endpoints are cloud-only ──
 
 def test_retrieval_endpoints_cloud_only(local_client):
@@ -1993,6 +2006,62 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     client.get_document("pi-1")
     assert calls[-1]["url"] == "https://staging.example/doc/pi-1/metadata/"
     assert calls[-1]["headers"] == {"api_key": "other"}
+
+
+def test_cloud_collection_wiring(cloud, sample_pdf):
+    client, calls, fake = cloud
+
+    fake.payload = {"collection": {"id": "c/1", "name": "papers"}}
+    assert client.create_collection("papers") == fake.payload
+    assert calls[-1]["method"] == "POST"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/collection/"
+    assert calls[-1]["json"] == {"name": "papers"}
+    client.create_collection("papers", description="2024")
+    assert calls[-1]["json"] == {"name": "papers", "description": "2024"}
+
+    fake.payload = {"collections": [], "total": 0}
+    assert client.list_collections() == fake.payload
+    assert calls[-1]["method"] == "GET"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/collections/"
+
+    fake.payload = {"collection_id": "c/1", "deleted": True, "deleted_documents": 2}
+    assert client.delete_collection("c/1") == fake.payload
+    assert calls[-1]["method"] == "DELETE"
+    assert calls[-1]["url"] == "https://api.pageindex.ai/collection/c%2F1/"
+
+    fake.payload = {"doc_id": "pi-1"}
+    client.submit_document(sample_pdf, collection_id="c/1")
+    assert calls[-1]["data"] == {"if_retrieval": True, "collection_id": "c/1"}
+
+    client.list_documents(collection_id="c/1")
+    assert calls[-1]["params"] == {"limit": 50, "offset": 0, "collection_id": "c/1"}
+
+
+def test_cloud_collection_metadata_schema(cloud):
+    client, calls, _ = cloud
+    fields = {"year": {"type": "number"}}
+    url = "https://api.pageindex.ai/collection/c%2F1/metadata/schema/"
+
+    client.create_metadata_schema(fields=fields, collection_id="c/1")
+    assert (calls[-1]["method"], calls[-1]["url"]) == ("PUT", url)
+    assert calls[-1]["json"] == {"fields": fields}
+    client.get_metadata_schema(collection_id="c/1")
+    assert (calls[-1]["method"], calls[-1]["url"]) == ("GET", url)
+    client.delete_metadata_schema(collection_id="c/1")
+    assert (calls[-1]["method"], calls[-1]["url"]) == ("DELETE", url)
+
+    sent = len(calls)
+    for call in (lambda: client.create_metadata_schema(fields=fields),
+                 lambda: client.create_metadata_schema("f", fields, collection_id="c"),
+                 lambda: client.get_metadata_schema(),
+                 lambda: client.get_metadata_schema("f", collection_id="c"),
+                 lambda: client.delete_metadata_schema(),
+                 lambda: client.delete_metadata_schema("f", collection_id="c")):
+        with pytest.raises(PageIndexAPIError, match="exactly one"):
+            call()
+    with pytest.raises(PageIndexAPIError, match="fields is required"):
+        client.create_metadata_schema(collection_id="c")
+    assert len(calls) == sent
 
 
 def test_cloud_get_tree_unified_shape(monkeypatch):
@@ -2131,6 +2200,43 @@ def test_parse_citations_mirrors_the_cloud_parser():
     assert _parse_citations("no tags, just [a.pdf, p. 3] prose") == []
 
 
+def test_parse_citations_keep_a_box():
+    """box="x0,y0,x1,y1" rides as PageIndex chat's renderer takes it: four
+    fractions from 0 to 1, each start before its end; a box that is not
+    leaves the page citation, and each distinct box is its own citation."""
+    from pageindex.client import _parse_citations
+    text = ('<cite doc="a.pdf" page="2" box="0.1,0.2,0.5,0.4"/> '
+            '<cite doc="a.pdf" page="2" box="0.1, 0.2, 0.5, 0.4"/> '
+            '<cite doc="a.pdf" page="2" box="0.1,0.6,0.5,0.8"/> '
+            '<cite doc="b.pdf" page="1" box="0.5,0.2,0.1,0.4"/> '
+            '<cite doc="b.pdf" page="3" box="0,0,1,1.5"/> '
+            '<cite doc="b.pdf" page="4" box="0.1,0.2,0.3"/> '
+            '<cite doc="b.pdf" page="5" box="nan,0,1,1"/>')
+    assert _parse_citations(text) == [
+        {"document": "a.pdf", "page": 2, "box": [0.1, 0.2, 0.5, 0.4]},
+        {"document": "a.pdf", "page": 2, "box": [0.1, 0.6, 0.5, 0.8]},
+        {"document": "b.pdf", "page": 1},
+        {"document": "b.pdf", "page": 3},
+        {"document": "b.pdf", "page": 4},
+        {"document": "b.pdf", "page": 5},
+    ]
+
+
+def test_resolve_citations_number_each_box(monkeypatch):
+    from pageindex import PageIndexClient
+    client = PageIndexClient(api_key="pi-k")
+    monkeypatch.setattr(client, "get_document",
+                        lambda doc_id: {"name": "a.pdf"})
+    answer = ('X <cite doc="a.pdf" page="2" box="0.1,0.2,0.5,0.4"/> '
+              'Y <cite doc="a.pdf" page="2" box="0.1,0.6,0.5,0.8"/>')
+    resolved = client.resolve_citations(answer, doc_id="d-1")
+    assert resolved["answer"] == ("X [[1]](#pageindex-citation-01) "
+                                  "Y [[2]](#pageindex-citation-02)")
+    assert [(c["doc_id"], c["page"], c["box"])
+            for c in resolved["citations"]] == [
+        ("d-1", 2, [0.1, 0.2, 0.5, 0.4]), ("d-1", 2, [0.1, 0.6, 0.5, 0.8])]
+
+
 def test_parse_citations_scans_in_linear_time():
     """An unterminated '<cite ' followed by whitespace, or a tag whose body
     is one long word, is caller-supplied text; the scan must stay linear,
@@ -2146,12 +2252,13 @@ def test_parse_citations_scans_in_linear_time():
 
 def _library(docs):
     """A cloud handler serving /docs/ (100 per page) and /doc/<id>/block/
-    lookups from {doc_id: (name, {block_id: block})}."""
+    lookups from {doc_id: (name, {block_id: block}[, path])}."""
     def handler(method, url, kw):
         if url.endswith("/docs/"):
             offset = kw["params"]["offset"]
-            entries = [{"id": doc_id, "name": name}
-                       for doc_id, (name, _) in docs.items()]
+            entries = [{"id": doc_id, "name": doc[0],
+                        **({"path": doc[2]} if len(doc) > 2 else {})}
+                       for doc_id, doc in docs.items()]
             return FakeResponse({"documents": entries[offset:offset + 100],
                                  "total": len(entries), "limit": 100,
                                  "offset": offset})
@@ -2273,6 +2380,34 @@ def test_get_citations_refuses_a_shared_name(cloud, monkeypatch):
     assert client.get_citations('<cite doc="a.pdf" page="1"/>',
                                     doc_id=["pi-2"]) == [
         {"document": "a.pdf", "doc_id": "pi-2", "page": 1}]
+
+
+def test_get_citations_resolves_library_paths(cloud, monkeypatch):
+    """The MCP server cites by library path: a nested path picks its own
+    document over a same-name one at the root, a bare name keeps the
+    shared-name refusal, and a path outside the listing (a shared mount)
+    stays unresolved rather than borrowing a same-name own document."""
+    client, calls, fake = cloud
+    block = {"doc_id": "pi-n", "page": 4, "block_id": "p4_text_1",
+             "bbox": [1, 2, 3, 4], "block_type": "text", "text": "Revenue."}
+    _patch_requests(monkeypatch, _library({
+        "pi-r": ("Q3 Report.pdf", {}, "Q3 Report.pdf"),
+        "pi-n": ("Q3 Report.pdf", {"p4_text_1": block},
+                 "Research/2024/Q3 Report.pdf"),
+    }))
+    nested = 'See <cite doc="Research/2024/Q3 Report.pdf" page="4" block="p4_text_1"/>.'
+    assert client.get_citations(nested) == [
+        {"document": "Research/2024/Q3 Report.pdf", **block}]
+    with pytest.raises(PageIndexAPIError, match=r"pi-r, pi-n.*doc_id="):
+        client.get_citations('<cite doc="Q3 Report.pdf" page="1"/>')
+    assert client.get_citations(
+        '<cite doc="Shared with me/Deals/Q3 Report.pdf" page="2"/>') == [
+        {"document": "Shared with me/Deals/Q3 Report.pdf", "doc_id": None,
+         "page": 2}]
+    # doc_id= reads metadata, which carries no path: the file name decides.
+    assert client.get_citations('<cite doc="Research/2024/Q3 Report.pdf" page="4"/>',
+                                doc_id="pi-n") == [
+        {"document": "Research/2024/Q3 Report.pdf", "doc_id": "pi-n", "page": 4}]
 
 
 def test_get_citations_keeps_blocks_it_cannot_read(cloud, monkeypatch):

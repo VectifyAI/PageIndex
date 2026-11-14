@@ -90,6 +90,7 @@ class LocalAPI:
         beta_headers: list[str] | None = None,
         folder_id: str | None = None,
         metadata: dict | None = None,
+        collection_id: str | None = None,
     ) -> dict[str, Any]:
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             raise PageIndexAPIError(
@@ -104,6 +105,10 @@ class LocalAPI:
         if folder_id is not None:
             raise PageIndexAPIError(
                 "Failed to submit document: folders are not supported in local mode."
+            )
+        if collection_id is not None:
+            raise PageIndexAPIError(
+                "Failed to submit document: collections are not supported in local mode."
             )
         if metadata is not None:
             if not isinstance(metadata, dict):
@@ -384,6 +389,7 @@ class LocalAPI:
         folder_id: str | None = None,
         name: str | None = None,
         recursive: bool = False,
+        collection_id: str | None = None,
     ) -> dict[str, Any]:
         if limit < 1 or limit > 10000:
             raise ValueError("limit must be between 1 and 10000")
@@ -392,6 +398,10 @@ class LocalAPI:
         if folder_id is not None and folder_id not in ("", "root"):
             raise PageIndexAPIError(
                 "Failed to list documents: folders are not supported in local mode."
+            )
+        if collection_id is not None:
+            raise PageIndexAPIError(
+                "Failed to list documents: collections are not supported in local mode."
             )
         metas = sorted(self._store.list_metas(), key=lambda m: m.get("id") or "")
         metas.sort(key=lambda m: m.get("createdAt") or "", reverse=True)

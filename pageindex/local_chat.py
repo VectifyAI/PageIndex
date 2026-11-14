@@ -20,7 +20,7 @@ import warnings
 from typing import Any, Generator, Iterator, Mapping, Optional, Union
 from urllib.parse import urlparse
 
-from .agent_tools import _base_instructions, targeting_block
+from .agent_tools import _base_instructions, _SeenPages, targeting_block
 from .chat_stream import (ChatStream, MessagesStream, ChatObject,
                           _yaml_as_dict)
 from .errors import PageIndexAPIError, _pageindex_cause
@@ -841,7 +841,8 @@ def _merged_backend(client, backend):
 _SKELETON_KEYS = frozenset({"system", "instructions", "input", "messages",
                             "tools"})
 _ARGUMENT_KEYS = {"stream": "stream=", "doc_id": "doc_id=",
-                  "folder_id": "folder_id=", "model": "model=",
+                  "folder_id": "folder_id=",
+                  "collection_id": "collection_id=", "model": "model=",
                   "reasoning_effort":
                       "reasoning_effort= (own chat models only)",
                   **dict.fromkeys(("api_key", "base_url", "api_base"),
@@ -882,7 +883,8 @@ def _refuse_skeleton(extra_body) -> None:
 def _openai_agent(client, protocol: str, model_name: str, instructions: str,
                   temperature, top_p, doc_ids=None, cache_key=None,
                   reasoning=None, reasoning_effort=None, extra_body=None,
-                  max_tokens=None, backend=None, extra_headers=None):
+                  max_tokens=None, backend=None, extra_headers=None,
+                  collection=None, seen=None):
     _refuse_skeleton(extra_body)
     from agents import Agent, ModelSettings
     from openai.types.shared import Reasoning
@@ -963,13 +965,81 @@ def _openai_agent(client, protocol: str, model_name: str, instructions: str,
         if swap:
             # the request hook (_register_fill) takes the "none" off beside it
             settings = dataclasses.replace(settings, extra_args={**args, **swap})
+    model = _openai_model(protocol, model_name, conn or None)
+    if seen is not None:
+        _drop_unseen_boxes(model, seen)
     return Agent(
         name="PageIndex",
         instructions=instructions,
-        tools=build_openai_tools(client, doc_ids=doc_ids),
-        model=_openai_model(protocol, model_name, conn or None),
+        tools=build_openai_tools(client, doc_ids=doc_ids,
+                                 collection=collection, seen=seen),
+        model=model,
         model_settings=settings,
     )
+
+
+def _strip_output(items, seen: _SeenPages) -> None:
+    for item in items or ():
+        if getattr(item, "type", None) == "message":
+            for part in item.content or ():
+                if getattr(part, "type", None) == "output_text":
+                    part.text = seen.strip(part.text)
+
+
+def _drop_unseen_boxes(model, seen: _SeenPages) -> None:
+    """Strips each reply, streamed or not, before openai-agents reads it."""
+    get_response = model.get_response
+    stream_response = model.stream_response
+
+    async def getting(*args, **kwargs):
+        response = await get_response(*args, **kwargs)
+        _strip_output(response.output, seen)
+        return response
+
+    async def streaming(*args, **kwargs):
+        from contextlib import aclosing
+        texts: dict = {}
+
+        def close(ended):
+            for key in [key for key in texts if ended(key)]:
+                held, last = texts.pop(key)
+                rest = held.flush()
+                if rest:
+                    yield last.model_copy(update={"delta": rest})
+
+        async with aclosing(stream_response(*args, **kwargs)) as events:  # type: ignore[arg-type]
+            async for event in events:
+                kind = getattr(event, "type", None)
+                if kind == "response.output_text.delta":
+                    key = (event.item_id, event.content_index)
+                    held = texts[key][0] if key in texts else seen.stream()
+                    texts[key] = (held, event)
+                    piece = event.delta
+                    event.delta = held.feed(piece)
+                    if piece and not event.delta:
+                        continue
+                elif kind in ("response.output_text.done",
+                              "response.content_part.done"):
+                    key = (event.item_id, event.content_index)
+                    for rest in close(lambda k: k == key):
+                        yield rest
+                    if kind == "response.output_text.done":
+                        event.text = seen.strip(event.text)
+                    elif getattr(event.part, "type", None) == "output_text":
+                        event.part.text = seen.strip(event.part.text)
+                elif kind == "response.output_item.done":
+                    for rest in close(lambda k: k[0] == event.item.id):
+                        yield rest
+                    _strip_output([event.item], seen)
+                elif kind in ("response.completed", "response.incomplete",
+                              "response.failed"):
+                    for rest in close(lambda k: True):
+                        yield rest
+                    _strip_output(event.response.output, seen)
+                yield event
+
+    model.get_response = getting
+    model.stream_response = streaming
 
 
 def _validate_max_turns(max_turns) -> None:
@@ -979,11 +1049,12 @@ def _validate_max_turns(max_turns) -> None:
 
 
 def _conversation_cache_key(model_name: str, instructions: str, doc_id,
-                            items, folder_id=None) -> str:
+                            items, folder_id=None, collection_id=None) -> str:
     """prompt_cache_key per conversation; items exclude the targeting block."""
     scope = [doc_id] if isinstance(doc_id, str) else doc_id
     seed = json.dumps([model_name, instructions, scope,
                        *([folder_id] if folder_id else []),
+                       *([collection_id] if collection_id else []),
                        items[0] if items else None],
                       sort_keys=True, default=str)
     return "pageindex-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -1304,7 +1375,7 @@ def _text_only(chunks) -> Iterator[str]:
 def _chat_agent(client, messages, doc_id, model, temperature=None,
                 top_p=None, reasoning_effort=None, extra_body=None,
                 max_tokens=None, backend=None, extra_headers=None,
-                folder_id=None,
+                folder_id=None, collection_id=None,
                 ) -> "tuple[Any, list, str, Optional[_Replies]]":
     """The chat lane's shared prologue: validated history, doc targeting,
     and the configured agent. Returns (agent, input items, model name,
@@ -1312,7 +1383,8 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
     messages = list(messages)
     system_texts, history = _split_chat_messages(messages)
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     items = ([{"role": "user", "content": block}] if block else []) + history
     model_name = model or client.chat_model
     managed = _managed_instructions(client, system_texts)
@@ -1320,11 +1392,12 @@ def _chat_agent(client, messages, doc_id, model, temperature=None,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
                               model_name, managed, doc_id, history,
-                              folder_id),
+                              folder_id, collection_id),
                           reasoning_effort=reasoning_effort,
                           extra_body=extra_body, max_tokens=max_tokens,
                           backend=_merged_backend(client, backend),
-                          extra_headers=extra_headers)
+                          extra_headers=extra_headers, collection=collection,
+                          seen=_SeenPages())
     return agent, items, model_name, _keep_reply_fields(agent, messages)
 
 
@@ -1636,7 +1709,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                     reasoning_effort=None,
                     show_process: Union[bool, Mapping[str, Any]] = False,
                     max_turns=None, backend=None, extra_headers=None,
-                    extra_body=None, folder_id=None,
+                    extra_body=None, folder_id=None, collection_id=None,
                     ) -> ChatStream:
     """chat(stream=True): validation and the agent build run here, eagerly;
     the run itself starts when the returned stream's chosen view is first
@@ -1654,6 +1727,7 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
     if is_claude_code(model or client.chat_model):
         run = _claude_code_run(client, messages, model or client.chat_model,
                                doc_id=doc_id, folder_id=folder_id,
+                               collection_id=collection_id,
                                reasoning_effort=reasoning_effort,
                                max_turns=max_turns, partial=True,
                                extra_body=extra_body,
@@ -1671,7 +1745,8 @@ def run_chat_stream(client, messages, doc_id=None, model=None,
                                      reasoning_effort=reasoning_effort,
                                      extra_body=extra_body, backend=backend,
                                      extra_headers=extra_headers,
-                                     folder_id=folder_id)
+                                     folder_id=folder_id,
+                                     collection_id=collection_id)
     run_kwargs = _run_kwargs(max_turns)
 
     def events():
@@ -1694,6 +1769,7 @@ def run_chat_completions(client, messages, stream: bool = False,
                          extra_headers: Optional[dict] = None,
                          backend: Optional[dict] = None,
                          folder_id: Optional[str] = None,
+                         collection_id: Optional[str] = None,
                          ) -> Union[ChatObject, Iterator[str],
                                     Iterator[ChatObject]]:
     if enable_citations:
@@ -1707,6 +1783,7 @@ def run_chat_completions(client, messages, stream: bool = False,
     if is_claude_code(model or client.chat_model):
         run = _claude_code_run(client, messages, model or client.chat_model,
                                doc_id=doc_id, folder_id=folder_id,
+                               collection_id=collection_id,
                                reasoning_effort=reasoning_effort,
                                max_turns=max_turns, partial=stream,
                                temperature=temperature, top_p=top_p,
@@ -1721,7 +1798,8 @@ def run_chat_completions(client, messages, stream: bool = False,
         client, messages, doc_id, model, temperature=temperature,
         top_p=top_p, reasoning_effort=reasoning_effort,
         extra_body=extra_body, max_tokens=max_tokens, backend=backend,
-        extra_headers=extra_headers, folder_id=folder_id)
+        extra_headers=extra_headers, folder_id=folder_id,
+        collection_id=collection_id)
     reported_model = _reported_model(model_name)
     recorded: dict = {}
     _record_chat_finish(agent, recorded)
@@ -1855,6 +1933,7 @@ def run_responses(client, input, model: Optional[str] = None,
                   extra_headers: Optional[dict] = None,
                   backend: Optional[dict] = None,
                   folder_id: Optional[str] = None,
+                  collection_id: Optional[str] = None,
                   ) -> Union[ChatObject, Iterator[ChatObject]]:
     _validate_max_turns(max_turns)
     if isinstance(input, str) and input.strip():
@@ -1866,22 +1945,25 @@ def run_responses(client, input, model: Optional[str] = None,
         raise PageIndexAPIError("messages must be a non-empty string or list "
                                 "of item dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     conversation = items
     if block:
         items = [{"role": "user", "content": block}] + items
     extra = [instructions] if instructions else []
     model_name = model or client.chat_model
     managed = _managed_instructions(client, extra)
+    seen = _SeenPages()
     agent = _openai_agent(client, "responses", model_name, managed,
                           temperature, top_p, doc_ids=scope,
                           cache_key=_conversation_cache_key(
                               model_name, managed, doc_id, conversation,
-                              folder_id),
+                              folder_id, collection_id),
                           reasoning=reasoning, extra_body=extra_body,
                           max_tokens=max_output_tokens,
                           backend=_merged_backend(client, backend),
-                          extra_headers=extra_headers)
+                          extra_headers=extra_headers, collection=collection,
+                          seen=seen)
     run_kwargs = _run_kwargs(max_turns)
     recorded: dict = {}
     import openai
@@ -1937,6 +2019,7 @@ def run_responses(client, input, model: Optional[str] = None,
                 # the run ended on a response cut short, before openai-agents'
                 # hooks or items saw it; this goes once they see it
                 cut = recorded["response"]
+                _strip_output(cut.output, seen)
                 transcript = [item.to_input_item()
                               for item in run_data.new_items]
                 transcript += _cut_text(
@@ -2247,6 +2330,52 @@ def _default_max_tokens(thinking=None) -> int:
     return 8192
 
 
+def _strip_blocks(blocks, seen: _SeenPages) -> None:
+    for block in blocks or ():
+        if getattr(block, "type", None) == "text":
+            block.text = seen.strip(block.text)
+
+
+def _seen_box_events(events, seen: _SeenPages) -> Iterator[dict]:
+    """A turn's stream events as dicts, each text as _strip_blocks leaves it."""
+    held: dict = {}
+    sent: dict = {}
+    last: tuple = (None, "")  # the text delta the SDK's "text" event repeats
+    for event in events:
+        data = event.model_dump(mode="json")
+        kind = data.get("type")
+        if (kind == "content_block_delta"
+                and data["delta"].get("type") == "text_delta"):
+            index, piece = data["index"], data["delta"]["text"]
+            out = held.setdefault(index, seen.stream()).feed(piece)
+            sent[index] = sent.get(index, "") + out
+            last = (index, out)
+            if piece and not out:
+                continue
+            data["delta"]["text"] = out
+        elif kind == "text":
+            index, out = last
+            if data["text"] and not out:
+                continue
+            data["text"], data["snapshot"] = out, sent.get(index, "")
+        elif kind == "content_block_stop":
+            index = data["index"]
+            rest = held.pop(index).flush() if index in held else ""
+            if rest:
+                sent[index] += rest
+                yield {"type": "content_block_delta", "index": index,
+                       "delta": {"type": "text_delta", "text": rest}}
+                yield {"type": "text", "text": rest, "snapshot": sent[index]}
+            block = data.get("content_block") or {}
+            if block.get("type") == "text":
+                block["text"] = seen.strip(block["text"])
+        elif kind == "message_stop":
+            for block in (data.get("message") or {}).get("content") or ():
+                if block.get("type") == "text":
+                    block["text"] = seen.strip(block["text"])
+        yield data
+
+
 def run_messages(client, messages, model: str, route: str,
                  max_tokens: Optional[int] = None,
                  stream: bool = False, doc_id=None, system=None,
@@ -2260,6 +2389,7 @@ def run_messages(client, messages, model: str, route: str,
                  extra_headers: Optional[dict] = None,
                  backend: Optional[dict] = None,
                  folder_id: Optional[str] = None,
+                 collection_id: Optional[str] = None,
                  ) -> Union[ChatObject, MessagesStream]:
     from .integrations.anthropic_sdk import build_anthropic_tools
 
@@ -2274,7 +2404,8 @@ def run_messages(client, messages, model: str, route: str,
         raise PageIndexAPIError("messages must be a non-empty string or a "
                                 "list of message dicts.")
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     prepared = [dict(message) for message in messages]
     if block:
         prepared = [{"role": "user", "content": block}] + prepared
@@ -2298,7 +2429,9 @@ def run_messages(client, messages, model: str, route: str,
     # Tools before the transport: on a bridge client building them is
     # network I/O, and a failure there must not strand the client below.
     failures: list = []
-    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures)
+    seen = _SeenPages()
+    tools = build_anthropic_tools(client, doc_ids=scope, failures=failures,
+                                  collection=collection, seen=seen)
     merged = _merged_backend(client, backend)
     backend_client = _anthropic_client(merged, route)
     # Close only a per-call construction: cached clients stay open for
@@ -2427,9 +2560,10 @@ def run_messages(client, messages, model: str, route: str,
             turns: list = []  # each finished turn's message snapshot
             try:
                 for turn_stream in runner:
-                    for event in turn_stream:
-                        yield _MessagesEvent(event.model_dump(mode="json"))
+                    for event in _seen_box_events(turn_stream, seen):
+                        yield _MessagesEvent(event)
                     message = turn_stream.get_final_message()
+                    _strip_blocks(message.content, seen)
                     if message.stop_reason is None:
                         raise PageIndexAPIError(
                             "The model backend failed: the response stream "
@@ -2451,6 +2585,7 @@ def run_messages(client, messages, model: str, route: str,
     turns: list = []
     try:
         for turn in runner:
+            _strip_blocks(turn.content, seen)
             turns.append(turn)
     except anthropic.AnthropicError as exc:
         raise _with_usage(_model_backend_error(exc, "messages", client),
@@ -2478,7 +2613,8 @@ _CLAUDE_CUT: dict[Optional[str], str] = {"max_tokens": "length",
 
 
 def _claude_code_run(client, messages, model_name: str, doc_id=None,
-                     folder_id=None, reasoning_effort=None, max_turns=None,
+                     folder_id=None, collection_id=None,
+                     reasoning_effort=None, max_turns=None,
                      partial: bool = False, **unsupported):
     """The claude-code/ engine: one Claude Code CLI run per call. The
     conversation goes in as ONE user message, a text block per turn: the
@@ -2501,7 +2637,8 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         claude_code_messages, claude_code_options, tool_server)
     system_texts, history = _split_chat_messages(messages, text_only=model_name)
     scope = client._local_doc_scope(doc_id)
-    block = targeting_block(client, doc_id, folder_id)
+    block, collection = targeting_block(client, doc_id, folder_id,
+                                        collection_id)
     blocks = [{"type": "text", "text": block}] if block else []
     blocks += [{"type": "text", "text": f'<turn role="{m["role"]}">\n'
                 f'{m["content"].replace("</turn>", "</ turn>")}\n</turn>'}
@@ -2509,11 +2646,14 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
     # cloud tool failures (auth, limits): the run fails on them, as the
     # bridge lanes do, instead of the model answering around them
     failures: list = []
+    seen = _SeenPages()
     options = claude_code_options(
         model_name, reasoning_effort,
         system_prompt=_managed_instructions(client, [_TURNS_NOTE, *system_texts]),
         mcp_servers={"pageindex": tool_server(client, doc_ids=scope,
-                                              failures=failures)},
+                                              failures=failures,
+                                              collection=collection,
+                                              seen=seen)},
         allowed_tools=["mcp__pageindex"],
         max_turns=max_turns if max_turns is not None else 10,
         include_partial_messages=partial)
@@ -2530,6 +2670,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
         sent = ""  # answer text out since the last text block
         streamed = ""  # this model call's text deltas
         cut = None  # (finish_reason, usage) of a streamed run cut short
+        held = seen.stream()
         failures.clear()
         try:
             async with aclosing(claude_code_messages(prompt(), options)) as sdk:
@@ -2547,7 +2688,9 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                         if streamed.startswith(sent)
                                         else "\n\n" + streamed)
                                 sent = streamed
-                                yield {"type": "answer", "delta": rest}
+                                rest = held.feed(rest)
+                                if rest:
+                                    yield {"type": "answer", "delta": rest}
                         elif (delta.get("type") == "thinking_delta"
                               and delta.get("thinking")):
                             yield {"type": "thinking", "delta": delta["thinking"]}
@@ -2560,6 +2703,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                             # whole, after whatever the failed stream got out
                             rest = (text[len(sent):] if text.startswith(sent)
                                     else "\n\n" + text)  # regenerated differently
+                            rest = held.feed(rest) + held.flush()
                             if rest:
                                 yield {"type": "answer", "delta": rest}
                             sent = streamed = ""
@@ -2579,7 +2723,7 @@ def _claude_code_run(client, messages, model_name: str, doc_id=None,
                                        "name": names.get(item.tool_use_id, "tool"),
                                        "output": item.content}
                     elif isinstance(message, ResultMessage) and done and not failures:
-                        yield {"type": "done", "answer": answer,
+                        yield {"type": "done", "answer": seen.strip(answer),
                                "usage": _claude_code_usage(message.usage),
                                "finish_reason": _CLAUDE_CUT.get(
                                    message.stop_reason, "stop")}

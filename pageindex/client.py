@@ -57,9 +57,26 @@ _CITE_TAG_RE = re.compile(r"<cite\s([^<>]*)>(?:(?P<inner>[^<>]*)</cite>)?")
 _CITE_ATTR_RE = re.compile(r"""\b(\w+)=(["'])(.*?)\2""", re.S)
 
 
-def _citation_key(m: re.Match) -> Optional[tuple[str, int, Optional[str]]]:
-    """(document, page, block_id) of one matched tag, or None when it names
-    no document or no positive page."""
+_CitationKey = tuple[str, int, Optional[str], Optional[tuple[float, ...]]]
+
+
+def _citation_box(raw: Optional[str]) -> Optional[tuple[float, ...]]:
+    """A box="x0,y0,x1,y1" value as PageIndex chat's renderer takes it:
+    four fractions from 0 to 1, each start before its end; else None."""
+    try:
+        box = tuple(float(part) for part in (raw or "").split(","))
+    except ValueError:
+        return None
+    if (len(box) != 4 or not all(0 <= value <= 1 for value in box)
+            or box[0] >= box[2] or box[1] >= box[3]):
+        return None
+    return box
+
+
+def _citation_key(m: re.Match) -> Optional[_CitationKey]:
+    """(document, page, block_id, box) of one matched tag, or None when it
+    names no document or no positive page."""
+    box_str = None
     if m.re is _OLD_CITATION_RE:
         doc, page_str, block_id = m.group(1), m.group(2), m.group(3)
     else:
@@ -67,21 +84,23 @@ def _citation_key(m: re.Match) -> Optional[tuple[str, int, Optional[str]]]:
                  _CITE_ATTR_RE.findall(m.group(1))}
         doc, page_str, block_id = (attrs.get("doc", ""), attrs.get("page", ""),
                                    attrs.get("block"))
+        box_str = attrs.get("box")
     doc = doc.strip()
     block_id = (block_id or "").strip() or None
     try:
         page = int(page_str.split("-")[0])
     except ValueError:
         return None
-    return (doc, page, block_id) if doc and page > 0 else None
+    return ((doc, page, block_id, _citation_box(box_str))
+            if doc and page > 0 else None)
 
 
 def _parse_citations(text: str) -> list[dict[str, Any]]:
     """``<doc=…;page=…;block=…>`` tags (the managed chat's format), then
-    ``<cite doc= page= block=/>`` tags; deduplicated, ``block_id`` only
-    when the tag carries one."""
+    ``<cite doc= page= block= box=/>`` tags; deduplicated, ``block_id`` and
+    ``box`` only when the tag carries one."""
     found: list[dict[str, Any]] = []
-    seen: set[tuple[str, int, Optional[str]]] = set()
+    seen: set[_CitationKey] = set()
     for m in [*_OLD_CITATION_RE.finditer(text), *_CITE_TAG_RE.finditer(text)]:
         key = _citation_key(m)
         if key and key not in seen:
@@ -89,6 +108,8 @@ def _parse_citations(text: str) -> list[dict[str, Any]]:
             entry: dict[str, Any] = {"document": key[0], "page": key[1]}
             if key[2]:
                 entry["block_id"] = key[2]
+            if key[3]:
+                entry["box"] = list(key[3])
             found.append(entry)
     return found
 
@@ -828,6 +849,7 @@ class PageIndexClient:
         folder_id: Optional[str] = None,
         metadata: Optional[dict] = None,
         wait: bool = False,
+        collection_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Submit a PDF document for processing. Returns {'doc_id': ..., 'name': ...}.
@@ -854,14 +876,22 @@ class PageIndexClient:
             metadata (dict, optional): Your own JSON-serializable tags for the
                 document; returned in get_document/get_tree/get_ocr responses
                 and list_documents entries (both modes). Cloud: a metadata
-                schema must apply to the folder (``create_metadata_schema()``);
-                without one, a non-empty dict raises PageIndexAPIError (HTTP
-                400).
+                schema must apply to the folder
+                (``create_metadata_schema()``); without one, a non-empty dict
+                raises PageIndexAPIError (HTTP 400). A collection without
+                declared fields learns them from this metadata, each key typed
+                by its first value, up to 32 keys. In a collection a document
+                takes at most 16 keys, names up to 64 characters and strings
+                up to 512; a breach or another type raises PageIndexAPIError
+                (HTTP 400).
             wait (bool): Return only once the document is ready for use.
                 Cloud: polls status until "completed" (raises on "failed" or
                 after 30 minutes). Local: indexing is synchronous already, so
                 this changes nothing. Leave False to submit many documents
                 concurrently and poll afterwards.
+            collection_id (str, optional): Cloud-only collection to store the
+                document in, in place of a folder: passing ``folder_id`` too
+                raises PageIndexAPIError (HTTP 400).
 
         Returns:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
@@ -874,6 +904,7 @@ class PageIndexClient:
         result = self._api.submit_document(
             file_path=file_path, mode=mode,
             beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
+            collection_id=collection_id,
         )
         stored = result.get("name")
         if stored and stored != os.path.basename(file_path):
@@ -1125,9 +1156,10 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1145,9 +1177,10 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1165,9 +1198,10 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: Literal["chat_completions", "responses", "messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1185,9 +1219,10 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: Literal["chat_completions", "responses"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1205,9 +1240,10 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: Literal["messages"],
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1225,9 +1261,10 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: None = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1245,10 +1282,11 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: Optional[Literal["chat_completions", "responses",
                                    "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1265,10 +1303,11 @@ class PageIndexClient:
         reasoning_effort: Optional[str] = None,
         show_process: Union[bool, Mapping[str, Any], None] = None,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
         protocol: Optional[Literal["chat_completions", "responses",
                                    "messages"]] = None,
         instructions: Optional[Union[str, list[dict[str, Any]]]] = None,
-        citations: bool = False,
+        citations: Union[bool, str] = False,
         max_turns: Optional[int] = None,
         backend: Optional[dict[str, Any]] = None,
         extra_headers: Optional[dict[str, str]] = None,
@@ -1348,6 +1387,12 @@ class PageIndexClient:
                 (``folder_context``), ahead of the document block.
                 ``"root"`` is the whole library.
                 Keep it identical across a conversation's calls.
+            collection_id: Collection ID to keep discovery in that
+                collection's documents. Cloud own-model chat only: the
+                conversation opens with the collection's targeting text,
+                and every tool that takes a collection searches this one.
+                Not with ``doc_id`` or ``folder_id``. Keep it identical
+                across a conversation's calls.
             stream: Answer lane: return a ``ChatStream`` — iterate it for
                 the answer as text chunks as they are produced
                 (``show_process`` is on by default, so the run's process
@@ -1417,14 +1462,21 @@ class PageIndexClient:
                 ``protocol="chat_completions"`` it precedes any ``system``
                 rows in the history; the managed cloud chat receives them
                 all as its one leading system message.
-            citations: Own-model chat: cite every claim the way PageIndex
-                chat does — ``<cite doc="…" page="…"/>`` tags, ``block="…"``
-                added where the cloud document has blocks. The guidance is
-                the PageIndex MCP server's ``cited_answer`` prompt, joining
-                the system prompt after the managed prompt and before
-                ``instructions``; local documents get the SDK's copy
-                (pages only); another format: ``citation_prompt()`` passed
-                through ``instructions=`` instead. Managed chat:
+            citations: Own-model chat: cite every claim in a format the
+                PageIndex MCP server's ``cited_answer`` prompt serves.
+                ``True`` is ``"cite"``, the ``<cite doc="…" page="…"/>``
+                tags PageIndex chat writes, ``block="…"`` added where the
+                cloud document has blocks; ``"cite_with_boxes"`` adds
+                ``box="x0,y0,x1,y1"`` to a tag with no block, the part of
+                the page as fractions of its width and height from the top
+                left, and has the model look at each page it cites (a box
+                on a page whose picture the call's tools never attached is
+                dropped, leaving the page citation);
+                ``"markdown"`` writes ``[doc, p. N]``. A format the server
+                does not serve raises. The guidance joins the system prompt
+                after the managed prompt and before ``instructions``; local
+                documents get the SDK's copy (pages only, ``"cite"`` and
+                ``"markdown"``). Managed chat: ``True`` only,
                 ``chat_completions``'s ``enable_citations`` — the endpoint
                 cites in its own inline markup, not ``<cite>`` tags, and
                 the resolved citations it returns ride the response
@@ -1463,8 +1515,9 @@ class PageIndexClient:
                 ``instructions`` / ``input`` / ``messages`` / ``tools``
                 are refused); extend the prompt with ``instructions=`` or a
                 leading system row in ``messages``. ``stream`` / ``doc_id``
-                / ``folder_id`` / ``model`` / ``reasoning_effort`` are
-                refused too: each has its own argument. Credentials and the
+                / ``folder_id`` / ``collection_id`` / ``model`` /
+                ``reasoning_effort`` are refused too: each has its own
+                argument. Credentials and the
                 endpoint (``api_key`` / ``base_url`` / ``api_base``) belong
                 in ``backend``, never here.
 
@@ -1544,23 +1597,29 @@ class PageIndexClient:
                 "system blocks; the other lanes take a string.")
         from .local_chat import _refuse_skeleton
         _refuse_skeleton(extra_body)
-        if citations and citations is not True:
+        if (citations and citations is not True
+                and not isinstance(citations, str)):
             raise PageIndexAPIError(
-                "citations must be True or False — for another format pass "
-                "citation_prompt(format=...) as instructions= (own-model "
-                "chat).")
+                "citations must be True, False or a citations format name "
+                "such as \"cite_with_boxes\".")
         enable_citations = False
         if citations:
             if self._local_chat:
-                text = self.citation_prompt()
+                text = self.citation_prompt(
+                    "cite" if citations is True else citations)
                 if isinstance(instructions, list):
                     instructions = [{"type": "text", "text": text},
                                     *instructions]
                 else:
                     instructions = (f"{text}\n\n{instructions}"
                                     if instructions else text)
-            else:
+            elif citations is True:
                 enable_citations = True
+            else:
+                raise PageIndexAPIError(
+                    "The managed chat cites in its own markup: pass "
+                    "citations=True, or construct the client with "
+                    "chat_model=... to cite in a format by name.")
         if protocol in ("responses", "messages"):
             self._require_own_chat(f"chat(protocol={protocol!r})")
             from .integrations.claude_agent_sdk import is_claude_code
@@ -1580,7 +1639,7 @@ class PageIndexClient:
                         **given.get("reasoning", {})}}
                 return self._responses(
                     messages, model=model, stream=stream, doc_id=doc_id,
-                    folder_id=folder_id,
+                    folder_id=folder_id, collection_id=collection_id,
                     instructions=cast(Optional[str], instructions),
                     max_turns=max_turns, extra_body=body,
                     extra_headers=extra_headers, backend=backend)
@@ -1605,7 +1664,7 @@ class PageIndexClient:
                         **given.get("output_config", {})}}
             return self._messages(
                 messages, model=model, stream=stream, doc_id=doc_id,
-                folder_id=folder_id,
+                folder_id=folder_id, collection_id=collection_id,
                 system=instructions, max_turns=max_turns, extra_body=body,
                 extra_headers=extra_headers, backend=backend)
         if instructions:
@@ -1623,7 +1682,7 @@ class PageIndexClient:
             return self.chat_completions(
                 messages, stream=stream, stream_metadata=True, doc_id=doc_id,
                 enable_citations=enable_citations, folder_id=folder_id,
-                model=model, max_turns=max_turns,
+                collection_id=collection_id, model=model, max_turns=max_turns,
                 reasoning_effort=reasoning_effort, extra_body=extra_body,
                 extra_headers=extra_headers, backend=backend)
         if stream:
@@ -1632,7 +1691,9 @@ class PageIndexClient:
             if self._local_chat:
                 from .local_chat import run_chat_stream
                 return run_chat_stream(self, messages, doc_id=doc_id,
-                                       folder_id=folder_id, model=model,
+                                       folder_id=folder_id,
+                                       collection_id=collection_id,
+                                       model=model,
                                        reasoning_effort=reasoning_effort,
                                        show_process=resolved,
                                        max_turns=max_turns, backend=backend,
@@ -1644,6 +1705,7 @@ class PageIndexClient:
                                            enable_citations=enable_citations,
                                            doc_id=doc_id, model=model,
                                            folder_id=folder_id,
+                                           collection_id=collection_id,
                                            reasoning_effort=reasoning_effort,
                                            max_turns=max_turns,
                                            backend=backend,
@@ -1654,6 +1716,7 @@ class PageIndexClient:
         result = self.chat_completions(messages, doc_id=doc_id, model=model,
                                        enable_citations=enable_citations,
                                        folder_id=folder_id,
+                                       collection_id=collection_id,
                                        reasoning_effort=reasoning_effort,
                                        max_turns=max_turns, backend=backend,
                                        extra_headers=extra_headers,
@@ -1693,6 +1756,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
     ) -> Union[ChatObject, Iterator[str], Iterator[ChatObject]]:
         """
         Kept for existing code — new code calls ``chat()``. Everything
@@ -1769,6 +1833,9 @@ class PageIndexClient:
                 leads the conversation with the folder's targeting text,
                 ahead of the document block.
                 ``"root"`` is the whole library.
+            collection_id: Collection ID to keep discovery in that
+                collection's documents, as in ``chat()``: cloud own-model
+                chat only, not with ``doc_id`` or ``folder_id``.
             temperature: Sampling temperature, passed through to the model.
             stream_metadata: With stream=True, yield chunk dicts instead of
                 text pieces.
@@ -1804,8 +1871,9 @@ class PageIndexClient:
                 The managed prompt, conversation and tools are not
                 fields here (``system`` / ``instructions`` / ``input`` /
                 ``messages`` / ``tools`` are refused), nor are ``stream``
-                / ``doc_id`` / ``folder_id`` / ``model`` /
-                ``reasoning_effort``: each has its own argument.
+                / ``doc_id`` / ``folder_id`` / ``collection_id`` /
+                ``model`` / ``reasoning_effort``: each has its own
+                argument.
                 Credentials and the endpoint (``api_key`` / ``base_url`` /
                 ``api_base``) belong in ``backend``, never here.
             extra_headers: Own-model chat only — extra HTTP headers merged into
@@ -1841,7 +1909,7 @@ class PageIndexClient:
             from .local_chat import run_chat_completions
             return run_chat_completions(
                 self, messages, stream=stream, doc_id=doc_id,
-                folder_id=folder_id,
+                folder_id=folder_id, collection_id=collection_id,
                 temperature=temperature, stream_metadata=stream_metadata,
                 enable_citations=enable_citations, model=model,
                 max_turns=max_turns, top_p=top_p, max_tokens=max_tokens,
@@ -1864,6 +1932,12 @@ class PageIndexClient:
                 "agent in your process, or drop them to use the managed "
                 "chat endpoint, which selects its own model."
             )
+        if collection_id is not None:
+            raise PageIndexAPIError(
+                "collection_id steers your own chat model's agent; the "
+                "managed chat endpoint takes doc_id and folder_id — "
+                "construct the client with chat_model=... to chat within "
+                "a collection.")
         # The endpoint takes one system message, first: the client's
         # instructions and the history's system rows fold into it.
         from .local_chat import _system_text
@@ -1903,6 +1977,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
     ) -> Union[ChatObject, Iterator[ChatObject]]:
         """
         The engine behind ``chat(protocol="responses")``: document QA over
@@ -1949,6 +2024,9 @@ class PageIndexClient:
                 documents (cloud-only), as the leading targeting text
                 ahead of the document block. ``"root"`` is the whole
                 library.
+            collection_id: Collection ID to keep discovery in that
+                collection's documents (cloud-only), as in ``chat()``;
+                not with ``doc_id`` or ``folder_id``.
             instructions: Appended to the managed system prompt.
             temperature / top_p: Passed through to the model.
             max_turns: Cap on agent turns per call.
@@ -1976,7 +2054,7 @@ class PageIndexClient:
         from .local_chat import run_responses
         return run_responses(
             self, input, model=model, stream=stream, doc_id=doc_id,
-            folder_id=folder_id,
+            folder_id=folder_id, collection_id=collection_id,
             instructions=instructions, temperature=temperature, top_p=top_p,
             max_turns=max_turns, max_output_tokens=max_output_tokens,
             reasoning=reasoning, extra_body=extra_body,
@@ -2002,6 +2080,7 @@ class PageIndexClient:
         backend: Optional[dict[str, Any]] = None,
         *,
         folder_id: Optional[str] = None,
+        collection_id: Optional[str] = None,
     ) -> Union[ChatObject, MessagesStream]:
         """
         The engine behind ``chat(protocol="messages")``: document QA over
@@ -2059,6 +2138,9 @@ class PageIndexClient:
                 documents (cloud-only), as the leading targeting text
                 ahead of the document block. ``"root"`` is the whole
                 library.
+            collection_id: Collection ID to keep discovery in that
+                collection's documents (cloud-only), as in ``chat()``;
+                not with ``doc_id`` or ``folder_id``.
             system: Appended after the managed system blocks.
             temperature / top_p / top_k / stop_sequences: Passed through.
             max_turns: Cap on agent turns per call (default 10, like the
@@ -2090,7 +2172,8 @@ class PageIndexClient:
                                    "chat(protocol='messages')")
         return run_messages(
             self, messages, model=wire, route=route, max_tokens=max_tokens,
-            stream=stream, doc_id=doc_id, folder_id=folder_id, system=system,
+            stream=stream, doc_id=doc_id, folder_id=folder_id,
+            collection_id=collection_id, system=system,
             temperature=temperature, top_p=top_p, top_k=top_k,
             stop_sequences=stop_sequences, max_turns=max_turns,
             thinking=thinking, extra_body=extra_body,
@@ -2105,7 +2188,8 @@ class PageIndexClient:
         'createdAt', 'pageNum', 'folderId', 'metadata'}. Status is one of
         "queued", "processing", "completed", "failed" (local documents are
         always "completed"; local 'folderId' is always None). 'metadata'
-        is your own tags from ``submit_document``, or None.
+        is your own tags from ``submit_document``, or None. A cloud document
+        also carries 'collectionId': its collection, or None.
 
         'createdAt' is UTC with no timezone marker, in both modes. To show
         it in the user's timezone::
@@ -2148,6 +2232,7 @@ class PageIndexClient:
         offset: int = 0,
         folder_id: Optional[str] = None,
         recursive: bool = False,
+        collection_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         List documents with pagination, newest first.
@@ -2159,17 +2244,22 @@ class PageIndexClient:
             recursive (bool): Include documents in ``folder_id``'s
                 descendant folders, flattened into one list. Cloud-only;
                 local libraries have no folders.
+            collection_id (str, optional): Cloud-only: list one collection's
+                documents. Passing ``folder_id`` or ``recursive`` too raises
+                PageIndexAPIError (HTTP 400).
 
         Returns:
             dict: {'documents': [...], 'total', 'limit', 'offset'}.
 
-        Each document carries ``path``, its folder chain rendered
-        ``"Parent/Child"`` — what a flat listing otherwise loses. None
-        at the library root, for a folder reached only through a share
-        of something below it, and for every local document.
+        Each document carries ``path``, its folder chain plus its file
+        name, ``"Parent/Child/Q3.pdf"`` — what a flat listing otherwise
+        loses. Just the file name at the library root; None in a
+        collection, for a folder reached only through a share of
+        something below it, and for every local document.
         """
         return self._api.list_documents(limit=limit, offset=offset,
-                                        folder_id=folder_id, recursive=recursive)
+                                        folder_id=folder_id, recursive=recursive,
+                                        collection_id=collection_id)
 
     # ---------- AGENT INTEGRATION ----------
 
@@ -2640,18 +2730,18 @@ class PageIndexClient:
         how each citation is written — as served by the PageIndex MCP
         server's ``cited_answer`` prompt — what own-model
         ``chat(citations=True)`` adds. Fetch it here to append to
-        ``agent_instructions()`` for an agent you build with a framework,
-        or to pass another format through own-model ``chat``'s
-        ``instructions=`` in place of ``citations=True`` — it is
-        guidance, so it belongs in the system prompt.
+        ``agent_instructions()`` for an agent you build with a framework —
+        it is guidance, so it belongs in the system prompt.
 
         ``format`` picks how a citation is written: ``"cite"`` (the
         ``<cite doc= page= block=/>`` tags PageIndex chat writes and
-        renders — the default) or ``"markdown"`` (a bracketed
-        ``[doc, p. N]`` reference, for hosts that strip tags); any
-        other value raises. Local documents: the SDK's
+        renders — the default), ``"cite_with_boxes"`` (the same tags, a
+        page-level one also naming the part of the page as
+        ``box="x0,y0,x1,y1"``) or ``"markdown"`` (a bracketed
+        ``[doc, p. N]`` reference, for hosts that strip tags); a format
+        the server does not serve raises. Local documents: the SDK's
         frozen copy of the same prompt (page-level — local page
-        content has no blocks).
+        content has no blocks), ``"cite"`` or ``"markdown"``.
         """
         from .agent_tools import fetch_citation_prompt
         return fetch_citation_prompt(self, format or "cite")
@@ -2676,14 +2766,18 @@ class PageIndexClient:
             answer (str): The answer text, tags included.
             doc_id (str | list[str], optional): The documents the answer
                 was about — what ``chat(doc_id=...)`` took. Citations name
-                documents, and the ids come from here; without it your own
-                library is listed. Two documents sharing a cited name
-                raise PageIndexAPIError naming both ids: pass ``doc_id``
-                to pick.
+                documents by name or by library path
+                (``Research/2024/Q3.pdf``), and the ids come from here;
+                without it your own library is listed. With it, a cited
+                path matches by its file name. Two documents sharing a
+                cited name raise PageIndexAPIError naming both ids: pass
+                ``doc_id`` to pick.
 
         Returns:
             list: One dict per distinct citation: ``{'document', 'doc_id',
-            'page'}`` for a page-level citation, plus ``'block_id'`` and
+            'page'}`` for a page-level citation, plus ``'box'`` when it
+            names the part of the page (``[x0, y0, x1, y1]``, fractions of
+            the page's width and height from its top left), or ``'block_id'`` and
             the block's fields as ``get_block()`` returns them (``'bbox'``,
             ``'block_type'``, ...) for a block-level one. A document not in
             the library keeps ``doc_id: None``; a block the document does
@@ -2715,9 +2809,17 @@ class PageIndexClient:
             for doc in _all_documents(self):
                 if doc.get("name") and doc.get("id"):
                     names.setdefault(doc["name"], []).append(doc["id"])
+                if doc.get("path") and doc.get("id"):
+                    names.setdefault(doc["path"], []).append(doc["id"])
         resolved: list[dict[str, Any]] = []
         for citation in citations:
-            ids = list(dict.fromkeys(names.get(citation["document"], [])))
+            cited = citation["document"]
+            ids = names.get(cited)
+            if not ids and doc_id is not None:
+                # Document metadata carries no path: a cited path matches
+                # by its file name within the scoped documents.
+                ids = names.get(cited.rsplit("/", 1)[-1])
+            ids = list(dict.fromkeys(ids or []))
             if len(ids) > 1:
                 raise PageIndexAPIError(
                     f"{citation['document']!r} names {len(ids)} documents "
@@ -2725,6 +2827,8 @@ class PageIndexClient:
             entry: dict[str, Any] = {"document": citation["document"],
                                      "doc_id": ids[0] if ids else None,
                                      "page": citation["page"]}
+            if "box" in citation:
+                entry["box"] = citation["box"]
             block_id = citation.get("block_id")
             if block_id:
                 entry["block_id"] = block_id
@@ -2761,13 +2865,15 @@ class PageIndexClient:
             dict: ``{'answer': str, 'citations': list}`` where each
             citation carries ``'anchor'``, ``'index'`` and the fields
             ``get_citations()`` returns (``'document'``, ``'doc_id'``,
-            ``'page'``, and for block-level citations ``'block_id'`` plus,
+            ``'page'``, ``'box'`` when the tag names one, and for
+            block-level citations ``'block_id'`` plus,
             when the block could be read, ``'bbox'``, ``'block_type'``,
             ``'text'``).
         """
         entries = self.get_citations(answer, doc_id=doc_id)
         index: dict[Any, int] = {
-            (c["document"], c["page"], c.get("block_id")): i
+            (c["document"], c["page"], c.get("block_id"),
+             tuple(c["box"]) if "box" in c else None): i
             for i, c in enumerate(_parse_citations(answer), 1)}
 
         def link(m: re.Match) -> str:
@@ -2830,61 +2936,143 @@ class PageIndexClient:
             parent_folder_id=parent_folder_id,
         )
 
-    def create_metadata_schema(
+    # ---------- COLLECTION MANAGEMENT ----------
+
+    def create_collection(
         self,
-        folder_id: str,
-        fields: dict[str, Any],
+        name: str,
+        description: Optional[str] = None,
     ) -> dict[str, Any]:
         """
-        Declare the metadata fields of a top-level folder (workspace), or of
-        the account with ``folder_id="root"``. Subfolders share their
-        top-level folder's fields. Chat's metadata search filters, sorts and
-        counts documents by these fields. ``metadata`` on a document under
-        the folder may use only these fields, with their types (HTTP 400
-        otherwise); a document may leave any of them out. Declaring also
-        removes, from the documents these fields apply to, the metadata keys
-        they don't declare or declare with another type; matching keys stay.
-        Set once: a second call on the same folder raises PageIndexAPIError
-        (HTTP 409); to change the fields, call ``delete_metadata_schema()``,
-        then declare them again. Cloud-only: local mode raises
+        Create a collection: a flat set of documents beside the folders, with
+        metadata fields of its own. A document is stored in a folder or in one
+        collection (``submit_document(collection_id=...)``). A name another of
+        your collections has raises PageIndexAPIError (HTTP 409). Cloud-only:
+        local mode raises PageIndexAPIError.
+
+        Returns:
+            dict: {'collection': {'id', 'name', 'description'}}.
+        """
+        return self._require_cloud(
+            "create_collection is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).create_collection(name=name, description=description)
+
+    def list_collections(self) -> dict[str, Any]:
+        """
+        List collections, newest first. Cloud-only: local mode raises
         PageIndexAPIError.
 
+        Returns:
+            dict: {'collections': [...], 'total'}; each collection is {'id',
+            'name', 'description', 'metadata_schema', 'created_at',
+            'document_count'}.
+        """
+        return self._require_cloud(
+            "list_collections is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).list_collections()
+
+    def delete_collection(self, collection_id: str) -> dict[str, Any]:
+        """
+        Delete a collection and every document in it. While one of its
+        documents is still queued or processing, the collection and that
+        document stay and PageIndexAPIError (HTTP 409) is raised: call again
+        once it has finished. Cloud-only: local mode raises PageIndexAPIError.
+
+        Returns:
+            dict: {'collection_id', 'deleted': True, 'deleted_documents'}.
+        """
+        return self._require_cloud(
+            "delete_collection is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).delete_collection(collection_id=collection_id)
+
+    # ---------- METADATA SCHEMAS ----------
+
+    def create_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        fields: Optional[dict[str, Any]] = None,
+        *,
+        collection_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Declare the metadata fields of a collection (``collection_id=``), of a
+        top-level folder (workspace), or of the account with
+        ``folder_id="root"``. A collection's documents follow only the
+        collection's fields; declaring them replaces the ones it learned from
+        its documents' metadata. Subfolders share their
+        top-level folder's fields. Chat's metadata search filters, sorts and
+        counts documents by these fields. ``metadata`` on a document under
+        the folder or in the collection may use only these fields, with their
+        types (HTTP 400 otherwise); a document may leave any of them out.
+        Declaring also removes, from the documents these fields apply to, the
+        metadata keys they don't declare or declare with another type;
+        matching keys stay. Set once: a second call on the same folder or
+        collection raises PageIndexAPIError (HTTP 409); to change the fields,
+        call ``delete_metadata_schema()``, then declare them again.
+        Cloud-only: local mode raises PageIndexAPIError.
+
         Args:
-            folder_id (str): Top-level folder ID, or "root".
+            folder_id (str, optional): Top-level folder ID, or "root".
             fields (dict): Field name to spec, e.g.
                 ``{"year": {"type": "number", "description": "Fiscal year"}}``;
                 type is "string", "number" or "boolean".
+            collection_id (str, optional): Collection ID, in place of
+                ``folder_id``.
         """
         return self._require_cloud(
             "create_metadata_schema is cloud-only — local mode has no "
             "metadata schemas. Create the client with an api_key to use them."
         ).create_metadata_schema(
-            folder_id=folder_id, fields=fields,
+            folder_id=folder_id, fields=fields, collection_id=collection_id,
         )
 
-    def get_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+    def get_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        *,
+        collection_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         """
         Get the metadata fields that apply to a folder's documents: from its
         top-level folder's schema, else the account's (``"root"``) schema.
         ``schema`` is None when neither has one; ``inherited`` is True when
-        the fields come from a parent folder or the account.
-        Cloud-only: local mode raises PageIndexAPIError.
+        the fields come from a parent folder or the account. With
+        ``collection_id=``: the collection's own fields, declared or learned
+        (``schema['learned']`` is True), None when it has neither, counted
+        from its documents that have not failed: ``documents`` is how many
+        there are, and each field gives how many carry it (``documents``), a
+        number's ``min`` and ``max``, and a string's 20 commonest ``values``
+        as ``{'value', 'documents'}``; counts adding up to less than the
+        field's ``documents`` mean more values exist. Cloud-only: local mode
+        raises PageIndexAPIError.
 
         Args:
-            folder_id (str): Any folder ID, or "root" for the account-level
-                fields alone.
+            folder_id (str, optional): Any folder ID, or "root" for the
+                account-level fields alone.
+            collection_id (str, optional): Collection ID, in place of
+                ``folder_id``.
 
         Returns:
-            dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}.
+            dict: {'folder_id', 'workspace_id', 'inherited', 'schema'}; for a
+            collection, {'collection_id', 'documents', 'schema'}.
         """
         return self._require_cloud(
             "get_metadata_schema is cloud-only — local mode has no "
             "metadata schemas. Create the client with an api_key to use them."
-        ).get_metadata_schema(folder_id=folder_id)
+        ).get_metadata_schema(folder_id=folder_id, collection_id=collection_id)
 
-    def delete_metadata_schema(self, folder_id: str) -> dict[str, Any]:
+    def delete_metadata_schema(
+        self,
+        folder_id: Optional[str] = None,
+        *,
+        collection_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         """
-        Delete the metadata fields declared on a top-level folder
+        Delete the metadata fields declared on a collection
+        (``collection_id=``), on a top-level folder
         (workspace), or on the account with ``folder_id="root"``, so they can
         be declared again with ``create_metadata_schema()``. It deletes only
         what this folder itself declares, and ``deleted`` is True even when
@@ -2892,18 +3080,23 @@ class PageIndexClient:
         account's fields; to allow no metadata at all, declare
         ``create_metadata_schema(folder_id, {})``, which removes the metadata
         they carry. Documents keep their metadata until fields are declared
-        again. Cloud-only: local mode raises PageIndexAPIError.
+        again; a collection learns its fields again from that metadata.
+        Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
-            folder_id (str): Top-level folder ID, or "root".
+            folder_id (str, optional): Top-level folder ID, or "root".
+            collection_id (str, optional): Collection ID, in place of
+                ``folder_id``.
 
         Returns:
-            dict: {'folder_id', 'deleted': True}.
+            dict: {'folder_id', 'deleted': True}; for a collection,
+            {'collection_id', 'deleted': True}.
         """
         return self._require_cloud(
             "delete_metadata_schema is cloud-only — local mode has no "
             "metadata schemas. Create the client with an api_key to use them."
-        ).delete_metadata_schema(folder_id=folder_id)
+        ).delete_metadata_schema(folder_id=folder_id,
+                                 collection_id=collection_id)
 
     # ---------- PATH HELPERS ----------
 

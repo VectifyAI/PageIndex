@@ -31,13 +31,15 @@ def _tool_failure(ctx, error):
     return default_tool_error_function(ctx, error)
 
 
-def build_mcp_server(client, include_management: bool = False, doc_ids=None):
+def build_mcp_server(client, include_management: bool = False, doc_ids=None,
+                     collection=None, seen=None):
     """The tool set as an in-process MCP server for the Agents SDK."""
     from agents.mcp import MCPServer
     from mcp import types as mcp_types
     from ..agent_tools import _tool_specs
 
-    specs = _tool_specs(client, include_management, doc_ids)
+    specs = _tool_specs(client, include_management, doc_ids,
+                        collection=collection, seen=seen)
 
     class _ToolServer(MCPServer):
         def __init__(self):
@@ -76,7 +78,8 @@ def build_mcp_server(client, include_management: bool = False, doc_ids=None):
 
 
 def build_openai_tools(client, include_management: bool = False,
-                       hosted: bool = False, doc_ids=None) -> list:
+                       hosted: bool = False, doc_ids=None,
+                       collection=None, seen=None) -> list:
     from agents import HostedMCPTool
     from agents.mcp import MCPUtil
     if getattr(client, "api_key", None) and hosted:
@@ -92,6 +95,7 @@ def build_openai_tools(client, include_management: bool = False,
             "require_approval": "never",
         })]
 
-    server = build_mcp_server(client, include_management, doc_ids)
+    server = build_mcp_server(client, include_management, doc_ids, collection,
+                              seen)
     return [MCPUtil.to_function_tool(tool, server, False)
             for tool in server.tools]
