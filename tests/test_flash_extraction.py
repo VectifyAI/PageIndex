@@ -718,9 +718,89 @@ def test_short_document_headings_are_detected(tmp_path):
     assert result["doc_title"] == "Mission"
 
 
+def test_articles_ending_in_references_keep_their_outline(tmp_path):
+    """A journal issue whose articles each end in a References list keeps its
+    article outline, though no heading reads "Chapter N"."""
+    from pageindex.flash.main import extract_toc
+
+    articles = ["Oral Oncolytics", "A New Front Door", "Remote Monitoring"]
+    pages = [("Issue Contents", ["Volume 38, number 3 of the journal."])]
+    for title in articles:
+        pages.append((title, _body(title)))
+        pages.append(("", _body(title)[:3] + [("bold", "References")]
+                      + [f"{n}. Author A. A paper. J Onc. 2023;{n}:1-9." for n in range(1, 5)]))
+    pdf = tmp_path / "issue.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    result = extract_toc(str(pdf))
+    assert [node["title"] for node in result["structure"]] == articles
+
+
+def test_reports_numbered_from_1_again_stay_side_by_side(tmp_path):
+    """Reports bound into one PDF, the first on page 1 so its title is the
+    document's, each number their chapters from 1 again: every later report
+    stays a top-level node holding its own References, not a child of the
+    last chapter of the report before it."""
+    from pageindex.flash.main import extract_toc
+
+    reports = ["Sketching Streams", "Robust Hashing", "Learned Indexes"]
+    pages = []
+    for title in reports:
+        pages += [(title, _body(title)), ("1 Introduction", _body(title)), ("2 Method", _body(title)),
+                  ("", _body(title)[:3] + [("bold", "References")]
+                   + [f"{n}. Author A. A paper. J. 2023;{n}:1-9." for n in range(1, 5)])]
+    pdf = tmp_path / "reports.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    result = extract_toc(str(pdf))
+    top = {node["title"]: node for node in result["structure"]}
+    for title in reports[1:]:
+        assert [child["title"] for child in top[title]["nodes"]] == ["References"]
+
+
+@pytest.mark.parametrize("cover", [False, True])
+def test_proceedings_papers_keep_their_sections(tmp_path, cover):
+    """Papers bound into proceedings, each titled at a page top with its
+    sections in bold and numbered from 1 again, ending in References: every
+    paper is a top-level node holding its own sections. With no cover page
+    the first paper's title is the document title and still opens its node."""
+    from pageindex.flash.main import extract_toc
+
+    sections = ["1 Introduction", "2 Method", "3 Results", "4 Discussion"]
+    papers = ["Sketching Streams", "Robust Hashing", "Learned Indexes", "Private Queries"]
+    pages = [("Proceedings Volume", ["Workshop proceedings."])] if cover else []
+    # A different section tops each paper's second page: the same text in the
+    # same spot on every paper would read as a running header.
+    for title, top in zip(papers, [2, 3, 2, 4]):
+        body = _body(title)
+        sections_on = lambda chosen: [line for section in chosen for line in (("bold", section), *body[:3])]
+        pages += [(title, ["Abstract. " + body[0], *body[1:3], *sections_on(sections[:top - 1])]),
+                  ("", sections_on(sections[top - 1:])),
+                  ("", [*body[:3], ("bold", "References"), *[f"{n}. Author A. A paper. J. 2023;{n}:1-9." for n in range(1, 5)]])]
+    pdf = tmp_path / "proceedings.pdf"
+    pdf.write_bytes(_layout_pdf(pages))
+    structure = extract_toc(str(pdf))["structure"]
+    assert [(node["title"], [child["title"] for child in node["nodes"]]) for node in structure] == [
+        (title, [*sections, "References"]) for title in papers]
+
+
 def _body(title):
     return [f"Line {n} of the {title.lower()} section with some body text."
             for n in range(1, 6)]
+
+
+def test_heading_starting_with_a_caption_word_is_a_heading(tmp_path):
+    """A heading whose first word is a caption word ("Graph", "Chart",
+    "Table", "Figure") followed by a plain word stays a heading. One followed
+    by a label ("Table A", "Figure SA-08.0") or abbreviated ("Fig.") is still
+    a caption."""
+    from pageindex.flash.main import extract_toc
+
+    titles = ["Overview", "Graph Theory", "Table A", "Chart of Accounts", "Figure SA-08.0 Pricing structure",
+              "Table Tennis Rules", "Fig. Plant layout", "Figure Skating", "Summary"]
+    pdf = tmp_path / "handbook.pdf"
+    pdf.write_bytes(_layout_pdf([("Annual Handbook", ["Prepared for the members, 2024"])]
+                                + [(title, _body(title)) for title in titles]))
+    assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == [
+        "Overview", "Graph Theory", "Chart of Accounts", "Table Tennis Rules", "Figure Skating", "Summary"]
 
 
 def test_running_contents_link_does_not_hide_headings(tmp_path, monkeypatch):

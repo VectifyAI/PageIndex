@@ -21,7 +21,7 @@ from .classification import is_body_paragraph, detect_header_footer, HeaderFoote
 from .labels import detect_captions, build_caption_regions, CaptionContext
 from .model import Rect, numbering_kind, block_text, deaccented_text, Block
 from .outline_assembly import (
-    build_heading_from_block, is_outline_valid, is_chapter_outline_valid, mark_outline_block_types, assemble_outline, compute_max_heading_gap, has_table_or_prominent, OutlineNode, outline_to_dict_tree,
+    build_heading_from_block, is_outline_valid, mark_outline_block_types, assemble_outline, compute_max_heading_gap, has_table_or_prominent, OutlineNode, outline_to_dict_tree,
 )
 from .parser_pdfium_parallel import parse_charlevel_meta_parallel
 from .phases import assign_reading_order, PageView, process_page
@@ -114,6 +114,26 @@ def page_by_block_lookup(pages, block) -> Optional[PageView]:
         if block in (page.secondary_slot or []):
             return page
     return None
+
+
+def _group_first_document(doc, title_winner, outline_nodes: list[OutlineNode]) -> list[OutlineNode]:
+    """A compilation with no cover page opens with its first document, whose
+    title is the document title. Once a later top-level heading styled as
+    that title starts plain numbering over at 1, the top-level sections before
+    it are that first document's, so they go under the title."""
+    from .heading_detection import PageScanState, classify_heading, similar_style
+
+    def is_one(node):
+        return node.heading.type == 1 and node.heading.numbering == [1]
+
+    for index, node in enumerate(outline_nodes[1:], 1):
+        if (not node.heading.numbering and any(is_one(child) for child in node.child_nodes)
+                and any(is_one(earlier) for earlier in outline_nodes[:index])
+                and any(similar_style(node.heading.group_slot, block) for block in title_winner.output_slot)):
+            first = OutlineNode(classify_heading(PageScanState(doc, title_winner.page), title_winner.output_slot[0]))
+            first.child_nodes = outline_nodes[:index]
+            return [first, *outline_nodes[index:]]
+    return outline_nodes
 
 
 # --------------------------------------------------------------------------- #
@@ -228,7 +248,7 @@ def extract_toc(
 
     from .heading_detection import find_section_openers as _find_section_openers
     title_page_idx = title_winner.page.page_index if title_winner is not None else 0
-    section_openers = _find_section_openers(doc, title_page_idx)
+    section_openers = _find_section_openers(doc, title_page_idx, title_winner.output_slot if title_winner is not None else ())
 
     # ----- 10) Extend labeled sections and claim body blocks ------------
     # Each labeled heading keeps its label type; body blocks are marked with
@@ -252,15 +272,16 @@ def extract_toc(
     # second doc-wide pass would double-count headers and pollute title scoring.
 
     # ----- 11) Outline assembly and validation gate ---------------------
-    outline_nodes = assemble_outline(doc, section_openers)
-    # Validate the assembled outline. Structured outlines must cover enough
-    # chapters; unstructured outlines are filtered by density gap.
+    outline_nodes = assemble_outline(doc, section_openers, title_winner.output_slot if title_winner is not None else ())
+    if title_winner is not None:
+        outline_nodes = _group_first_document(doc, title_winner, outline_nodes)
+    # Validate the assembled outline. One with three or more References
+    # headings, as in collected articles, is kept as it is; other outlines
+    # are filtered by density gap.
     # The abstract/references signal rides along with this gate: it is False on
     # the valid-outline branch, and on the other branch it is read off the
     # possibly-emptied list once the density filter has run.
     if is_outline_valid(doc, outline_nodes):
-        if not is_chapter_outline_valid(doc, outline_nodes):
-            outline_nodes = []
         has_abstract_or_references = False
     else:
         mark_outline_block_types(outline_nodes)

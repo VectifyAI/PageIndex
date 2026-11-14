@@ -361,25 +361,3 @@ def is_outline_valid(doc, item_list: list[OutlineNode]) -> bool:
             return False
         last_page = line
     return True
-
-
-def is_chapter_outline_valid(doc, item_list: list[OutlineNode]) -> bool:
-    """Secondary validity check based on chapter count and inter-chapter span."""
-    chapters = 0
-    span = 0
-    previous = -1
-    for chapter_outline_node in item_list:
-        chapter_page = chapter_outline_node.heading.page.page_index
-        if previous >= 0:
-            span += chapter_page - previous
-            previous = -1
-        if chapter_outline_node.heading.type == 8:
-            chapters += 1
-            previous = chapter_page
-    if previous >= 0:
-        span += len(doc.primary_slot) - previous + 1
-    return (
-        chapters >= 3
-        and span >= 0.7 * len(doc.primary_slot)
-        and span / max(1, chapters) < 100
-    )
