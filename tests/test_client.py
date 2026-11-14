@@ -3274,6 +3274,23 @@ def test_retry_waits_as_the_server_asks(headers, wait):
                for i in range(retry.INDEX_RETRIES)) > 60
 
 
+def test_retry_waits_until_the_date_the_server_names(monkeypatch):
+    """Retry-After may name an HTTP-date instead of seconds (RFC 9110), as the
+    official SDKs read it: the wait runs until that date, within the same
+    0-60 s bound; a date already past, or too far off, falls back to backoff."""
+    from email.utils import formatdate
+    from pageindex import retry
+    now = 1_800_000_000
+    monkeypatch.setattr("time.time", lambda: now)
+    def at(offset):
+        return httpx.Headers({"retry-after": formatdate(now + offset, usegmt=True)})
+    assert retry.retry_after(at(20)) == 20
+    assert retry.delay(3, at(20), retry.INDEX_MAX_DELAY) == 20
+    assert retry.retry_after(at(-20)) is None
+    assert retry.retry_after(at(90)) is None
+    assert retry.retry_after(httpx.Headers({"retry-after": "soon"})) is None
+
+
 @pytest.mark.parametrize("make, calls, slept", [
     (lambda: _LLMError(429, {"retry-after": "7"}), 10, [7] * 9),
     (lambda: _LLMError(500, cause=ValueError("Missing credentials")), 1, []),
