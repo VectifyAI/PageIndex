@@ -35,28 +35,43 @@ def extract_nodes_from_markdown(markdown_content):
     code_block_pattern = r'^```'
     node_list = []
     
+    # Setext underline: `===` (level 1) or `---` (level 2) under paragraph text.
+    setext_pattern = r'^ {0,3}(=+|-+)[ \t]*$'
     lines = markdown_content.split('\n')
     in_code_block = False
-    
+    front_matter_end = _front_matter_end(lines)
+    paragraph = []  # (line_num, text) of the paragraph lines seen so far
+
     for line_num, line in enumerate(lines, 1):
         stripped_line = line.strip()
         
         # Check for code block delimiters (triple backticks)
         if re.match(code_block_pattern, stripped_line):
             in_code_block = not in_code_block
+            paragraph = []
             continue
         
         # Skip empty lines
         if not stripped_line:
+            paragraph = []
             continue
         
         # Only look for headers when not inside a code block
         if not in_code_block:
+            setext_match = re.match(setext_pattern, line)
+            if setext_match and paragraph and line_num > front_matter_end:
+                title = ' '.join(text for _, text in paragraph)
+                level = 1 if setext_match.group(1)[0] == '=' else 2
+                node_list.append({'node_title': title, 'line_num': paragraph[0][0], 'level': level})
+                paragraph = []
+                continue
+
             match = re.match(header_pattern, stripped_line)
             if match:
                 title = match.group(2).strip()
                 level = len(match.group(1))
                 node_list.append({'node_title': title, 'line_num': line_num, 'level': level})
+                paragraph = []
                 continue
 
             bold_match = re.match(bold_heading_pattern, stripped_line)
@@ -64,6 +79,15 @@ def extract_nodes_from_markdown(markdown_content):
                 title = bold_match.group(1).strip()
                 if title:
                     node_list.append({'node_title': title, 'line_num': line_num, 'level': 1})
+                    paragraph = []
+                    continue
+
+            # Only plain paragraph text can carry a setext underline: not a
+            # list item, quote, table row or indented code.
+            if re.match(r'^( {4,}|\t)|^\s*([-*+>|]|\d+[.)])(\s|$)', line):
+                paragraph = []
+            else:
+                paragraph.append((line_num, stripped_line))
 
     return node_list, lines
 
@@ -86,7 +110,31 @@ def extract_node_text_content(node_list, markdown_lines):
             end_line = len(markdown_lines)
         
         node['text'] = '\n'.join(markdown_lines[start_line:end_line]).strip()    
+
+    # Text before the first heading (or a file with no headings) belongs to no
+    # section. Keep it as a Preface node, as the PDF paths do, instead of
+    # dropping it from the tree.
+    preface_start = _front_matter_end(markdown_lines)
+    preface_end = all_nodes[0]['line_num'] - 1 if all_nodes else len(markdown_lines)
+    preface = '\n'.join(markdown_lines[preface_start:preface_end]).strip()
+    if preface:
+        all_nodes.insert(0, {
+            'title': 'Preface',
+            'line_num': preface_start + 1,
+            'level': all_nodes[0]['level'] if all_nodes else 1,
+            'text': preface,
+        })
     return all_nodes
+
+
+def _front_matter_end(markdown_lines):
+    """Index of the first line after a leading YAML front matter block, else 0."""
+    if not markdown_lines or markdown_lines[0].strip() != '---':
+        return 0
+    for i in range(1, len(markdown_lines)):
+        if markdown_lines[i].strip() in ('---', '...'):
+            return i + 1
+    return 0
 
 def update_node_list_with_text_token_count(node_list, model=None):
 
