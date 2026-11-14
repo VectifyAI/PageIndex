@@ -46,20 +46,23 @@ def exit_code_in_forked_child(check, timeout=5):
     return os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
 
 
-def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"):
+def build_pdf(page_texts, font="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", inherited_box=None):
     """Build a minimal, uncompressed PDF (one line per page, a page's
     (x, y, size, text) lines, or a page's raw content stream as bytes, in
-    ``font``, Helvetica by default) whose text PyPDF2 can extract. Returns
-    the PDF file bytes."""
+    ``font``, Helvetica by default) whose text PyPDF2 can extract; with
+    ``inherited_box`` ("[0 0 595 842]") the pages inherit their MediaBox from
+    the page tree. Returns the PDF file bytes."""
     n = len(page_texts)
     objects = []
     kids = " ".join(f"{3 + i} 0 R" for i in range(n))
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
-    objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {n} >>".encode())
+    tree_box = f" /MediaBox {inherited_box}" if inherited_box else ""
+    objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {n}{tree_box} >>".encode())
     font_obj = 3 + 2 * n
+    page_box = "" if inherited_box else "/MediaBox [0 0 612 792] "
     for i in range(n):
         objects.append(
-            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"<< /Type /Page /Parent 2 0 R {page_box}"
             f"/Resources << /Font << /F1 {font_obj} 0 R >> >> "
             f"/Contents {3 + n + i} 0 R >>".encode()
         )

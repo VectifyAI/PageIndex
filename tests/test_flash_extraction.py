@@ -23,9 +23,13 @@ def test_read_bookmarks_same_on_pdfium_4_and_5():
     pdf = Path(__file__).parent.parent / "examples" / "documents" / "attention-residuals.pdf"
     bookmarks = read_bookmarks(str(pdf))
     assert len(bookmarks) == 22
-    assert bookmarks[0] == {"title": "Introduction", "level": 1, "page": 2}
+    assert bookmarks[0] == {"title": "Introduction", "level": 1, "page": 2,
+                            "x": pytest.approx(0.1176, abs=1e-4),
+                            "y": pytest.approx(0.0909, abs=1e-4)}
     assert bookmarks[2] == {"title": "Training Deep Networks via Residuals",
-                            "level": 2, "page": 3}
+                            "level": 2, "page": 3,
+                            "x": pytest.approx(0.1176, abs=1e-4),
+                            "y": pytest.approx(0.2003, abs=1e-4)}
 
 
 @pytest.mark.skipif(int(version("pypdfium2").split(".")[0]) < 5,
@@ -147,6 +151,18 @@ def test_rtl_chars_ignore_code_widths(tmp_path):
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(build_pdf(["xyba z"], font=_helvetica(widths, hebrew)))
     assert extract_toc(str(pdf))["page_texts"] == ["xy \u05d0\u05d1 z"]
+
+
+def test_text_above_letter_height_on_an_inherited_a4_page_is_kept(tmp_path):
+    """A page without a CropBox shows its whole MediaBox, inherited A4 included,
+    so a header above US-Letter's 792 pt stays on the page."""
+    from conftest import build_pdf
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(build_pdf([[(72, 815, 10, "Running header"), (72, 700, 12, "Body")]],
+                              inherited_box="[0 0 595 842]"))
+    assert extract_toc(str(pdf))["page_texts"] == ["Running header\nBody"]
 
 
 def test_composite_font_widths_read_both_w_forms():
@@ -705,6 +721,171 @@ def test_landscape_deck_is_structured(tmp_path):
     assert result["toc_source"] == "detected"
 
 
+def _placed_pdf(pages):
+    """Uncompressed A4 PDF; ``pages`` is a list of pages, each a list of ``(x, y, size, bold, text)`` lines."""
+    objs = {1: "<</Type/Catalog/Pages 2 0 R>>", 3: "<</Font<</F1 5 0 R/F3 6 0 R>>>>",
+            5: "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>",
+            6: "<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>"}
+    kids, nxt = [], 7
+    for lines in pages:
+        stream = "".join(f"BT /{'F3' if bold else 'F1'} {size} Tf {x} {y} Td ({text}) Tj ET\n"
+                         for x, y, size, bold, text in lines)
+        objs[nxt] = f"<</Length {len(stream)}>>\nstream\n{stream}endstream"
+        objs[nxt + 1] = f"<</Type/Page/MediaBox[0 0 595 842]/Resources 3 0 R/Parent 2 0 R/Contents {nxt} 0 R>>"
+        kids.append(nxt + 1)
+        nxt += 2
+    objs[2] = f"<</Type/Pages/Count {len(kids)}/Kids[{' '.join(f'{k} 0 R' for k in kids)}]>>"
+    out, offsets = bytearray(b"%PDF-1.7\n"), {}
+    for num in sorted(objs):
+        offsets[num] = len(out)
+        out += f"{num} 0 obj\n{objs[num]}\nendobj\n".encode("latin-1")
+    xref = len(out)
+    out += f"xref\n0 {nxt}\n0000000000 65535 f \n".encode()
+    for num in range(1, nxt):
+        out += (f"{offsets[num]:010d} 00000 n \n" if num in offsets else "0000000000 65535 f \n").encode()
+    out += f"trailer\n<</Size {nxt}/Root 1 0 R>>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+SECTION_NAMES = ["Chain rule", "Conditional independence", "Graphical models", "Graph terminology",
+                 "Directed models", "Naive Bayes", "Markov models", "Medical diagnosis"]
+
+
+def _book_pdf(heading):
+    """Four pages of two sections each: ``heading(page, section, name, y)`` gives a section's heading lines,
+    and eight lines of body text follow from x=140."""
+    pages = []
+    for page in range(1, 5):
+        lines, y = [], 780
+        for section, name in enumerate(SECTION_NAMES[2 * page - 2:2 * page], 1):
+            lines += heading(page, section, name, y)
+            lines += [(140, y - 8 - 14 * n, 10, False, f"Body line {n} of section {page}.{section} with enough "
+                       "words to read as running text here.") for n in range(1, 9)]
+            y -= 150
+        pages.append(lines)
+    return _placed_pdf(pages)
+
+
+def test_section_numbers_hanging_in_the_margin_stay_with_their_headings(tmp_path):
+    """Numbers set apart in the left margin are no column of their own, however long ("10.2.1")."""
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "book.pdf"
+    pdf.write_bytes(_book_pdf(lambda page, section, name, y: [
+        (60, y, 14, True, f"10.{page}.{section}"), (140, y, 14, True, name)]))
+    # page 1 is spent on the document title, as on any title page
+    assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == [
+        f"10.{page}.{section} {name}" for page in range(2, 5)
+        for section, name in enumerate(SECTION_NAMES[2 * page - 2:2 * page], 1)]
+
+
+@pytest.mark.parametrize("chapter", [7, 21])
+def test_section_number_of_four_parts_is_read_past_twenty(tmp_path, chapter):
+    """A long book's later chapters number their sections "21.2.1.1": no quantity, however large its first part."""
+    from pageindex.flash.main import extract_toc
+
+    pdf = tmp_path / "book.pdf"
+    pdf.write_bytes(_book_pdf(lambda page, section, name, y: [
+        (140, y, 10, True, f"{chapter}.{page}.{section}.1 {name}")]))  # bold at the body's size
+    assert [node["title"] for node in extract_toc(str(pdf))["structure"]] == [
+        f"{chapter}.{page}.{section}.1 {name}" for page in range(1, 5)
+        for section, name in enumerate(SECTION_NAMES[2 * page - 2:2 * page], 1)][1:]
+
+
+def _children_by_title(pdf_path):
+    from pageindex.flash.main import extract_toc
+
+    return {node["title"]: [child["title"] for child in node.get("nodes") or []]
+            for node in extract_toc(str(pdf_path))["structure"]}
+
+
+@pytest.mark.parametrize("pages, parent, children", [
+    # the plain print starts further left where a page sets the two one above the other: it is the shallower,
+    # on the page holding an item alone too
+    ([(110, "Group {}", 140, "Item {}")] * 4 + [(None, None, 140, "Late item")], "Group 4", ["Item 4", "Late item"]),
+    # most pages decide
+    ([(110, "Group {}", 140, "Item {}"), (170, "Group {}", 140, "Item {}")] + [(110, "Group {}", 140, "Item {}")] * 2,
+     "Group 2", ["Item 2"]),
+    # a numbered heading takes its depth from its number, not from where its print starts
+    ([(110, "Group {}", 140, "Item {}")] * 3 + [(110, "Group {}", 140, "7.1 Numbered")], "Group 4", []),
+    # no page tells them apart, and bold outranks plain: both start alike,
+    ([(140, "Group {}", 140, "Item {}")] * 4, "Item 1", ["Group 2"]),
+    # or a hair apart,
+    ([(137, "Group {}", 140, "Item {} with a longer name")] * 4, "Item 1 with a longer name", ["Group 2"]),
+    # or one is centred over the other,
+    ([(91, "Group {} of the book", 140, "Item {}")] * 4, "Item 1", ["Group 2 of the book"]),
+    # or centred on the page
+    ([(140, "Group {} of the big book", 262, "Middle {}")] * 3 + [(140, "Group {}", 140, "Item {}")],
+     "Middle 3", ["Group 4", "Item 4"]),
+])
+def test_bold_and_plain_prints_that_score_alike_rank_by_where_the_document_sets_them(tmp_path, pages, parent, children):
+    """A 14pt bold heading and a 15pt plain one score alike; the document's pages say which print is the deeper.
+
+    Each page sets a plain heading over a bold one: ``(plain x, plain title, bold x, bold title)``."""
+    def body(y, of):
+        return [(140, y - 8 - 14 * n, 10, False, f"Body line {n} of {of} with enough words to read as running "
+                 "text here.") for n in range(1, 8)]
+
+    lines = [[(140, 700, 24, True, "A Book of Groups")] + body(660, "the title page")]
+    for k, (plain_x, plain, bold_x, bold) in enumerate(pages, 1):
+        if plain is None:
+            lines.append(body(780, f"page {k}") + [(bold_x, 640, 14, True, bold.format(k))] + body(640, f"item {k}"))
+        else:
+            lines.append(body(780, f"page {k}") + [(plain_x, 640, 15, False, plain.format(k))] + body(640, f"group {k}")
+                         + [(bold_x, 500, 14, True, bold.format(k))] + body(500, f"item {k}"))
+    pdf = tmp_path / "book.pdf"
+    pdf.write_bytes(_placed_pdf(lines))
+    assert _children_by_title(pdf)[parent] == children
+
+
+def test_numbered_headings_give_no_evidence_of_where_a_print_starts():
+    """A section number hangs or indents by its own rules: only unnumbered headings vote."""
+    from types import SimpleNamespace
+    from pageindex.flash.outline_assembly.style_context import position_ranks
+
+    page = object()
+
+    def heading(left, right, size, bold, numbering=()):
+        block = SimpleNamespace(dominant_size_cache=float(size), isolated_centered=False, bold_frac=lambda: float(bold),
+                                left_edge=lambda: left, right_edge=lambda: right, center_x=lambda: (left + right) / 2)
+        return SimpleNamespace(group_slot=block, page=page, numbering=list(numbering))
+
+    plain, bold = (15.0, False), (14.0, True)
+    assert position_ranks([heading(110, 200, 15, False), heading(140, 260, 14, True)]) == {
+        (plain, bold): 1, (bold, plain): -1}
+    assert position_ranks([heading(110, 200, 15, False), heading(140, 260, 14, True, numbering=[7, 1])]) == {}
+
+
+def test_prints_in_different_columns_say_nothing_of_rank(tmp_path):
+    """Only headings set one above the other are compared by where they start: a left column's are not left of a right column's."""
+    def column(x, y, of):
+        return [(x, y - 8 - 14 * n, 10, False, f"Body line {n} of {of} with words to read as text.")
+                for n in range(1, 8)]
+
+    pages = [[(140, 700, 24, True, "A Book of Groups")] + column(140, 660, "the title page")]
+    pages += [column(60, 780, f"left {k}") + [(60, 640, 15, False, f"Group {k}")] + column(60, 640, f"group {k}")
+              + column(60, 500, f"more of group {k}") + column(320, 780, f"right {k}")
+              + column(320, 640, f"mid right {k}") + [(320, 500, 14, True, f"Item {k}")]
+              + column(320, 500, f"item {k}") for k in range(1, 5)]
+    pdf = tmp_path / "book.pdf"
+    pdf.write_bytes(_placed_pdf(pages))
+    assert _children_by_title(pdf)["Item 1"] == ["Group 2"]  # bold outranks plain
+
+
+def test_bullet_line_set_like_a_slide_title_is_no_section(tmp_path):
+    """A list item is no heading, and its page stays in the section before it."""
+    from pageindex.flash.main import extract_toc
+
+    titles = DECK_TITLES[:3] + ["\\225 Regional offices"] + DECK_TITLES[3:]  # \225 is WinAnsi's bullet
+    pdf = tmp_path / "deck.pdf"
+    pdf.write_bytes(_layout_pdf(
+        [(title, [f"Detail {n} for slide {slide} with a few more words of body text" for n in range(1, 6)])
+         for slide, title in enumerate(titles, 1)], landscape=True))
+    nodes = extract_toc(str(pdf))["structure"]
+    assert [node["title"] for node in nodes] == DECK_TITLES[1:]
+    assert (nodes[1]["start_index"], nodes[1]["end_index"]) == (3, 4)
+
+
 def test_short_document_headings_are_detected(tmp_path):
     """Three pages of heading-plus-a-line are enough for detection."""
     from pageindex.flash.main import extract_toc
@@ -1071,18 +1252,25 @@ def test_bookmark_title_printed_a_page_after_its_target_is_no_child():
     """A bookmark can target the page before its title is printed: a detected
     heading with exactly the bookmark's title on the next page is the
     bookmark's own heading, not a child of it, while another title there
-    stays a child, and so does one that only ends with the bookmark's title
-    (that looser match counts on the bookmark's own page only)."""
+    stays a child. The title behind numbering there is the bookmark's
+    heading only while the bookmark has none on its own page, or a running
+    header repeating the section number of the one it has; its title
+    carried on with "(Continued)" is the bookmark's too."""
     from pageindex.flash.embedded_toc import merge_bookmark_tree
 
     entries = [{"title": "Overview", "level": 1, "page": 1}, {"title": "Declarations", "level": 1, "page": 5},
-               {"title": "Appendix", "level": 1, "page": 9}]
+               {"title": "Appendix", "level": 1, "page": 9}, {"title": "Findings", "level": 1, "page": 11}]
     detected = [{"title": "Declarations", "start_index": 6, "end_index": 8, "nodes": []},
                 {"title": "Signatures", "start_index": 7, "end_index": 8, "nodes": []},
-                {"title": "A. Appendix", "start_index": 10, "end_index": 10, "nodes": []}]
-    tree = {node["title"]: node for node in merge_bookmark_tree(detected, entries, 10)}
+                {"title": "A. Appendix", "start_index": 10, "end_index": 10, "nodes": []},
+                {"title": "3 Findings", "start_index": 11, "end_index": 11, "nodes": []},
+                {"title": "3. FINDINGS", "start_index": 12, "end_index": 12, "nodes": []},
+                {"title": "Findings (Continued)", "start_index": 12, "end_index": 12, "nodes": []},
+                {"title": "I. Findings", "start_index": 12, "end_index": 12, "nodes": []}]
+    tree = {node["title"]: node for node in merge_bookmark_tree(detected, entries, 12)}
     assert [child["title"] for child in tree["Declarations"]["nodes"]] == ["Signatures"]
-    assert [child["title"] for child in tree["Appendix"]["nodes"]] == ["A. Appendix"]
+    assert tree["Appendix"].get("nodes", []) == []
+    assert [child["title"] for child in tree["Findings"]["nodes"]] == ["I. Findings"]
 
 
 def test_toc_source_is_always_present(tmp_path):

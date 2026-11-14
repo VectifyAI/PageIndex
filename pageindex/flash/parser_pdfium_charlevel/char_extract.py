@@ -399,7 +399,7 @@ def _page_view_rect(page, med_raw=None, crop_raw=None) -> tuple[float, float, fl
     crop = norm(crop_raw)
     if crop is None:
         try:
-            crop = norm(tuple(page.get_cropbox()))
+            crop = norm(page.get_cropbox(fallback_ok=False))  # absent: the MediaBox, not pdfium's US-Letter
         except Exception:
             crop = None
     if crop is None or crop == med:

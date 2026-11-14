@@ -186,8 +186,8 @@ class HierarchyStack:
         self.tertiary_slot = self.tertiary_slot or other_outline_node.heading.is_prominent
 
 
-def find_parent_heading(stack: HierarchyStack, other_heading_candidate: HeadingCandidate) -> Optional[OutlineNode]:
-    """Pop entries from the stack until a parent for the candidate is found."""
+def find_parent_heading(stack: HierarchyStack, other_heading_candidate: HeadingCandidate, ranks: Optional[dict] = None) -> Optional[OutlineNode]:
+    """Pop entries from the stack until a parent for the candidate is found; ``ranks`` is the document's ``position_ranks``."""
     heading: Optional[HeadingCandidate] = None
     while stack.primary_slot:
         stack_outline_node = stack.primary_slot[-1]
@@ -200,7 +200,7 @@ def find_parent_heading(stack: HierarchyStack, other_heading_candidate: HeadingC
             stack.pop()
             heading = state_candidate
             continue
-        cmp = compare_heading_depth(state_candidate, other_heading_candidate, stack.auxiliary_slot)
+        cmp = compare_heading_depth(state_candidate, other_heading_candidate, stack.auxiliary_slot, ranks)
         if cmp != -1:
             if cmp == 1:
                 return stack_outline_node
