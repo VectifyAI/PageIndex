@@ -1161,6 +1161,51 @@ def test_cloud_tool_limits_fail_the_chat(monkeypatch, end):
 
 
 @needs_claude
+def test_chat_drops_boxes_on_pages_never_seen(monkeypatch):
+    import claude_agent_sdk
+    import pageindex.mcp_bridge as mcp_bridge
+    from pageindex import PageIndexCloudClient
+
+    class Bridge:
+        def __init__(self, url, headers):
+            pass
+
+        def list_tools(self):
+            return [{"name": "view_pages", "description": "v",
+                     "inputSchema": {"type": "object", "properties": {}}}]
+
+        def instructions(self):
+            return "GUIDANCE"
+
+        def call_tool(self, name, arguments):
+            return [{"type": "text", "text": json.dumps({
+                "doc_name": "r.pdf", "returned_pages": "2"})},
+                {"type": "image", "mimeType": "image/jpeg", "data": "AAAA"}], False
+    monkeypatch.setattr(mcp_bridge, "McpBridge", Bridge)
+    tools = {}
+
+    def server(**kwargs):
+        tools.update({tool.name: tool for tool in kwargs["tools"]})
+        return {"type": "sdk", "name": kwargs["name"], "instance": None}
+    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", server)
+
+    async def the_model_views_page_2():
+        await tools["view_pages"].handler({})
+    text = ('A <cite doc="r.pdf" page="2" box="0.1,0.2,0.3,0.4"/> '
+            'B <cite doc="r.pdf" page="3" box="0.5,0.6,0.7,0.8"/> <cite doc')
+    expected = text.replace(' box="0.5,0.6,0.7,0.8"', "")
+    said = AssistantMessage(content=[TextBlock(text)], model="haiku")
+    pieces = [delta(text[i:i + 5]) for i in range(0, len(text), 5)]
+    cloud = PageIndexCloudClient(api_key="pi-test-key",
+                                 chat_model="claude-code/haiku")
+    fake_cli(monkeypatch, said, result(text), during=the_model_views_page_2)
+    assert cloud.chat("Q") == expected
+    fake_cli(monkeypatch, *pieces[:-3], said, result(text),
+             during=the_model_views_page_2)
+    assert "".join(cloud.chat("Q", stream=True)) == expected
+
+
+@needs_claude
 def test_chat_max_turns(monkeypatch, chat_client):
     fake_cli(monkeypatch, result(None, is_error=True, subtype="error_max_turns",
                                  usage={"input_tokens": 5, "output_tokens": 7}))

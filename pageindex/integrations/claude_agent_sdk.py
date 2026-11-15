@@ -53,7 +53,8 @@ def build_claude_mcp(client, include_management: bool = False, *,
 
 def tool_server(client, include_management: bool = False, *,
                 server_name: str = "pageindex", doc_ids=None,
-                failures: Optional[list] = None):
+                failures: Optional[list] = None,
+                collection: Optional[str] = None, seen=None):
     """The agent tools as an in-process server in either mode, on cloud
     through the bridge: local as_claude_mcp()'s, and the claude-code/ chat
     engine's, whose system prompt carries the guidance. ``failures``
@@ -87,7 +88,8 @@ def tool_server(client, include_management: bool = False, *,
         return handler
 
     hints: dict = {}  # readOnlyHint lets the CLI run the read tools in parallel
-    specs = _tool_specs(client, include_management, doc_ids, annotations=hints)
+    specs = _tool_specs(client, include_management, doc_ids, annotations=hints,
+                        collection=collection, seen=seen)
     tools = [
         tool(name, description, schema, annotations=ToolAnnotations(
             **(hints.get(name) or {}), maxResultSizeChars=MAX_RESULT_CHARS),

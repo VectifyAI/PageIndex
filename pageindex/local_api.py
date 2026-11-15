@@ -56,16 +56,28 @@ class LocalAPI:
         from .utils import ConfigLoader
         self._config_loader = ConfigLoader()
 
-    def _with_backend(self, usage, func, *args):
+    def _with_backend(self, usage, models, func, *args):
         """Scope the indexing lane's connection overrides and the `usage`
         tally around one operation — runs inside whatever thread
-        run_off_loop picked."""
-        from .utils import _llm_backend, _llm_usage
-        token = _llm_backend.set(self._index_backend)
+        run_off_loop picked. A reasoning effort among the overrides goes to
+        each of `models`, the ones the operation calls, as chosen_effort
+        carries it to that one, or fails first."""
+        from .integrations.claude_agent_sdk import is_claude_code
+        from .utils import _llm_backend, _llm_effort, _llm_usage, chosen_effort
+        backend = self._index_backend
+        effort = (backend or {}).get("reasoning_effort")
+        token = _llm_backend.set(backend)  # chosen_effort reads it
         usage_token = _llm_usage.set(usage)
+        effort_token = None
         try:
+            effort_token = _llm_effort.set({
+                model: chosen_effort(model, effort, name='index_backend["reasoning_effort"]')
+                for model in dict.fromkeys(models)
+                if effort and model and not is_claude_code(model)})
             return func(*args)
         finally:
+            if effort_token is not None:
+                _llm_effort.reset(effort_token)
             _llm_usage.reset(usage_token)
             _llm_backend.reset(token)
 
@@ -78,6 +90,7 @@ class LocalAPI:
         beta_headers: list[str] | None = None,
         folder_id: str | None = None,
         metadata: dict | None = None,
+        collection_id: str | None = None,
     ) -> dict[str, Any]:
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             raise PageIndexAPIError(
@@ -92,6 +105,10 @@ class LocalAPI:
         if folder_id is not None:
             raise PageIndexAPIError(
                 "Failed to submit document: folders are not supported in local mode."
+            )
+        if collection_id is not None:
+            raise PageIndexAPIError(
+                "Failed to submit document: collections are not supported in local mode."
             )
         if metadata is not None:
             if not isinstance(metadata, dict):
@@ -148,12 +165,13 @@ class LocalAPI:
         try:
             if mode == "flash":
                 structure, description = run_off_loop(
-                    self._with_backend, usage, self._index_flash, file_path
+                    self._with_backend, usage, (self._summary_model,),
+                    self._index_flash, file_path
                 )
             else:
                 structure, description = run_off_loop(
-                    self._with_backend, usage, self._index_standard, file_path,
-                    page_texts
+                    self._with_backend, usage, (self._model, self._summary_model),
+                    self._index_standard, file_path, page_texts
                 )
         except PageIndexAPIError:
             raise
@@ -371,6 +389,7 @@ class LocalAPI:
         folder_id: str | None = None,
         name: str | None = None,
         recursive: bool = False,
+        collection_id: str | None = None,
     ) -> dict[str, Any]:
         if limit < 1 or limit > 10000:
             raise ValueError("limit must be between 1 and 10000")
@@ -379,6 +398,10 @@ class LocalAPI:
         if folder_id is not None and folder_id not in ("", "root"):
             raise PageIndexAPIError(
                 "Failed to list documents: folders are not supported in local mode."
+            )
+        if collection_id is not None:
+            raise PageIndexAPIError(
+                "Failed to list documents: collections are not supported in local mode."
             )
         metas = sorted(self._store.list_metas(), key=lambda m: m.get("id") or "")
         metas.sort(key=lambda m: m.get("createdAt") or "", reverse=True)
