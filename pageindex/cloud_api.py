@@ -744,3 +744,189 @@ class CloudAPI:
                 f"Failed to delete metadata schema: {response.text}",
                 status_code=response.status_code)
         return response.json()
+
+    # ---------- SEARCH ----------
+
+    def search_pages(
+        self,
+        doc_id: str,
+        questions: List[str],
+        top_k: Optional[int] = None,
+        include_text: bool = False,
+        start_page: Optional[int] = None,
+        end_page: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Judge each page of a document on how likely it helps answer each question.
+
+        Returns:
+            dict: {"id", "doc_id", "results": [{"question", "pages", "more_pages"}],
+                "failed_pages", "usage", "seconds"}
+        """
+        payload = {"questions": questions, "top_k": top_k, "include_text": include_text,
+                   "start_page": start_page, "end_page": end_page}
+        response = self._http.post(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/page-search/",
+            headers=self._headers(),
+            json={k: v for k, v in payload.items() if v is not None},
+            timeout=300
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to search pages: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def search_documents(
+        self,
+        questions: List[str],
+        document_ids: Optional[List[str]] = None,
+        collection_id: Optional[str] = None,
+        folder_id: Optional[str] = None,
+        recursive: bool = False,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+        top_k: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Judge each document in scope on how likely it holds what answers each question.
+
+        Returns:
+            dict: {"id", "results": [{"question", "documents", "more_documents"}],
+                "failed_documents", "processing_documents", "usage", "seconds"}
+        """
+        payload = {"questions": questions, "document_ids": document_ids,
+                   "collection_id": collection_id, "folder_id": folder_id,
+                   "recursive": recursive, "metadata_filter": metadata_filter, "top_k": top_k}
+        response = self._http.post(
+            f"{self.BASE_URL}/docs/search/",
+            headers=self._headers(),
+            json={k: v for k, v in payload.items() if v is not None},
+            timeout=300
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to search documents: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    # ---------- EXTRACT ----------
+
+    def create_extract(
+        self,
+        configuration: Dict[str, Any],
+        file_path: Optional[str] = None,
+        doc_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Start an extract job on a PDF sent with it (read for this job only, not
+        kept as a document) or on an uploaded document.
+
+        Args:
+            configuration (dict): {"data_schema", "tier", "cite_sources",
+                "target_pages", "system_prompt"}.
+            file_path (str, optional): Path to the PDF file.
+            doc_id (str, optional): Document ID, in place of file_path.
+
+        Returns:
+            dict: The job, pending: {"id", "status", "doc_id", "configuration",
+                "created_at", "updated_at"}
+        """
+        data = {"configuration": json.dumps(configuration)}
+        if file_path is not None:
+            with open(file_path, "rb") as f:
+                response = self._http.post(
+                    f"{self.BASE_URL}/extract/",
+                    headers=self._headers(),
+                    files={'file': (sanitize_filename(Path(file_path).name), f)},
+                    data=data
+                )
+        else:
+            response = self._http.post(
+                f"{self.BASE_URL}/extract/",
+                headers=self._headers(),
+                data={**data, "doc_id": doc_id},
+                timeout=60
+            )
+        if response.status_code != 202:
+            raise PageIndexAPIError(
+                f"Failed to start extract job: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def get_extract(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get an extract job, with its result once completed.
+
+        Returns:
+            dict: {"id", "status", "doc_id", "configuration", "created_at",
+                "updated_at"}; completed: "extract_result", "extract_metadata"
+                and "usage" too; failed: "error_message" too.
+        """
+        response = self._http.get(
+            f"{self.BASE_URL}/extract/{_enc(job_id)}/",
+            headers=self._headers(),
+            timeout=60
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get extract job: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def list_extracts(self, limit: int = 20, after: Optional[str] = None) -> Dict[str, Any]:
+        """
+        List extract jobs, newest first, without their results.
+
+        Returns:
+            dict: {"jobs": [...], "next": the id to pass as after, or None}
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if after is not None:
+            params["after"] = after
+        response = self._http.get(
+            f"{self.BASE_URL}/extracts/",
+            headers=self._headers(),
+            params=params,
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to list extract jobs: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def cancel_extract(self, job_id: str) -> Dict[str, Any]:
+        """
+        Stop an extract job that is pending or running.
+
+        Returns:
+            dict: The job, cancelled.
+        """
+        response = self._http.post(
+            f"{self.BASE_URL}/extract/{_enc(job_id)}/cancel/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to cancel extract job: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def delete_extract(self, job_id: str) -> Dict[str, Any]:
+        """
+        Delete an extract job and its result.
+
+        Returns:
+            dict: {"id": ..., "deleted": True}
+        """
+        response = self._http.delete(
+            f"{self.BASE_URL}/extract/{_enc(job_id)}/",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to delete extract job: {response.text}",
+                status_code=response.status_code)
+        return response.json()
