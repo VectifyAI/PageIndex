@@ -2052,7 +2052,7 @@ def test_search_and_extract_are_cloud_only(local_client):
 @pytest.fixture
 def served(monkeypatch):
     """A cloud client whose requests answers.to(method, path, kw) answers,
-    with a payload or a (status, payload) pair."""
+    with a payload, a (status, payload) pair or a FakeResponse."""
     client = PageIndexClient(api_key="secret")
     calls = []
     class Answers:
@@ -2061,6 +2061,8 @@ def served(monkeypatch):
         path = url.replace("https://api.pageindex.ai", "", 1)
         calls.append({"method": method, "path": path, **kw})
         answer = Answers.to(method, path, kw)
+        if isinstance(answer, FakeResponse):
+            return answer
         status, payload = answer if isinstance(answer, tuple) else (200, answer)
         return FakeResponse(payload, status_code=status, text=json.dumps(payload))
     _patch_requests(monkeypatch, handler)
@@ -2350,6 +2352,108 @@ def test_extract_job_wiring(served):
     with pytest.raises(PageIndexAPIError, match="already completed") as raised:
         client.cancel_extract("ext/1")
     assert raised.value.status_code == 409
+
+
+def test_page_image_gives_the_picture(served):
+    client, calls, answers = served
+    link = "https://files.example/p12.jpg?sig=1"
+    answers.to = lambda method, path, kw: (
+        {"images": [{"page": 12, "url": link}]} if path.startswith("/doc/")
+        else FakeResponse(content=b"PAGE"))
+    assert client.page_image("pi/1", 12) == b"PAGE"
+    assert calls[-1]["path"] == link
+    assert "headers" not in calls[-1]  # the API key stays off the storage link
+
+    answers.to = lambda method, path, kw: FakeResponse(content=b"PART")
+    assert client.page_image("pi/1", 12, box=(0.1, 0.4, 0.9, 0.7)) == b"PART"
+    assert (calls[-1]["method"], calls[-1]["path"]) == ("GET", "/doc/s3/pi%2F1/images/region")
+    assert calls[-1]["params"] == {"page": 12, "box": "0.1,0.4,0.9,0.7"}
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+
+    answers.to = lambda method, path, kw: (422, {"detail": "box fractions are from 0 to 1"})
+    with pytest.raises(PageIndexAPIError, match="box fractions") as raised:
+        client.page_image("pi/1", 12, box=(0.9, 0.4, 0.1, 0.7))
+    assert raised.value.status_code == 422
+
+
+def test_update_document_changes_only_the_keys_named(served):
+    client, calls, answers = served
+    def stored(metadata):
+        answers.to = lambda method, path, kw: (
+            {"id": "pi/1", "metadata": metadata} if method == "GET"
+            else {"doc_id": "pi/1", "metadata": kw["json"]})
+
+    stored({"year": 2024, "draft": True, "team": "a"})
+    assert client.update_document("pi/1", metadata={"year": 2025, "draft": None}) == {
+        "doc_id": "pi/1", "metadata": {"year": 2025, "team": "a"}}
+    assert (calls[-1]["method"], calls[-1]["path"]) == ("PUT", "/doc/pi%2F1/metadata/")
+    assert calls[-1]["json"] == {"year": 2025, "team": "a"}
+
+    stored(None)
+    client.update_document("pi/1", metadata={"year": 2025, "draft": None})
+    assert calls[-1]["json"] == {"year": 2025}
+
+
+def test_list_documents_by_metadata(served, local_client):
+    client, calls, answers = served
+    answers.to = lambda method, path, kw: {"documents": [], "total": 0}
+    wanted = {"year": {"$gte": 2023}}
+    client.list_documents(collection_id="c-1", filter=wanted)
+    assert calls[-1]["params"] == {"limit": 50, "offset": 0, "collection_id": "c-1",
+                                   "metadata_filter": json.dumps(wanted)}
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.list_documents(filter=wanted)
+
+
+def test_wait_document(served, monkeypatch):
+    client, _, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    states = iter(["processing", "completed", "completed"])
+    answers.to = lambda method, path, kw: {"id": "pi-1", "status": next(states)}
+    assert client.wait_document("pi-1") == {"id": "pi-1", "status": "completed"}
+
+    answers.to = lambda method, path, kw: {"id": "pi-1", "status": "failed"}
+    with pytest.raises(PageIndexAPIError, match="processing failed"):
+        client.wait_document("pi-1")
+
+
+def test_wait_document_local_is_ready_at_once(local_client, indexed_doc):
+    assert local_client.wait_document(indexed_doc)["status"] == "completed"
+
+
+def test_wait_extract(served, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    done = {"id": "ext_1", "status": "completed", "extract_result": {"total": 5}}
+    later = iter([{"id": "ext_1", "status": "running"}, done])
+    answers.to = lambda method, path, kw: next(later)
+    assert client.wait_extract("ext_1") == done
+    assert [(c["method"], c["path"]) for c in calls] == [("GET", "/extract/ext_1/")] * 2
+
+    answers.to = lambda method, path, kw: {"id": "ext_1", "status": "cancelled"}
+    with pytest.raises(PageIndexAPIError, match="ext_1 cancelled"):
+        client.wait_extract("ext_1")
+    answers.to = lambda method, path, kw: {"id": "ext_1", "status": "running"}
+    with pytest.raises(PageIndexAPIError, match="still running after"):
+        client.wait_extract("ext_1", timeout=-1)
+
+
+def test_get_collection(served):
+    client, _, answers = served
+    answers.to = lambda method, path, kw: {
+        "collections": [{"id": "c-1", "name": "a"}, {"id": "c-2", "name": "b"}], "total": 2}
+    assert client.get_collection("c-2") == {"id": "c-2", "name": "b"}
+    with pytest.raises(PageIndexAPIError, match="Collection not found: c-3"):
+        client.get_collection("c-3")
+
+
+def test_page_image_metadata_and_waits_are_cloud_only(local_client):
+    for call in (lambda: local_client.page_image("d", 1),
+                 lambda: local_client.update_document("d", metadata={"year": 2025}),
+                 lambda: local_client.get_collection("c"),
+                 lambda: local_client.wait_extract("ext_1")):
+        with pytest.raises(PageIndexAPIError, match="cloud-only"):
+            call()
 
 
 def test_cloud_collection_metadata_schema(cloud):

@@ -7,7 +7,7 @@ import threading
 import time
 import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
-                    Optional, Union, cast, overload)
+                    Optional, Sequence, Union, cast, overload)
 
 from .chat_stream import ChatStream, MessagesStream, ChatObject
 from .errors import PageIndexAPIError
@@ -917,6 +917,16 @@ class PageIndexClient:
             self._wait_until_ready(result["doc_id"])
         return result
 
+    def wait_document(self, doc_id: str, timeout: float = 1800.0) -> dict[str, Any]:
+        """
+        Wait until a document is ready for use, and return it as
+        ``get_document()`` does. Raises PageIndexAPIError if its processing
+        failed, or is not done within ``timeout`` seconds (it goes on in the
+        cloud). A local document is ready at once.
+        """
+        self._wait_until_ready(doc_id, timeout)
+        return self.get_document(doc_id)
+
     def _wait_until_ready(self, doc_id: str, timeout: float = 1800.0) -> None:
         import requests
         interval = 2.0
@@ -1039,6 +1049,32 @@ class PageIndexClient:
             "get_page_image is cloud-only — local mode has no page-image "
             "rendering. Create the client with an api_key to get page images."
         ).get_page_image(doc_id=doc_id, page=page)
+
+    def page_image(self, doc_id: str, page: int,
+                   box: Optional[Sequence[float]] = None) -> bytes:
+        """
+        One page as JPEG bytes: the image itself, where ``get_page_image()``
+        gives a link to it. With ``box``, only that part of the page, drawn
+        sharper, to read small print. Cloud-only: local mode renders no page
+        images.
+
+            crop = client.page_image(doc_id, 12, box=(0.1, 0.4, 0.9, 0.7))
+
+        Args:
+            doc_id (str): Document ID.
+            page (int): 1-based page number.
+            box (sequence of 4 floats, optional): (x0, y0, x1, y1) as
+                fractions of the page's width and height from its top left,
+                each from 0 to 1, with x0 < x1 and y0 < y1. A box the cloud
+                cannot read raises PageIndexAPIError (HTTP 422).
+
+        Returns:
+            bytes: The JPEG.
+        """
+        return self._require_cloud(
+            "page_image is cloud-only — local mode has no page-image "
+            "rendering. Create the client with an api_key to get page images."
+        ).page_image(doc_id=doc_id, page=page, box=box)
 
     def get_document_image(self, doc_id: str, img_id: str) -> str:
         """
@@ -2233,6 +2269,7 @@ class PageIndexClient:
         folder_id: Optional[str] = None,
         recursive: bool = False,
         collection_id: Optional[str] = None,
+        filter: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """
         List documents with pagination, newest first.
@@ -2247,6 +2284,10 @@ class PageIndexClient:
             collection_id (str, optional): Cloud-only: list one collection's
                 documents. Passing ``folder_id`` or ``recursive`` too raises
                 PageIndexAPIError (HTTP 400).
+            filter (dict, optional): Cloud-only: list only the documents
+                whose metadata meets it, e.g. ``{"year": {"$gte": 2023}}``.
+                A key alone is equality; the operators are $eq, $ne, $in,
+                $gt, $gte, $lt, $lte, and $and / $or over a list of filters.
 
         Returns:
             dict: {'documents': [...], 'total', 'limit', 'offset'}.
@@ -2257,9 +2298,42 @@ class PageIndexClient:
         collection, for a folder reached only through a share of
         something below it, and for every local document.
         """
+        if filter is not None:
+            return self._require_cloud(
+                "list_documents(filter=) is cloud-only — metadata filters "
+                "are not supported in local mode. Create the client with an "
+                "api_key to use them."
+            ).list_documents(limit=limit, offset=offset, folder_id=folder_id,
+                             recursive=recursive, collection_id=collection_id,
+                             metadata_filter=filter)
         return self._api.list_documents(limit=limit, offset=offset,
                                         folder_id=folder_id, recursive=recursive,
                                         collection_id=collection_id)
+
+    def update_document(self, doc_id: str, *,
+                        metadata: dict[str, Any]) -> dict[str, Any]:
+        """
+        Set metadata keys on a document: a key set to None is removed, and
+        the keys not named stay. The metadata rules of ``submit_document()``
+        apply: a breach raises PageIndexAPIError (HTTP 400). Cloud-only:
+        local mode raises PageIndexAPIError.
+
+            client.update_document(doc_id, metadata={"year": 2025, "draft": None})
+
+        The client reads the document's metadata, then writes the whole of
+        it back, so of two writers at once the later one wins.
+
+        Returns:
+            dict: {'doc_id', 'metadata'}: the metadata as it now stands.
+        """
+        api = self._require_cloud(
+            "update_document is cloud-only — local mode cannot change a "
+            "document's metadata. Create the client with an api_key to use "
+            "it.")
+        current = api.get_document(doc_id).get("metadata") or {}
+        return api.set_document_metadata(doc_id, {
+            key: value for key, value in {**current, **metadata}.items()
+            if value is not None})
 
     # ---------- AGENT INTEGRATION ----------
 
@@ -2973,6 +3047,22 @@ class PageIndexClient:
             "in local mode. Create the client with an api_key to use them."
         ).list_collections()
 
+    def get_collection(self, collection_id: str) -> dict[str, Any]:
+        """
+        Get one collection, as ``list_collections()`` gives it: {'id',
+        'name', 'description', 'metadata_schema', 'created_at',
+        'document_count'}. Raises PageIndexAPIError if you have no such
+        collection. Cloud-only: local mode raises PageIndexAPIError.
+        """
+        collections = self._require_cloud(
+            "get_collection is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).list_collections()["collections"]
+        for collection in collections:
+            if collection["id"] == collection_id:
+                return collection
+        raise PageIndexAPIError(f"Collection not found: {collection_id}")
+
     def delete_collection(self, collection_id: str) -> dict[str, Any]:
         """
         Delete a collection and every document in it. While one of its
@@ -3375,7 +3465,7 @@ class PageIndexClient:
                 ``timeout`` seconds; raises PageIndexAPIError if it failed or
                 was cancelled, or is not done in time (it goes on running:
                 read it with ``get_extract()``). False returns it at once,
-                pending.
+                pending: ``wait_extract()`` waits for it later.
             timeout (float): Seconds to wait, the document's processing
                 included. Defaults to an hour.
 
@@ -3422,8 +3512,9 @@ class PageIndexClient:
                     raise
                 self._wait_until_ready(document, deadline - time.monotonic())
                 job = api.create_extract(configuration, doc_id=document)
-        if not wait:
-            return job
+        return self._extract_done(api, job, deadline, timeout) if wait else job
+
+    def _extract_done(self, api, job: dict, deadline: float, timeout: float) -> dict:
         while job["status"] in ("pending", "running"):
             if time.monotonic() > deadline:
                 raise PageIndexAPIError(
@@ -3438,6 +3529,19 @@ class PageIndexClient:
                 f"Extract job {job['id']} {job['status']}"
                 + (f": {job['error_message']}" if job.get("error_message") else "."))
         return job
+
+    def wait_extract(self, job_id: str, timeout: float = 3600.0) -> dict[str, Any]:
+        """
+        Wait for an extract job, and return it once it is completed: the
+        dict ``extract()`` returns. Raises PageIndexAPIError if it failed or
+        was cancelled, or is not done within ``timeout`` seconds (it goes on
+        running). Cloud-only: local mode raises PageIndexAPIError.
+        """
+        api = self._require_cloud(
+            "wait_extract is cloud-only — Extract is not supported in local "
+            "mode. Create the client with an api_key to use it.")
+        return self._extract_done(
+            api, api.get_extract(job_id), time.monotonic() + timeout, timeout)
 
     def get_extract(self, job_id: str) -> dict[str, Any]:
         """

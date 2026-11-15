@@ -2,7 +2,7 @@
 import os
 import requests
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union, Iterator
+from typing import Optional, Dict, Any, List, Sequence, Union, Iterator
 import json
 import urllib.parse
 
@@ -185,6 +185,34 @@ class CloudAPI:
             if img.get("page") == page and img.get("url"):
                 return img["url"]
         raise PageIndexAPIError(f"No image URL returned for page {page}.")
+
+    def page_image(self, doc_id: str, page: int, box: Optional[Sequence[float]] = None) -> bytes:
+        """A rendered page as JPEG bytes.
+
+        Args:
+            doc_id (str): Document ID.
+            page (int): 1-based page number.
+            box (sequence of 4 floats, optional): (x0, y0, x1, y1) as fractions
+                of the page from its top left: only that part, drawn sharper.
+
+        Returns:
+            bytes: The JPEG.
+        """
+        if box is None:
+            # a presigned URL: the API key stays off it
+            response = self._http.get(self.get_page_image(doc_id, page), timeout=60)
+        else:
+            response = self._http.get(
+                f"{self.BASE_URL}/doc/s3/{_enc(doc_id)}/images/region",
+                headers=self._headers(),
+                params={"page": page, "box": ",".join(str(v) for v in box)},
+                timeout=60
+            )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get page image: {response.text}",
+                status_code=response.status_code)
+        return response.content
 
     def get_document_image(self, doc_id: str, img_id: str) -> str:
         """Presigned URL for an embedded image extracted during OCR.
@@ -422,6 +450,29 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
+    def set_document_metadata(self, doc_id: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Replace a document's metadata (your own tags) with `metadata`.
+
+        Args:
+            doc_id (str): Document ID.
+            metadata (dict): The whole of the new metadata; {} clears it.
+
+        Returns:
+            dict: {"doc_id": ..., "metadata": ...}
+        """
+        response = self._http.put(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/metadata/",
+            headers=self._headers(),
+            json=metadata,
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to update document metadata: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
     def delete_document(self, doc_id: str) -> Dict[str, Any]:
         """
         Delete a PageIndex document and all its associated data.
@@ -443,7 +494,7 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json() if response.content else {}
 
-    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None, recursive: bool = False, collection_id: Optional[str] = None) -> Dict[str, Any]:
+    def list_documents(self, limit: int = 50, offset: int = 0, folder_id: Optional[str] = None, name: Optional[str] = None, recursive: bool = False, collection_id: Optional[str] = None, metadata_filter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         List all documents for the authenticated user with pagination.
 
@@ -455,6 +506,7 @@ class CloudAPI:
             recursive (bool, optional): Also return documents in descendant folders of folder_id.
                 Defaults to False (direct contents only).
             collection_id (str, optional): Return one collection's documents. Defaults to None.
+            metadata_filter (dict, optional): Return only the documents whose metadata meets it. Defaults to None.
 
         Returns:
             dict: API response containing:
@@ -477,6 +529,8 @@ class CloudAPI:
             params["recursive"] = recursive
         if collection_id is not None:
             params["collection_id"] = collection_id
+        if metadata_filter is not None:
+            params["metadata_filter"] = json.dumps(metadata_filter)
 
         response = self._http.get(
             f"{self.BASE_URL}/docs/",
