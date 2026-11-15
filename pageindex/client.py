@@ -3515,6 +3515,7 @@ class PageIndexClient:
         return self._extract_done(api, job, deadline, timeout) if wait else job
 
     def _extract_done(self, api, job: dict, deadline: float, timeout: float) -> dict:
+        import requests
         while job["status"] in ("pending", "running"):
             if time.monotonic() > deadline:
                 raise PageIndexAPIError(
@@ -3523,7 +3524,15 @@ class PageIndexClient:
                     "it with get_extract(job_id), or stop it with "
                     "cancel_extract(job_id).")
             time.sleep(3)
-            job = api.get_extract(job["id"])
+            try:
+                job = api.get_extract(job["id"])
+            except (PageIndexAPIError, requests.RequestException) as exc:
+                raise PageIndexAPIError(
+                    f"Could not read extract job {job['id']}: {exc}. It may "
+                    "still be running in the cloud — read it with "
+                    "get_extract(job_id), or stop it with "
+                    "cancel_extract(job_id).",
+                    status_code=getattr(exc, "status_code", None)) from exc
         if job["status"] != "completed":
             raise PageIndexAPIError(
                 f"Extract job {job['id']} {job['status']}"

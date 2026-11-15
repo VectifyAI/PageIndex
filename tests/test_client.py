@@ -2327,6 +2327,26 @@ def test_extract_raises_when_the_job_does_not_complete(served, monkeypatch):
     assert raised.value.status_code == 402
 
 
+def test_extract_names_the_job_when_reading_it_fails(served, monkeypatch):
+    import requests
+    client, _, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    def reads(fail):
+        answers.to = lambda method, path, kw: (
+            (202, {"id": "ext_1", "status": "pending"}) if method == "POST"
+            else fail())
+
+    reads(lambda: (502, {"detail": "Bad gateway"}))
+    with pytest.raises(PageIndexAPIError, match="read extract job ext_1") as raised:
+        client.extract("pi-1", {"type": "object"})
+    assert raised.value.status_code == 502
+    def dropped():
+        raise requests.ConnectionError("reset")
+    reads(dropped)
+    with pytest.raises(PageIndexAPIError, match="read extract job ext_1"):
+        client.extract("pi-1", {"type": "object"})
+
+
 def test_extract_job_wiring(served):
     client, calls, answers = served
     sent = lambda: (calls[-1]["method"], calls[-1]["path"])
