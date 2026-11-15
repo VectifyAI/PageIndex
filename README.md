@@ -106,6 +106,23 @@ print(answer)
 
 ### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
 
+For native async **cloud document I/O**, use the separate
+`AsyncPageIndexCloudClient` with `async with` (or `await client.aclose()`).
+It supports `submit_document`, `get_document` (including status), `get_tree`,
+`get_ocr`, `get_page_content`, and `list_documents`, with the synchronous
+methods' response shapes. See [the async document example](examples/async_cloud_documents.py).
+Local indexing, chat, and processing-status polling are outside this initial
+async surface; the existing synchronous clients are unchanged.
+
+Each request has finite connect/read/write/pool timeouts (30 seconds by
+default) and at most two retries. GETs retry transient failures; uploads
+retry only a connection failure before sending or an HTTP 429 refusal.
+A read/write timeout leaves the upload outcome unknown and does not resend it.
+For an overall upload deadline, use `asyncio.wait_for`; processing after the
+upload has its own lifetime. An injected `http_client=httpx.AsyncClient(...)`
+is borrowed and must be closed by its owner. Use one event loop per client,
+and finish or cancel in-flight requests before closing it.
+
 Configure other models, streaming, multi-document search, citations, and more.
 
 ### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)

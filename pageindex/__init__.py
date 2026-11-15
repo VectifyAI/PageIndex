@@ -8,6 +8,7 @@ from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
                     IndexConfig, LocalIndexConfig)
 
 if _TYPE_CHECKING:
+    from .async_cloud import AsyncPageIndexCloudClient
     from .flash import page_index_flash
     from .imaging import highlight_region
     from .page_index_classic import page_index, page_index_main
@@ -16,6 +17,7 @@ if _TYPE_CHECKING:
 
 __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
+    "AsyncPageIndexCloudClient",
     "PageIndexAPIError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
     "ChatProcessOptions", "ChatStream", "MessagesStream", "ChatObject",
@@ -24,6 +26,7 @@ __all__ = [
 ]
 
 _LAZY = {
+    "AsyncPageIndexCloudClient": ".async_cloud",
     "highlight_region": ".imaging",
     "page_index_flash": ".flash",
     "optimize_tree": ".tree_optimize",
