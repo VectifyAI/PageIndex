@@ -185,11 +185,22 @@ _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path",
 _RESERVED_MODE_WORDS = {"hosted", "managed"}
 
 
-def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
+# Page Search's and Page Extract's keys, which work here once their accounts
+# have moved, read only when PAGEINDEX_API_KEY is not set.
+_ENV_KEYS = ("PAGEINDEX_API_KEY", "PAGEINDEX_SEARCH_API_KEY",
+             "PAGEINDEX_EXTRACT_API_KEY")
+
+
+def _env_key() -> Optional[str]:
     # .env support lives in utils' import-time load_dotenv(): load it
     # before the read, or a key in .env is visible only by import order.
     from . import utils  # noqa: F401
-    key = os.environ.get("PAGEINDEX_API_KEY")
+    return next((os.environ[name] for name in _ENV_KEYS
+                 if os.environ.get(name)), None)
+
+
+def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
+    key = _env_key()
     if not key:
         raise PageIndexAPIError(
             f"{spelling} reads the PageIndex API key from the "
@@ -3323,9 +3334,7 @@ class PageIndexCloudClient(PageIndexClient):
     ):
         if index is None:
             if api_key is None:
-                # .env keys arrive via utils' import-time load_dotenv().
-                from . import utils  # noqa: F401
-                api_key = os.environ.get("PAGEINDEX_API_KEY")
+                api_key = _env_key()
             if not api_key:
                 raise PageIndexAPIError(
                     "PageIndexCloudClient requires a PageIndex API key — "

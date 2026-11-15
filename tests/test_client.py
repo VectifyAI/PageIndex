@@ -226,6 +226,19 @@ def test_pinned_class_errors_name_a_reachable_exit():
     assert "mode=" not in str(err.value)
 
 
+def test_a_page_search_or_page_extract_key_in_the_environment_is_read_last(monkeypatch):
+    from pageindex import PageIndexCloudClient
+    monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
+    monkeypatch.setenv("PAGEINDEX_EXTRACT_API_KEY", "pie_live_x")
+    assert PageIndexClient(index="cloud").api_key == "pie_live_x"
+    monkeypatch.setenv("PAGEINDEX_SEARCH_API_KEY", "pis_live_x")
+    assert PageIndexCloudClient().api_key == "pis_live_x"
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(mode="cloud").api_key == "pi-env"
+    # Still never a reason to leave local mode on its own.
+    assert not hasattr(PageIndexClient(), "api_key")
+
+
 def test_mode_words_normalize_like_the_label(monkeypatch):
     monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
     assert PageIndexClient(mode=" Cloud ").api_key == "pi-env"
