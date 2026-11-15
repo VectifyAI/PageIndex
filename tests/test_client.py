@@ -2037,6 +2037,445 @@ def test_cloud_collection_wiring(cloud, sample_pdf):
     assert calls[-1]["params"] == {"limit": 50, "offset": 0, "collection_id": "c/1"}
 
 
+def test_search_and_extract_are_cloud_only(local_client):
+    for call in (lambda: local_client.search("q", document="d"),
+                 lambda: local_client.search_documents("q"),
+                 lambda: local_client.extract("d", {"type": "object"}),
+                 lambda: local_client.get_extract("ext_1"),
+                 local_client.list_extracts,
+                 lambda: local_client.cancel_extract("ext_1"),
+                 lambda: local_client.delete_extract("ext_1")):
+        with pytest.raises(PageIndexAPIError, match="cloud-only"):
+            call()
+
+
+@pytest.fixture
+def served(monkeypatch):
+    """A cloud client whose requests answers.to(method, path, kw) answers,
+    with a payload, a (status, payload) pair or a FakeResponse."""
+    client = PageIndexClient(api_key="secret")
+    calls = []
+    class Answers:
+        to = staticmethod(lambda method, path, kw: {})
+    def handler(method, url, kw):
+        path = url.replace("https://api.pageindex.ai", "", 1)
+        calls.append({"method": method, "path": path, **kw})
+        answer = Answers.to(method, path, kw)
+        if isinstance(answer, FakeResponse):
+            return answer
+        status, payload = answer if isinstance(answer, tuple) else (200, answer)
+        return FakeResponse(payload, status_code=status, text=json.dumps(payload))
+    _patch_requests(monkeypatch, handler)
+    return client, calls, Answers
+
+
+def test_search_one_document(served):
+    client, calls, answers = served
+    info = {"id": "pi/1", "name": "q1.pdf", "pageNum": 20, "folderId": "f-1",
+            "collectionId": None, "metadata": {"year": 2025}, "status": "completed"}
+    pages = [{"page": 4, "relevance": 0.9, "read": "text"}]
+    more = [{"page": 7, "relevance": 0.2, "read": "image"}]
+    usage = {"pages": 20, "questions": 1, "billable_pages": 19, "credits": 0.19,
+             "balance": 99.81}
+    answers.to = lambda method, path, kw: info if method == "GET" else {
+        "id": "srch_1", "doc_id": "pi/1",
+        "results": [{"question": "revenue?", "pages": pages, "more_pages": more}],
+        "failed_pages": [9], "usage": usage, "seconds": 1.2}
+
+    found = client.search("revenue?", document="pi/1", start_page=2, end_page=21)
+
+    assert (calls[-1]["method"], calls[-1]["path"]) == ("POST", "/doc/pi%2F1/page-search/")
+    assert calls[-1]["json"] == {"questions": ["revenue?"], "include_text": False,
+                                 "start_page": 2, "end_page": 21}
+    assert found == {
+        "id": "srch_1",
+        "results": [{"question": "revenue?", "documents": [{
+            "id": "pi/1", "name": "q1.pdf", "pageNum": 20, "folderId": "f-1",
+            "collectionId": None, "metadata": {"year": 2025}, "relevance": None,
+            "pages": pages, "more_pages": more, "failed_pages": [9]}]}],
+        "failed_documents": [],
+        "processing_documents": [],
+        "usage": {"documents": 0, "billable_documents": 0, **usage},
+        "seconds": 1.2,
+    }
+
+
+def _found_document(doc_id, relevance):
+    return {"id": doc_id, "name": f"{doc_id}.pdf", "pageNum": 10, "folderId": None,
+            "collectionId": "c-1", "metadata": None, "relevance": relevance}
+
+
+def _documents_found(first, second):
+    return {"id": "srch_d",
+            "results": [{"question": "q1", "documents": first, "more_documents": []},
+                        {"question": "q2", "documents": second, "more_documents": []}],
+            "failed_documents": ["x"], "processing_documents": ["y"],
+            "usage": {"documents": 4, "questions": 2, "billable_documents": 3,
+                      "credits": 0.12, "balance": 50.0},
+            "seconds": 0.5}
+
+
+def _pages_found(path, kw):
+    doc_id = path.split("/")[2]
+    return {"id": f"srch_{doc_id}", "doc_id": doc_id,
+            "results": [{"question": q, "pages": [{"page": int(q[1]), "relevance": 0.9,
+                                                   "read": "text"}]}
+                        for q in kw["json"]["questions"]],
+            "failed_pages": [], "seconds": 1.0,
+            "usage": {"pages": 10, "questions": len(kw["json"]["questions"]),
+                      "billable_pages": 10, "credits": 0.11, "balance": 49.89}}
+
+
+def test_search_across_documents(served):
+    client, calls, answers = served
+    a, b, c = (_found_document(doc_id, r) for doc_id, r in (("a", 0.9), ("b", 0.8), ("c", 0.7)))
+    judged = _documents_found([a, b, c], [b])
+    def to(method, path, kw):
+        if path == "/docs/search/":
+            return judged
+        if path.startswith("/doc/a/"):
+            return 409, {"detail": "The document's pages are not ready."}
+        return _pages_found(path, kw)
+    answers.to = to
+
+    found = client.search(["q1", "q2"], collection="c-1", filter={"year": 2025},
+                          max_documents=2, top_k=5, include_text=True)
+
+    assert calls[0]["json"] == {"questions": ["q1", "q2"], "collection_id": "c-1",
+                                "recursive": False, "metadata_filter": {"year": 2025}}
+    # each question opens its two most relevant; one both chose is searched once
+    opened = {call["path"]: call["json"] for call in calls[1:]}
+    assert opened == {
+        "/doc/a/page-search/": {"questions": ["q1"], "top_k": 5, "include_text": True},
+        "/doc/b/page-search/": {"questions": ["q1", "q2"], "top_k": 5, "include_text": True},
+    }
+    page = lambda n: [{"page": n, "relevance": 0.9, "read": "text"}]
+    assert found["results"] == [
+        {"question": "q1", "documents": [{**b, "pages": page(1), "failed_pages": []}]},
+        {"question": "q2", "documents": [{**b, "pages": page(2), "failed_pages": []}]},
+    ]
+    assert found["id"] == "srch_d"
+    assert found["failed_documents"] == ["x", "a"]
+    assert found["processing_documents"] == ["y"]
+    assert found["usage"] == {"documents": 4, "billable_documents": 3, "pages": 10,
+                              "billable_pages": 10, "questions": 2, "credits": 0.23,
+                              "balance": 49.89}
+
+    del calls[:]
+    found = client.search(["q1", "q2"], documents=["a", "b"], document_top_k=1)
+    assert calls[0]["json"] == {"questions": ["q1", "q2"], "document_ids": ["a", "b"],
+                                "recursive": False, "top_k": 1}
+    # exactly one a question: q1's is the one that cannot be searched
+    assert [len(item["documents"]) for item in found["results"]] == [0, 1]
+
+
+def test_search_across_documents_raises_what_it_cannot_answer(served):
+    client, _, answers = served
+    judged = _documents_found([_found_document("a", 0.9), _found_document("b", 0.8)], [])
+
+    # out of credits part-way: never an answer with documents missing
+    answers.to = lambda method, path, kw: (
+        judged if path == "/docs/search/"
+        else (402, {"detail": "Insufficient credits."}) if path.startswith("/doc/b/")
+        else _pages_found(path, kw))
+    with pytest.raises(PageIndexAPIError, match="Insufficient credits") as raised:
+        client.search(["q1", "q2"])
+    assert raised.value.status_code == 402
+
+    # no document's pages could be searched
+    answers.to = lambda method, path, kw: (
+        judged if path == "/docs/search/" else (503, {"detail": "try again"}))
+    with pytest.raises(PageIndexAPIError, match="try again") as raised:
+        client.search(["q1", "q2"])
+    assert raised.value.status_code == 503
+
+    # no document likely to answer: nothing to search, and nothing failed
+    answers.to = lambda method, path, kw: _documents_found([], [])
+    assert client.search(["q1", "q2"])["results"] == [
+        {"question": "q1", "documents": []}, {"question": "q2", "documents": []}]
+
+
+def test_search_refuses_arguments_that_do_not_go_together(served):
+    client, calls, _ = served
+    for kwargs in ({"document": "d", "collection": "c"},
+                   {"document": "d", "max_documents": 2},
+                   {"document": "d", "recursive": True},
+                   {"start_page": 2},
+                   {"collection": "c", "end_page": 2},
+                   {"max_documents": 2, "document_top_k": 2},
+                   {"max_documents": 11},
+                   {"document_top_k": 0}):
+        with pytest.raises(PageIndexAPIError):
+            client.search("q", **kwargs)
+    assert calls == []
+
+
+def test_search_documents_wiring(served):
+    client, calls, answers = served
+    answers.to = lambda method, path, kw: {"id": "srch_1", "results": []}
+
+    assert client.search_documents(
+        "q", collection="c-1", filter={"year": 2025}, top_k=5,
+    ) == {"id": "srch_1", "results": []}
+    assert (calls[-1]["method"], calls[-1]["path"]) == ("POST", "/docs/search/")
+    assert calls[-1]["json"] == {"questions": ["q"], "collection_id": "c-1",
+                                 "recursive": False, "metadata_filter": {"year": 2025},
+                                 "top_k": 5}
+
+    client.search_documents(["a", "b"], document_ids=["d1"], folder="f-1", recursive=True)
+    assert calls[-1]["json"] == {"questions": ["a", "b"], "document_ids": ["d1"],
+                                 "folder_id": "f-1", "recursive": True}
+
+    answers.to = lambda method, path, kw: (400, {"detail": "there are more"})
+    with pytest.raises(PageIndexAPIError, match="there are more") as raised:
+        client.search_documents("q")
+    assert raised.value.status_code == 400
+
+
+def test_extract_waits_for_the_result(served, sample_pdf, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    done = {"id": "ext_1", "status": "completed", "extract_result": {"total": 5}}
+    later = iter([{"id": "ext_1", "status": "running"}, done])
+    answers.to = lambda method, path, kw: (
+        (202, {"id": "ext_1", "status": "pending"}) if method == "POST" else next(later))
+    schema = {"type": "object", "properties": {"total": {"type": "number"}}}
+
+    job = client.extract(sample_pdf, schema, pages=(3, 9), cite_sources=True,
+                         system_prompt="Totals in USD.")
+
+    assert job == done
+    assert (calls[0]["method"], calls[0]["path"]) == ("POST", "/extract/")
+    assert calls[0]["files"]["file"][0] == "sample.pdf"
+    assert set(calls[0]["data"]) == {"configuration"}
+    assert json.loads(calls[0]["data"]["configuration"]) == {
+        "data_schema": schema, "tier": "standard", "target_pages": "3-9",
+        "cite_sources": True, "system_prompt": "Totals in USD."}
+    assert [(c["method"], c["path"]) for c in calls[1:]] == [("GET", "/extract/ext_1/")] * 2
+
+
+def test_extract_from_an_uploaded_document(served):
+    client, calls, answers = served
+    answers.to = lambda method, path, kw: (202, {"id": "ext_1", "status": "pending"})
+    class Invoice:
+        @staticmethod
+        def model_json_schema():
+            return {"type": "object", "properties": {"total": {"type": "number"}}}
+
+    job = client.extract("pi-1", Invoice, tier="pro", pages=3, wait=False)
+
+    assert job == {"id": "ext_1", "status": "pending"}
+    assert len(calls) == 1 and "files" not in calls[0]
+    assert calls[0]["data"]["doc_id"] == "pi-1"
+    assert json.loads(calls[0]["data"]["configuration"]) == {
+        "data_schema": Invoice.model_json_schema(), "tier": "pro", "target_pages": "3"}
+
+    with pytest.raises(FileNotFoundError):
+        client.extract("missing.pdf", {"type": "object"})
+    with pytest.raises(PageIndexAPIError, match="JSON Schema"):
+        client.extract("pi-1", "an invoice's total")
+    assert len(calls) == 1
+
+
+def test_extract_waits_for_a_document_still_processing(served, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    not_ready = 409, {"detail": "The document's pages are not ready."}
+    done = {"id": "ext_1", "status": "completed", "extract_result": {}}
+    def serve(*replies):
+        del calls[:]
+        replies = iter(replies)
+        answers.to = lambda method, path, kw: next(replies)
+
+    serve(not_ready, {"status": "processing"}, {"status": "completed"}, (202, done))
+    assert client.extract("pi-1", {"type": "object"}) == done
+    assert [(c["method"], c["path"]) for c in calls] == [
+        ("POST", "/extract/"), ("GET", "/doc/pi-1/metadata/"),
+        ("GET", "/doc/pi-1/metadata/"), ("POST", "/extract/")]
+
+    # without wait, and for a ready document with no pages, the refusal stands
+    serve(not_ready)
+    with pytest.raises(PageIndexAPIError, match="not ready"):
+        client.extract("pi-1", {"type": "object"}, wait=False)
+    serve(not_ready, {"status": "completed"}, not_ready)
+    with pytest.raises(PageIndexAPIError, match="not ready") as raised:
+        client.extract("pi-1", {"type": "object"})
+    assert raised.value.status_code == 409 and len(calls) == 3
+
+
+def test_extract_raises_when_the_job_does_not_complete(served, monkeypatch):
+    client, _, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    def ends(job):
+        answers.to = lambda method, path, kw: (
+            (202, {"id": "ext_1", "status": "pending"}) if method == "POST"
+            else {"id": "ext_1", **job})
+
+    ends({"status": "failed", "error_message": "The PDF has no text."})
+    with pytest.raises(PageIndexAPIError, match="ext_1 failed: The PDF has no text."):
+        client.extract("pi-1", {"type": "object"})
+    ends({"status": "cancelled"})
+    with pytest.raises(PageIndexAPIError, match="ext_1 cancelled"):
+        client.extract("pi-1", {"type": "object"})
+    ends({"status": "running"})
+    with pytest.raises(PageIndexAPIError, match="still pending after"):
+        client.extract("pi-1", {"type": "object"}, timeout=-1)
+
+    answers.to = lambda method, path, kw: (402, {"detail": "Insufficient credits."})
+    with pytest.raises(PageIndexAPIError, match="Insufficient credits") as raised:
+        client.extract("pi-1", {"type": "object"})
+    assert raised.value.status_code == 402
+
+
+def test_extract_names_the_job_when_reading_it_fails(served, monkeypatch):
+    import requests
+    client, _, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    def reads(fail):
+        answers.to = lambda method, path, kw: (
+            (202, {"id": "ext_1", "status": "pending"}) if method == "POST"
+            else fail())
+
+    reads(lambda: (502, {"detail": "Bad gateway"}))
+    with pytest.raises(PageIndexAPIError, match="read extract job ext_1") as raised:
+        client.extract("pi-1", {"type": "object"})
+    assert raised.value.status_code == 502
+    def dropped():
+        raise requests.ConnectionError("reset")
+    reads(dropped)
+    with pytest.raises(PageIndexAPIError, match="read extract job ext_1"):
+        client.extract("pi-1", {"type": "object"})
+
+
+def test_extract_job_wiring(served):
+    client, calls, answers = served
+    sent = lambda: (calls[-1]["method"], calls[-1]["path"])
+
+    answers.to = lambda method, path, kw: {"jobs": [], "next": None}
+    assert client.list_extracts(limit=5, after="ext_0") == {"jobs": [], "next": None}
+    assert sent() == ("GET", "/extracts/")
+    assert calls[-1]["params"] == {"limit": 5, "after": "ext_0"}
+    client.list_extracts()
+    assert calls[-1]["params"] == {"limit": 20}
+
+    answers.to = lambda method, path, kw: {"id": "ext/1", "status": "cancelled"}
+    assert client.get_extract("ext/1") == {"id": "ext/1", "status": "cancelled"}
+    assert sent() == ("GET", "/extract/ext%2F1/")
+    assert client.cancel_extract("ext/1") == {"id": "ext/1", "status": "cancelled"}
+    assert sent() == ("POST", "/extract/ext%2F1/cancel/")
+
+    answers.to = lambda method, path, kw: {"id": "ext/1", "deleted": True}
+    assert client.delete_extract("ext/1") == {"id": "ext/1", "deleted": True}
+    assert sent() == ("DELETE", "/extract/ext%2F1/")
+
+    answers.to = lambda method, path, kw: (409, {"detail": "already completed"})
+    with pytest.raises(PageIndexAPIError, match="already completed") as raised:
+        client.cancel_extract("ext/1")
+    assert raised.value.status_code == 409
+
+
+def test_page_image_gives_the_picture(served):
+    client, calls, answers = served
+    link = "https://files.example/p12.jpg?sig=1"
+    answers.to = lambda method, path, kw: (
+        {"images": [{"page": 12, "url": link}]} if path.startswith("/doc/")
+        else FakeResponse(content=b"PAGE"))
+    assert client.page_image("pi/1", 12) == b"PAGE"
+    assert calls[-1]["path"] == link
+    assert "headers" not in calls[-1]  # the API key stays off the storage link
+
+    answers.to = lambda method, path, kw: FakeResponse(content=b"PART")
+    assert client.page_image("pi/1", 12, box=(0.1, 0.4, 0.9, 0.7)) == b"PART"
+    assert (calls[-1]["method"], calls[-1]["path"]) == ("GET", "/doc/s3/pi%2F1/images/region")
+    assert calls[-1]["params"] == {"page": 12, "box": "0.1,0.4,0.9,0.7"}
+    assert calls[-1]["headers"] == {"api_key": "secret"}
+
+    answers.to = lambda method, path, kw: (422, {"detail": "box fractions are from 0 to 1"})
+    with pytest.raises(PageIndexAPIError, match="box fractions") as raised:
+        client.page_image("pi/1", 12, box=(0.9, 0.4, 0.1, 0.7))
+    assert raised.value.status_code == 422
+
+
+def test_update_document_changes_only_the_keys_named(served):
+    client, calls, answers = served
+    def stored(metadata):
+        answers.to = lambda method, path, kw: (
+            {"id": "pi/1", "metadata": metadata} if method == "GET"
+            else {"doc_id": "pi/1", "metadata": kw["json"]})
+
+    stored({"year": 2024, "draft": True, "team": "a"})
+    assert client.update_document("pi/1", metadata={"year": 2025, "draft": None}) == {
+        "doc_id": "pi/1", "metadata": {"year": 2025, "team": "a"}}
+    assert (calls[-1]["method"], calls[-1]["path"]) == ("PUT", "/doc/pi%2F1/metadata/")
+    assert calls[-1]["json"] == {"year": 2025, "team": "a"}
+
+    stored(None)
+    client.update_document("pi/1", metadata={"year": 2025, "draft": None})
+    assert calls[-1]["json"] == {"year": 2025}
+
+
+def test_list_documents_by_metadata(served, local_client):
+    client, calls, answers = served
+    answers.to = lambda method, path, kw: {"documents": [], "total": 0}
+    wanted = {"year": {"$gte": 2023}}
+    client.list_documents(collection_id="c-1", filter=wanted)
+    assert calls[-1]["params"] == {"limit": 50, "offset": 0, "collection_id": "c-1",
+                                   "metadata_filter": json.dumps(wanted)}
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        local_client.list_documents(filter=wanted)
+
+
+def test_wait_document(served, monkeypatch):
+    client, _, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    states = iter(["processing", "completed", "completed"])
+    answers.to = lambda method, path, kw: {"id": "pi-1", "status": next(states)}
+    assert client.wait_document("pi-1") == {"id": "pi-1", "status": "completed"}
+
+    answers.to = lambda method, path, kw: {"id": "pi-1", "status": "failed"}
+    with pytest.raises(PageIndexAPIError, match="processing failed"):
+        client.wait_document("pi-1")
+
+
+def test_wait_document_local_is_ready_at_once(local_client, indexed_doc):
+    assert local_client.wait_document(indexed_doc)["status"] == "completed"
+
+
+def test_wait_extract(served, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    done = {"id": "ext_1", "status": "completed", "extract_result": {"total": 5}}
+    later = iter([{"id": "ext_1", "status": "running"}, done])
+    answers.to = lambda method, path, kw: next(later)
+    assert client.wait_extract("ext_1") == done
+    assert [(c["method"], c["path"]) for c in calls] == [("GET", "/extract/ext_1/")] * 2
+
+    answers.to = lambda method, path, kw: {"id": "ext_1", "status": "cancelled"}
+    with pytest.raises(PageIndexAPIError, match="ext_1 cancelled"):
+        client.wait_extract("ext_1")
+    answers.to = lambda method, path, kw: {"id": "ext_1", "status": "running"}
+    with pytest.raises(PageIndexAPIError, match="still running after"):
+        client.wait_extract("ext_1", timeout=-1)
+
+
+def test_get_collection(served):
+    client, _, answers = served
+    answers.to = lambda method, path, kw: {
+        "collections": [{"id": "c-1", "name": "a"}, {"id": "c-2", "name": "b"}], "total": 2}
+    assert client.get_collection("c-2") == {"id": "c-2", "name": "b"}
+    with pytest.raises(PageIndexAPIError, match="Collection not found: c-3"):
+        client.get_collection("c-3")
+
+
+def test_page_image_metadata_and_waits_are_cloud_only(local_client):
+    for call in (lambda: local_client.page_image("d", 1),
+                 lambda: local_client.update_document("d", metadata={"year": 2025}),
+                 lambda: local_client.get_collection("c"),
+                 lambda: local_client.wait_extract("ext_1")):
+        with pytest.raises(PageIndexAPIError, match="cloud-only"):
+            call()
+
+
 def test_cloud_collection_metadata_schema(cloud):
     client, calls, _ = cloud
     fields = {"year": {"type": "number"}}
