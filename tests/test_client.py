@@ -2275,6 +2275,32 @@ def test_extract_from_an_uploaded_document(served):
     assert len(calls) == 1
 
 
+def test_extract_waits_for_a_document_still_processing(served, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    not_ready = 409, {"detail": "The document's pages are not ready."}
+    done = {"id": "ext_1", "status": "completed", "extract_result": {}}
+    def serve(*replies):
+        del calls[:]
+        replies = iter(replies)
+        answers.to = lambda method, path, kw: next(replies)
+
+    serve(not_ready, {"status": "processing"}, {"status": "completed"}, (202, done))
+    assert client.extract("pi-1", {"type": "object"}) == done
+    assert [(c["method"], c["path"]) for c in calls] == [
+        ("POST", "/extract/"), ("GET", "/doc/pi-1/metadata/"),
+        ("GET", "/doc/pi-1/metadata/"), ("POST", "/extract/")]
+
+    # without wait, and for a ready document with no pages, the refusal stands
+    serve(not_ready)
+    with pytest.raises(PageIndexAPIError, match="not ready"):
+        client.extract("pi-1", {"type": "object"}, wait=False)
+    serve(not_ready, {"status": "completed"}, not_ready)
+    with pytest.raises(PageIndexAPIError, match="not ready") as raised:
+        client.extract("pi-1", {"type": "object"})
+    assert raised.value.status_code == 409 and len(calls) == 3
+
+
 def test_extract_raises_when_the_job_does_not_complete(served, monkeypatch):
     client, _, answers = served
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)

@@ -3360,8 +3360,8 @@ class PageIndexClient:
         Args:
             document (str): A PDF's path: the file is read for this job only,
                 and not kept as a document. Or the ``doc_id`` of an uploaded
-                document; raises PageIndexAPIError (HTTP 409) while it is
-                still processing.
+                document: one still processing is waited for first, and with
+                ``wait=False`` raises PageIndexAPIError (HTTP 409).
             schema (dict | type): A JSON Schema whose top is an object or an
                 array, or a Pydantic model class.
             tier (str): "standard" (default) or "pro".
@@ -3376,7 +3376,8 @@ class PageIndexClient:
                 was cancelled, or is not done in time (it goes on running:
                 read it with ``get_extract()``). False returns it at once,
                 pending.
-            timeout (float): Seconds to wait. Defaults to an hour.
+            timeout (float): Seconds to wait, the document's processing
+                included. Defaults to an hour.
 
         Returns:
             dict: The job: {'id', 'status', 'doc_id', 'configuration',
@@ -3408,15 +3409,21 @@ class PageIndexClient:
         if system_prompt:
             configuration["system_prompt"] = system_prompt
         document = os.fspath(document)
+        deadline = time.monotonic() + timeout
         if os.path.exists(document):
             job = api.create_extract(configuration, file_path=document)
         elif document.lower().endswith(".pdf"):
             raise FileNotFoundError(document)
         else:
-            job = api.create_extract(configuration, doc_id=document)
+            try:
+                job = api.create_extract(configuration, doc_id=document)
+            except PageIndexAPIError as exc:
+                if not wait or exc.status_code != 409:
+                    raise
+                self._wait_until_ready(document, deadline - time.monotonic())
+                job = api.create_extract(configuration, doc_id=document)
         if not wait:
             return job
-        deadline = time.monotonic() + timeout
         while job["status"] in ("pending", "running"):
             if time.monotonic() > deadline:
                 raise PageIndexAPIError(
