@@ -1960,7 +1960,7 @@ def test_cloud_request_wiring(cloud, sample_pdf):
     assert calls[-1]["url"] == "https://api.pageindex.ai/doc/"
     assert calls[-1]["headers"] == {"api_key": "secret"}
     assert calls[-1]["data"] == {"if_retrieval": True}
-    assert "timeout" not in calls[-1]
+    assert calls[-1]["timeout"] == 600
 
     client.submit_document(sample_pdf, metadata={"project": "alpha"})
     assert calls[-1]["data"]["metadata"] == json.dumps({"project": "alpha"})
