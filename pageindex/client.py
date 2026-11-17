@@ -870,8 +870,7 @@ class PageIndexClient:
             file_path (str): Path to the PDF file.
             mode (str, optional): Local: "flash" (default) or "standard", a
                 full LLM-built tree. Cloud: None (default), standard
-                indexing, or "flash", PageIndex Flash, which builds the
-                tree from the PDF's text layer.
+                indexing, or "flash".
             beta_headers (list[str], optional): Cloud-only beta feature headers.
             folder_id (str, optional): Cloud-only folder (workspace) ID.
             metadata (dict, optional): Your own JSON-serializable tags for the

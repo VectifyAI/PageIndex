@@ -1,4 +1,4 @@
-"""Cloud mode of the PageIndex SDK: the client of the PageIndex Cloud API."""
+"""Cloud mode of the PageIndex SDK, based on the 0.2.8 client."""
 import os
 import requests
 from pathlib import Path
@@ -61,8 +61,7 @@ class CloudAPI:
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): None (default), standard indexing, or "flash", PageIndex
-                Flash, which builds the tree from the PDF's text layer.
+            mode (str, optional): None (default), standard indexing, or "flash".
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
