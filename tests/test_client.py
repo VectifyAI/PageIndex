@@ -2132,7 +2132,7 @@ def test_an_upload_to_search_builds_no_index(searching, sample_pdf, monkeypatch)
     assert len(calls) == 1 and calls[0]["data"] == {"algorithm": "none"}
 
 
-def test_build_index_builds_the_index_of_a_document_stored_without_one(served, monkeypatch):
+def test_build_outline_index_builds_the_index_of_a_document_stored_without_one(served, monkeypatch):
     client, calls, answers = served
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     def serve(*replies):
@@ -2142,31 +2142,32 @@ def test_build_index_builds_the_index_of_a_document_stored_without_one(served, m
     queued = {"doc_id": "pi/1", "index_status": "queued"}
 
     serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"})
-    assert client.build_index("pi/1") == {"doc_id": "pi/1", "index_status": "completed"}
+    assert client.build_outline_index("pi/1") == {"doc_id": "pi/1", "index_status": "completed"}
     assert (calls[0]["method"], calls[0]["path"]) == ("POST", "/doc/pi%2F1/index")
     assert len(calls) == 3
 
     serve(dict(queued))
-    assert client.build_index("pi/1", wait=False)["index_status"] == "queued"
+    assert client.build_outline_index("pi/1", wait=False)["index_status"] == "queued"
     serve(dict(queued), {"index_status": "failed"})
     with pytest.raises(PageIndexAPIError, match="could not be built"):
-        client.build_index("pi/1")
+        client.build_outline_index("pi/1")
     serve(dict(queued))
     with pytest.raises(PageIndexAPIError, match="Timed out"):
-        client.build_index("pi/1", timeout=-1)
+        client.build_outline_index("pi/1", timeout=-1)
     serve((402, {"detail": "Insufficient credits."}))
     with pytest.raises(PageIndexAPIError, match="Insufficient credits") as raised:
-        client.build_index("pi/1")
+        client.build_outline_index("pi/1")
     assert raised.value.status_code == 402
 
 
-def test_get_tree_of_a_document_without_an_index_says_how_to_build_it(served):
+def test_get_tree_of_a_document_without_an_outline_index_says_how_to_build_it(served):
     client, _, answers = served
     answers.to = lambda method, path, kw: {
         "doc_id": "pi-1", "status": "completed", "index_status": "skipped"}
-    with pytest.raises(PageIndexAPIError, match=r"no index.*build_index\(doc_id\)"):
+    with pytest.raises(PageIndexAPIError,
+                       match=r"no outline index.*build_outline_index\(doc_id\)"):
         client.get_tree("pi-1")
-    with pytest.raises(PageIndexAPIError, match="no index"):
+    with pytest.raises(PageIndexAPIError, match="no outline index"):
         client.get_document_structure("pi-1")
 
     answers.to = lambda method, path, kw: {
@@ -2174,9 +2175,9 @@ def test_get_tree_of_a_document_without_an_index_says_how_to_build_it(served):
     assert client.get_tree("pi-1")["index_status"] == "processing"
 
 
-def test_build_index_is_cloud_only(local_client):
-    with pytest.raises(PageIndexAPIError, match="cloud-only"):
-        local_client.build_index("d")
+def test_build_outline_index_is_cloud_only(local_client):
+    with pytest.raises(PageIndexAPIError, match="build_outline_index is cloud-only"):
+        local_client.build_outline_index("d")
 
 
 def test_search_one_document(searching):
