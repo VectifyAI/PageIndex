@@ -269,7 +269,7 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
-    def build_index(self, doc_id: str) -> Dict[str, Any]:
+    def build_outline_index(self, doc_id: str) -> Dict[str, Any]:
         """
         Build the tree of a document stored without one.
 

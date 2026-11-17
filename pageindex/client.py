@@ -1164,8 +1164,9 @@ class PageIndexClient:
         """
         Build the outline index of a cloud document that has none, as one
         uploaded with ``PageSearchClient`` or ``PageExtractClient``;
-        ``get_tree()`` then returns it. Indexing is charged as an upload's
-        is. A document that has its outline index is left as it is.
+        ``get_tree()`` then returns it. Building it is charged, at the price
+        of an upload that builds its index. A document that has its outline
+        index is left as it is.
         Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
@@ -1183,7 +1184,7 @@ class PageIndexClient:
         api = self._require_cloud(
             "build_outline_index is cloud-only — a local document is indexed "
             "when it is submitted.")
-        built = api.build_index(doc_id)
+        built = api.build_outline_index(doc_id)
         deadline = time.monotonic() + timeout
         while wait and built["index_status"] in ("queued", "processing"):
             if time.monotonic() >= deadline:

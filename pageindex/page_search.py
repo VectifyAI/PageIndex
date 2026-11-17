@@ -43,7 +43,7 @@ class PageSearchClient:
     ) -> dict[str, Any]:
         """
         Upload a PDF to search. Its pages are stored and no outline index is
-        built, so no indexing is charged;
+        built, so the upload is charged less than one that builds it;
         ``PageIndexClient.build_outline_index()`` builds one later. Uploading
         the same file to the same place again returns the stored document.
 

@@ -58,8 +58,9 @@ class PageExtractClient:
 
         Args:
             document (str): A PDF's path: the file is uploaded to
-                ``collection`` first, with no outline index built, and
-                uploading the same file again uses the stored document. Or
+                ``collection`` first, with no outline index built (the upload
+                is charged for every page of the file), and uploading the
+                same file again uses the stored document. Or
                 the ``doc_id`` of an uploaded document: one still processing
                 is waited for first, and with ``wait=False`` raises
                 PageIndexAPIError (HTTP 409).
@@ -67,7 +68,8 @@ class PageExtractClient:
                 array, or a Pydantic model class.
             tier (str): "standard" (default) or "pro".
             pages (str | int | tuple, optional): Extract from these pages
-                only, and only they are charged: "3-9", (3, 9) or 3.
+                only, and the extraction is charged for them alone: "3-9",
+                (3, 9) or 3.
             cite_sources (bool): Give the page each list item is on, under
                 'extract_metadata'.
             system_prompt (str, optional): Your own instructions for the
