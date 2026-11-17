@@ -24,14 +24,16 @@ class PageExtractClient:
 
     Args:
         api_key (str, optional): Your PageIndex API key. Defaults to the
-            PAGEINDEX_API_KEY environment variable.
+            PAGEINDEX_API_KEY environment variable, then to
+            PAGEINDEX_EXTRACT_API_KEY, where Page Extract's SDK read its key.
         client (PageIndexClient, optional): A cloud ``PageIndexClient`` to
             work through, in place of ``api_key``.
     """
 
     def __init__(self, api_key: Optional[str] = None, *,
                  client: Optional[PageIndexClient] = None):
-        self.pageindex = _cloud_client(api_key, client, "PageExtractClient")
+        self.pageindex = _cloud_client(api_key, client, "PageExtractClient",
+                                       "PAGEINDEX_EXTRACT_API_KEY")
         self._collections: dict[str, str] = {}
 
     def extract(
