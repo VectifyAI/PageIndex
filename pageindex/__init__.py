@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 from .chat_stream import ChatStream, MessagesStream, ChatObject
 from .client import PageIndexClient, PageIndexCloudClient, PageIndexLocalClient
 from .errors import PageIndexAPIError
+from .page_extract import PageExtractClient
+from .page_search import PageSearchClient
 from .types import (ChatConfig, ChatProcessOptions, CloudIndexConfig,
                     IndexConfig, LocalIndexConfig)
 
@@ -16,6 +18,7 @@ if _TYPE_CHECKING:
 
 __all__ = [
     "PageIndexClient", "PageIndexCloudClient", "PageIndexLocalClient",
+    "PageSearchClient", "PageExtractClient",
     "PageIndexAPIError",
     "IndexConfig", "CloudIndexConfig", "LocalIndexConfig", "ChatConfig",
     "ChatProcessOptions", "ChatStream", "MessagesStream", "ChatObject",
@@ -31,8 +34,9 @@ _LAZY = {
 }
 _SUBMODULES = {"agent_tools", "chat_stream", "client", "cloud_api", "errors",
                "flash", "imaging", "integrations", "local_api", "local_chat",
-               "local_store", "mcp_bridge", "page_index_classic",
-               "page_index_md", "retry", "tree_optimize", "types", "utils"}
+               "local_store", "mcp_bridge", "page_extract", "page_index_classic",
+               "page_index_md", "page_search", "retry", "tree_optimize", "types",
+               "utils"}
 
 
 def __getattr__(name):
