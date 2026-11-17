@@ -61,7 +61,7 @@ class CloudAPI:
 
         Args:
             file_path (str): Path to the PDF file.
-            mode (str, optional): None (default) or "flash".
+            mode (str, optional): None (default), the default cloud pipeline, or "flash".
             beta_headers (List[str], optional): Beta feature headers (e.g., ["block_reference"]
                 to enable block-level content with bounding boxes). Defaults to None.
             folder_id (str, optional): Folder (workspace) ID to assign the document to. Defaults to None.
