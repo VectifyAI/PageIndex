@@ -1184,7 +1184,7 @@ class PageIndexClient:
         api = self._require_cloud(
             "build_outline_index is cloud-only — a local document is indexed "
             "when it is submitted.")
-        built = api.build_index(doc_id)
+        built = api.build_outline_index(doc_id)
         deadline = time.monotonic() + timeout
         while wait and built["index_status"] in ("queued", "processing"):
             if time.monotonic() >= deadline:
