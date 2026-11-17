@@ -14,10 +14,10 @@ class PageSearchClient:
         doc = client.upload("report.pdf")
         client.search("What was revenue in 2024?", document=doc["doc_id"])
 
-    ``upload()`` stores a document's pages and builds no index. The documents
-    are the ones ``PageIndexClient`` and ``PageExtractClient`` see with the
-    same key; ``client.pageindex`` is that ``PageIndexClient``, for listing
-    and deleting them, collections and metadata.
+    ``upload()`` stores a document's pages and builds no outline index. The
+    documents are the ones ``PageIndexClient`` and ``PageExtractClient`` see
+    with the same key; ``client.pageindex`` is that ``PageIndexClient``, for
+    listing and deleting them, collections and metadata.
 
     Args:
         api_key (str, optional): Your PageIndex API key. Defaults to the
@@ -42,10 +42,10 @@ class PageSearchClient:
         timeout: float = 1800.0,
     ) -> dict[str, Any]:
         """
-        Upload a PDF to search. Its pages are stored and no index is built,
-        so no indexing is charged; ``PageIndexClient.build_index()`` builds
-        one later. Uploading the same file to the same place again returns
-        the stored document.
+        Upload a PDF to search. Its pages are stored and no outline index is
+        built, so no indexing is charged;
+        ``PageIndexClient.build_outline_index()`` builds one later. Uploading
+        the same file to the same place again returns the stored document.
 
         Args:
             file_path (str): Path to the PDF file.

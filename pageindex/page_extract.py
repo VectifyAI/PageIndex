@@ -18,9 +18,10 @@ class PageExtractClient:
         job["extract_result"]
 
     A PDF given by its path is uploaded to the "Page Extract" collection,
-    with no index built. The documents are the ones ``PageIndexClient`` and
-    ``PageSearchClient`` see with the same key; ``client.pageindex`` is that
-    ``PageIndexClient``, for listing and deleting them.
+    with no outline index built. The documents are the ones
+    ``PageIndexClient`` and ``PageSearchClient`` see with the same key;
+    ``client.pageindex`` is that ``PageIndexClient``, for listing and
+    deleting them.
 
     Args:
         api_key (str, optional): Your PageIndex API key. Defaults to the
@@ -57,11 +58,11 @@ class PageExtractClient:
 
         Args:
             document (str): A PDF's path: the file is uploaded to
-                ``collection`` first, with no index built, and uploading the
-                same file again uses the stored document. Or the ``doc_id``
-                of an uploaded document: one still processing is waited for
-                first, and with ``wait=False`` raises PageIndexAPIError
-                (HTTP 409).
+                ``collection`` first, with no outline index built, and
+                uploading the same file again uses the stored document. Or
+                the ``doc_id`` of an uploaded document: one still processing
+                is waited for first, and with ``wait=False`` raises
+                PageIndexAPIError (HTTP 409).
             schema (dict | type): A JSON Schema whose top is an object or an
                 array, or a Pydantic model class.
             tier (str): "standard" (default) or "pro".

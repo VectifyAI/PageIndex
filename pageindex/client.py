@@ -1129,16 +1129,17 @@ class PageIndexClient:
             ('summary',) ('text',) 'nodes'} in both modes. Each node's summary
             describes its own pages start_index..end_index; its text is the
             part no child holds, though a parent's may share the page its
-            first child starts on. A cloud document that has no index, as one
-            uploaded with ``PageSearchClient`` or ``PageExtractClient``,
-            raises PageIndexAPIError: ``build_index()`` builds it.
+            first child starts on. A cloud document that has no outline index,
+            as one uploaded with ``PageSearchClient`` or
+            ``PageExtractClient``, raises PageIndexAPIError:
+            ``build_outline_index()`` builds it.
         """
         tree = self._api.get_tree(doc_id=doc_id, node_summary=node_summary,
                                   include_text=include_text)
         if not tree.get("result") and tree.get("index_status") == "skipped":
             raise PageIndexAPIError(
-                f"Document '{doc_id}' has no index (index_status: skipped). "
-                "Build one with build_index(doc_id).")
+                f"Document '{doc_id}' has no outline index (index_status: "
+                "skipped). Build one with build_outline_index(doc_id).")
         if tree.get("result"):
             from .utils import _subtree, remove_fields, unify_tree
             page_count = None
@@ -1158,37 +1159,37 @@ class PageIndexClient:
         """
         return self.get_tree(doc_id, node_summary=True, include_text=False)["result"]
 
-    def build_index(self, doc_id: str, wait: bool = True,
-                    timeout: float = 1800.0) -> dict[str, Any]:
+    def build_outline_index(self, doc_id: str, wait: bool = True,
+                            timeout: float = 1800.0) -> dict[str, Any]:
         """
-        Build the index of a cloud document that has none, as one uploaded
-        with ``PageSearchClient`` or ``PageExtractClient``; ``get_tree()``
-        then returns it. Indexing is charged as an upload's is. A document
-        that has its index is left as it is. Cloud-only: local mode raises
-        PageIndexAPIError.
+        Build the outline index of a cloud document that has none, as one
+        uploaded with ``PageSearchClient`` or ``PageExtractClient``;
+        ``get_tree()`` then returns it. Indexing is charged as an upload's
+        is. A document that has its outline index is left as it is.
+        Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
             doc_id (str): Document ID. One still processing raises
                 PageIndexAPIError (HTTP 409).
-            wait (bool): Return once the index is built (default), up to
-                ``timeout`` seconds; raises PageIndexAPIError if it could not
-                be built or is not done in time (it goes on in the cloud).
-                False returns at once.
+            wait (bool): Return once the outline index is built (default),
+                up to ``timeout`` seconds; raises PageIndexAPIError if it
+                could not be built or is not done in time (it goes on in the
+                cloud). False returns at once.
 
         Returns:
             dict: {'doc_id', 'index_status'}; 'index_status' is "queued",
             "processing" or "completed".
         """
         api = self._require_cloud(
-            "build_index is cloud-only — a local document is indexed when it "
-            "is submitted.")
+            "build_outline_index is cloud-only — a local document is indexed "
+            "when it is submitted.")
         built = api.build_index(doc_id)
         deadline = time.monotonic() + timeout
         while wait and built["index_status"] in ("queued", "processing"):
             if time.monotonic() >= deadline:
                 raise PageIndexAPIError(
-                    f"Timed out after {int(timeout)}s waiting for the index "
-                    f"(doc_id: {doc_id}, index_status: "
+                    f"Timed out after {int(timeout)}s waiting for the outline "
+                    f"index (doc_id: {doc_id}, index_status: "
                     f"{built['index_status']}). It goes on being built in the "
                     "cloud — read get_tree(doc_id)['index_status'].")
             time.sleep(2)
@@ -1196,7 +1197,7 @@ class PageIndexClient:
                 doc_id, include_text=False).get("index_status")
         if wait and built["index_status"] != "completed":
             raise PageIndexAPIError(
-                f"The index could not be built (doc_id: {doc_id}, "
+                f"The outline index could not be built (doc_id: {doc_id}, "
                 f"index_status: {built['index_status']}).")
         return built
 
