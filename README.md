@@ -208,6 +208,24 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
 | [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
 
+### Page Search and Page Extract
+
+The same API key also finds the pages that answer a question ([Page Search](https://docs.pageindex.ai/search/quick-start)) and extracts JSON that fits your schema ([Page Extract](https://docs.pageindex.ai/extract/quick-start)). Their uploads build no tree index:
+
+```python
+from pageindex import PageExtractClient, PageSearchClient
+
+search = PageSearchClient()                    # reads PAGEINDEX_API_KEY
+doc_id = search.upload("report.pdf")["doc_id"]
+print(search.search("What was the 2023 operating margin?", document=doc_id))
+
+extract = PageExtractClient()
+schema = {"type": "object", "properties": {"total": {"type": "number"}}}
+print(extract.extract("invoice.pdf", schema)["extract_result"])
+```
+
+All three clients see the same documents. `PageIndexClient(index="cloud").build_index(doc_id)` builds the tree index of one uploaded without it.
+
 ### More About PageIndex Cloud
 
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
