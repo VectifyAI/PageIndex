@@ -890,39 +890,26 @@ class CloudAPI:
     def create_extract(
         self,
         configuration: Dict[str, Any],
-        file_path: Optional[str] = None,
-        doc_id: Optional[str] = None,
+        doc_id: str,
     ) -> Dict[str, Any]:
         """
-        Start an extract job on a PDF sent with it (read for this job only, not
-        kept as a document) or on an uploaded document.
+        Start an extract job on an uploaded document.
 
         Args:
             configuration (dict): {"data_schema", "tier", "cite_sources",
                 "target_pages", "system_prompt"}.
-            file_path (str, optional): Path to the PDF file.
-            doc_id (str, optional): Document ID, in place of file_path.
+            doc_id (str): Document ID.
 
         Returns:
             dict: The job, pending: {"id", "status", "doc_id", "configuration",
                 "created_at", "updated_at"}
         """
-        data = {"configuration": json.dumps(configuration)}
-        if file_path is not None:
-            with open(file_path, "rb") as f:
-                response = self._http.post(
-                    f"{self.BASE_URL}/extract/",
-                    headers=self._headers(),
-                    files={'file': (sanitize_filename(Path(file_path).name), f)},
-                    data=data
-                )
-        else:
-            response = self._http.post(
-                f"{self.BASE_URL}/extract/",
-                headers=self._headers(),
-                data={**data, "doc_id": doc_id},
-                timeout=60
-            )
+        response = self._http.post(
+            f"{self.BASE_URL}/extract/",
+            headers=self._headers(),
+            data={"configuration": json.dumps(configuration), "doc_id": doc_id},
+            timeout=60
+        )
         if response.status_code != 202:
             raise PageIndexAPIError(
                 f"Failed to start extract job: {response.text}",

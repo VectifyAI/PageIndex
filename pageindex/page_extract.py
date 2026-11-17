@@ -72,14 +72,15 @@ class PageExtractClient:
             wait (bool): Return the job once it is completed (default), up to
                 ``timeout`` seconds; raises PageIndexAPIError if it failed or
                 was cancelled, or is not done in time (it goes on running:
-                read it with ``get_extract()``). False returns it at once,
-                pending: ``wait_extract()`` waits for it later.
+                read it with ``get_extract()``). False returns it pending
+                once it starts, a file still uploaded and processed first:
+                ``wait_extract()`` waits for it later.
             timeout (float): Seconds to wait, the document's upload and
                 processing included. Defaults to an hour.
             collection (str, optional): Where a file is uploaded: a
-                collection's name or ID, "Page Extract" by default. A name
-                none of your collections has makes one. None stores the
-                document outside any collection.
+                collection's name (any case) or ID, "Page Extract" by
+                default. A name none of your collections has makes one.
+                None stores the document outside any collection.
 
         Returns:
             dict: The job: {'id', 'status', 'doc_id', 'configuration',
@@ -139,10 +140,12 @@ class PageExtractClient:
             return self._collections.get(collection)
         api = self.pageindex._api
 
+        name = collection.strip().casefold()
+
         def stored():
             return next(
                 (c["id"] for c in api.list_collections()["collections"]
-                 if collection in (c["id"], c["name"])), None)
+                 if c["id"] == collection or c["name"].casefold() == name), None)
 
         found = stored()
         if found is None:
@@ -152,6 +155,11 @@ class PageExtractClient:
                 if exc.status_code != 409:
                     raise
                 found = stored()
+                if found is None:
+                    raise PageIndexAPIError(
+                        f"A collection named like '{collection}' exists, but "
+                        "not by that spelling: pass its exact name or ID.",
+                        status_code=409) from exc
         self._collections[collection] = found
         return found
 

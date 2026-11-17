@@ -2354,6 +2354,8 @@ def test_extract_stores_a_file_in_the_collection_named(extracting, sample_pdf):
         if path == "/collections/":
             return {"collections": stored, "total": len(stored)}
         if path == "/collection/":
+            if kw["json"]["name"] == "Invöices":  # the same name to the cloud's collation
+                return 409, {"detail": "A collection with this name already exists."}
             stored.append({"id": "c-new", "name": kw["json"]["name"]})
             return {"collection": stored[-1]}
         if path == "/doc/":
@@ -2376,6 +2378,13 @@ def test_extract_stores_a_file_in_the_collection_named(extracting, sample_pdf):
     assert stored_in(collection="Invoices") == ["c-1"]
     assert stored_in(collection="c-1") == ["c-1"]
     assert stored_in(collection=None) == [None]
+    # names match in any case, as the cloud keeps them unique
+    assert stored_in(collection=" invoices ") == ["c-1"]
+    # one the cloud says exists but none matches: raise, never upload outside
+    with pytest.raises(PageIndexAPIError, match="exact name") as raised:
+        stored_in(collection="Invöices")
+    assert raised.value.status_code == 409
+    assert not any(c["path"] == "/doc/" for c in calls)
 
 
 def test_extract_finds_its_collection_again_when_the_one_it_knew_is_gone(
