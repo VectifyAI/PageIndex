@@ -17,7 +17,8 @@ import pytest
 
 import pageindex.flash
 import pageindex.utils
-from pageindex import PageIndexClient, PageIndexAPIError
+from pageindex import (PageExtractClient, PageIndexAPIError, PageIndexClient,
+                       PageSearchClient)
 
 page_index_module = importlib.import_module("pageindex.page_index_classic")
 
@@ -223,6 +224,33 @@ def test_pinned_class_errors_name_a_reachable_exit():
     with pytest.raises(PageIndexAPIError) as err:
         PageIndexClient(chat="cloud")
     assert "mode=" not in str(err.value)
+
+
+def test_a_page_search_or_page_extract_key_in_the_environment_is_read_last(monkeypatch):
+    from pageindex import PageIndexCloudClient
+    monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
+    monkeypatch.setenv("PAGEINDEX_EXTRACT_API_KEY", "pie_live_x")
+    assert PageIndexClient(index="cloud").api_key == "pie_live_x"
+    monkeypatch.setenv("PAGEINDEX_SEARCH_API_KEY", "pis_live_x")
+    assert PageIndexCloudClient().api_key == "pis_live_x"
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageIndexClient(mode="cloud").api_key == "pi-env"
+    # Still never a reason to leave local mode on its own.
+    assert not hasattr(PageIndexClient(), "api_key")
+
+
+def test_a_product_s_client_reads_its_own_older_key_before_the_other_s(monkeypatch):
+    # A person's two keys may belong to two accounts.
+    monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
+    monkeypatch.setenv("PAGEINDEX_SEARCH_API_KEY", "pis_live_x")
+    assert PageExtractClient().pageindex.api_key == "pis_live_x"  # the only one set
+    monkeypatch.setenv("PAGEINDEX_EXTRACT_API_KEY", "pie_live_x")
+    assert PageSearchClient().pageindex.api_key == "pis_live_x"
+    assert PageExtractClient().pageindex.api_key == "pie_live_x"
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
+    assert PageSearchClient().pageindex.api_key == "pi-env"
+    assert PageExtractClient().pageindex.api_key == "pi-env"
+    assert PageExtractClient("pi-given").pageindex.api_key == "pi-given"
 
 
 def test_mode_words_normalize_like_the_label(monkeypatch):
@@ -2037,16 +2065,19 @@ def test_cloud_collection_wiring(cloud, sample_pdf):
     assert calls[-1]["params"] == {"limit": 50, "offset": 0, "collection_id": "c/1"}
 
 
-def test_search_and_extract_are_cloud_only(local_client):
-    for call in (lambda: local_client.search("q", document="d"),
-                 lambda: local_client.search_documents("q"),
-                 lambda: local_client.extract("d", {"type": "object"}),
-                 lambda: local_client.get_extract("ext_1"),
-                 local_client.list_extracts,
-                 lambda: local_client.cancel_extract("ext_1"),
-                 lambda: local_client.delete_extract("ext_1")):
-        with pytest.raises(PageIndexAPIError, match="cloud-only"):
-            call()
+@pytest.mark.parametrize("cls", [PageSearchClient, PageExtractClient])
+def test_page_search_and_extract_clients_are_cloud_only(cls, local_client, monkeypatch):
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        cls(client=local_client)
+    with pytest.raises(PageIndexAPIError, match="not both"):
+        cls("secret", client=PageIndexClient(api_key="secret"))
+
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "from-env")
+    assert cls().pageindex._api.api_key == "from-env"
+    assert cls("given").pageindex._api.api_key == "given"
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "")
+    with pytest.raises(PageIndexAPIError, match="API key"):
+        cls()
 
 
 @pytest.fixture
@@ -2069,8 +2100,88 @@ def served(monkeypatch):
     return client, calls, Answers
 
 
-def test_search_one_document(served):
+@pytest.fixture
+def searching(served):
     client, calls, answers = served
+    return PageSearchClient(client=client), calls, answers
+
+
+@pytest.fixture
+def extracting(served):
+    client, calls, answers = served
+    return PageExtractClient(client=client), calls, answers
+
+
+def test_an_upload_to_search_builds_no_index(searching, sample_pdf, monkeypatch):
+    client, calls, answers = searching
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    answers.to = lambda method, path, kw: (
+        {"doc_id": "pi-1", "name": "sample.pdf"} if method == "POST"
+        else {"id": "pi-1", "status": "completed"})
+
+    stored = client.upload(sample_pdf, collection="c-1", metadata={"year": 2025})
+
+    assert stored == {"doc_id": "pi-1", "name": "sample.pdf"}
+    assert (calls[0]["method"], calls[0]["path"]) == ("POST", "/doc/")
+    assert calls[0]["data"] == {"algorithm": "none", "collection_id": "c-1",
+                                "metadata": '{"year": 2025}'}
+    assert [(c["method"], c["path"]) for c in calls[1:]] == [("GET", "/doc/pi-1/metadata/")]
+
+    del calls[:]
+    client.upload(sample_pdf, wait=False)
+    assert len(calls) == 1 and calls[0]["data"] == {"algorithm": "none"}
+
+
+def test_build_outline_index_builds_the_index_of_a_document_stored_without_one(served, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    def serve(*replies):
+        del calls[:]
+        replies = iter(replies)
+        answers.to = lambda method, path, kw: next(replies)
+    queued = {"doc_id": "pi/1", "index_status": "queued"}
+
+    serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"})
+    assert client.build_outline_index("pi/1") == {"doc_id": "pi/1", "index_status": "completed"}
+    assert (calls[0]["method"], calls[0]["path"]) == ("POST", "/doc/pi%2F1/index")
+    assert len(calls) == 3
+
+    serve(dict(queued))
+    assert client.build_outline_index("pi/1", wait=False)["index_status"] == "queued"
+    serve(dict(queued), {"index_status": "failed"})
+    with pytest.raises(PageIndexAPIError, match="could not be built"):
+        client.build_outline_index("pi/1")
+    serve(dict(queued))
+    with pytest.raises(PageIndexAPIError, match="Timed out"):
+        client.build_outline_index("pi/1", timeout=-1)
+    serve((402, {"detail": "Insufficient credits."}))
+    with pytest.raises(PageIndexAPIError, match="Insufficient credits") as raised:
+        client.build_outline_index("pi/1")
+    assert raised.value.status_code == 402
+
+
+def test_get_tree_of_a_document_without_an_outline_index_says_how_to_build_it(served):
+    client, _, answers = served
+    answers.to = lambda method, path, kw: {
+        "doc_id": "pi-1", "status": "completed", "index_status": "skipped"}
+    with pytest.raises(PageIndexAPIError,
+                       match=r"no outline index.*build_outline_index\(doc_id\)"):
+        client.get_tree("pi-1")
+    with pytest.raises(PageIndexAPIError, match="no outline index"):
+        client.get_document_structure("pi-1")
+
+    answers.to = lambda method, path, kw: {
+        "doc_id": "pi-1", "status": "completed", "index_status": "processing"}
+    assert client.get_tree("pi-1")["index_status"] == "processing"
+
+
+def test_build_outline_index_is_cloud_only(local_client):
+    with pytest.raises(PageIndexAPIError, match="build_outline_index is cloud-only"):
+        local_client.build_outline_index("d")
+
+
+def test_search_one_document(searching):
+    client, calls, answers = searching
     info = {"id": "pi/1", "name": "q1.pdf", "pageNum": 20, "folderId": "f-1",
             "collectionId": None, "metadata": {"year": 2025}, "status": "completed"}
     pages = [{"page": 4, "relevance": 0.9, "read": "text"}]
@@ -2126,8 +2237,8 @@ def _pages_found(path, kw):
                       "billable_pages": 10, "credits": 0.11, "balance": 49.89}}
 
 
-def test_search_across_documents(served):
-    client, calls, answers = served
+def test_search_across_documents(searching):
+    client, calls, answers = searching
     a, b, c = (_found_document(doc_id, r) for doc_id, r in (("a", 0.9), ("b", 0.8), ("c", 0.7)))
     judged = _documents_found([a, b, c], [b])
     def to(method, path, kw):
@@ -2169,8 +2280,8 @@ def test_search_across_documents(served):
     assert [len(item["documents"]) for item in found["results"]] == [0, 1]
 
 
-def test_search_across_documents_raises_what_it_cannot_answer(served):
-    client, _, answers = served
+def test_search_across_documents_raises_what_it_cannot_answer(searching):
+    client, _, answers = searching
     judged = _documents_found([_found_document("a", 0.9), _found_document("b", 0.8)], [])
 
     # out of credits part-way: never an answer with documents missing
@@ -2195,8 +2306,8 @@ def test_search_across_documents_raises_what_it_cannot_answer(served):
         {"question": "q1", "documents": []}, {"question": "q2", "documents": []}]
 
 
-def test_search_refuses_arguments_that_do_not_go_together(served):
-    client, calls, _ = served
+def test_search_refuses_arguments_that_do_not_go_together(searching):
+    client, calls, _ = searching
     for kwargs in ({"document": "d", "collection": "c"},
                    {"document": "d", "max_documents": 2},
                    {"document": "d", "recursive": True},
@@ -2212,8 +2323,8 @@ def test_search_refuses_arguments_that_do_not_go_together(served):
 
 @pytest.mark.parametrize("parameter", ["max_documents", "document_top_k"])
 @pytest.mark.parametrize("value", [1.5, 2.0, True, False, "2", [], {}, 0, 11])
-def test_search_rejects_non_integer_document_limits_before_request(served, parameter, value):
-    client, calls, answers = served
+def test_search_rejects_non_integer_document_limits_before_request(searching, parameter, value):
+    client, calls, answers = searching
     answers.to = lambda method, path, kw: (
         _documents_found([_found_document("a", 0.9)], [])
         if path == "/docs/search/" else _pages_found(path, kw))
@@ -2228,8 +2339,8 @@ def test_search_rejects_non_integer_document_limits_before_request(served, param
 
 @pytest.mark.parametrize("parameter", ["max_documents", "document_top_k"])
 @pytest.mark.parametrize("value", [1, 10])
-def test_search_accepts_integer_document_limit_boundaries(served, parameter, value):
-    client, calls, answers = served
+def test_search_accepts_integer_document_limit_boundaries(searching, parameter, value):
+    client, calls, answers = searching
     answers.to = lambda method, path, kw: _documents_found([], [])
 
     assert client.search(["q1", "q2"], **{parameter: value})["results"] == [
@@ -2241,8 +2352,8 @@ def test_search_accepts_integer_document_limit_boundaries(served, parameter, val
         assert "top_k" not in calls[0]["json"]
 
 
-def test_search_documents_wiring(served):
-    client, calls, answers = served
+def test_search_documents_wiring(searching):
+    client, calls, answers = searching
     answers.to = lambda method, path, kw: {"id": "srch_1", "results": []}
 
     assert client.search_documents(
@@ -2263,30 +2374,107 @@ def test_search_documents_wiring(served):
     assert raised.value.status_code == 400
 
 
-def test_extract_waits_for_the_result(served, sample_pdf, monkeypatch):
-    client, calls, answers = served
+def test_extract_uploads_a_file_without_an_index_and_waits_for_the_result(
+        extracting, sample_pdf, monkeypatch):
+    client, calls, answers = extracting
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     done = {"id": "ext_1", "status": "completed", "extract_result": {"total": 5}}
     later = iter([{"id": "ext_1", "status": "running"}, done])
-    answers.to = lambda method, path, kw: (
-        (202, {"id": "ext_1", "status": "pending"}) if method == "POST" else next(later))
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": [{"id": "c-9", "name": "Page Extract"}], "total": 1}
+        if path == "/doc/":
+            return {"doc_id": "pi-1", "name": "sample.pdf"}
+        if path == "/doc/pi-1/metadata/":
+            return {"id": "pi-1", "status": "completed"}
+        return (202, {"id": "ext_1", "status": "pending"}) if method == "POST" else next(later)
+    answers.to = to
     schema = {"type": "object", "properties": {"total": {"type": "number"}}}
 
     job = client.extract(sample_pdf, schema, pages=(3, 9), cite_sources=True,
                          system_prompt="Totals in USD.")
 
     assert job == done
-    assert (calls[0]["method"], calls[0]["path"]) == ("POST", "/extract/")
-    assert calls[0]["files"]["file"][0] == "sample.pdf"
-    assert set(calls[0]["data"]) == {"configuration"}
-    assert json.loads(calls[0]["data"]["configuration"]) == {
+    assert [(c["method"], c["path"]) for c in calls] == [
+        ("GET", "/collections/"), ("POST", "/doc/"), ("GET", "/doc/pi-1/metadata/"),
+        ("POST", "/extract/"), ("GET", "/extract/ext_1/"), ("GET", "/extract/ext_1/")]
+    assert calls[1]["files"]["file"][0] == "sample.pdf"
+    assert calls[1]["data"] == {"algorithm": "none", "collection_id": "c-9"}
+    assert "files" not in calls[3] and calls[3]["data"]["doc_id"] == "pi-1"
+    assert json.loads(calls[3]["data"]["configuration"]) == {
         "data_schema": schema, "tier": "standard", "target_pages": "3-9",
         "cite_sources": True, "system_prompt": "Totals in USD."}
-    assert [(c["method"], c["path"]) for c in calls[1:]] == [("GET", "/extract/ext_1/")] * 2
 
 
-def test_extract_from_an_uploaded_document(served):
-    client, calls, answers = served
+def test_extract_stores_a_file_in_the_collection_named(extracting, sample_pdf):
+    client, calls, answers = extracting
+    stored = [{"id": "c-1", "name": "Invoices"}]
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": stored, "total": len(stored)}
+        if path == "/collection/":
+            if kw["json"]["name"] == "Invöices":  # the same name to the cloud's collation
+                return 409, {"detail": "A collection with this name already exists."}
+            stored.append({"id": "c-new", "name": kw["json"]["name"]})
+            return {"collection": stored[-1]}
+        if path == "/doc/":
+            return {"doc_id": "pi-1", "name": "sample.pdf"}
+        if path == "/doc/pi-1/metadata/":
+            return {"id": "pi-1", "status": "completed"}
+        return 202, {"id": "ext_1", "status": "pending"}
+    answers.to = to
+    def stored_in(**where):
+        del calls[:]
+        client.extract(sample_pdf, {"type": "object"}, wait=False, **where)
+        return [c["data"].get("collection_id") for c in calls if c["path"] == "/doc/"]
+
+    # the default collection is made on first use, and found after
+    assert stored_in() == ["c-new"]
+    assert [c["path"] for c in calls].count("/collection/") == 1
+    assert stored_in() == ["c-new"]
+    assert not any(c["path"].startswith("/collection") for c in calls)
+    # a name or an ID of one of yours; None is no collection
+    assert stored_in(collection="Invoices") == ["c-1"]
+    assert stored_in(collection="c-1") == ["c-1"]
+    assert stored_in(collection=None) == [None]
+    # names match in any case, as the cloud keeps them unique
+    assert stored_in(collection=" invoices ") == ["c-1"]
+    # one the cloud says exists but none matches: raise, never upload outside
+    with pytest.raises(PageIndexAPIError, match="exact name") as raised:
+        stored_in(collection="Invöices")
+    assert raised.value.status_code == 409
+    assert not any(c["path"] == "/doc/" for c in calls)
+
+
+def test_extract_finds_its_collection_again_when_the_one_it_knew_is_gone(
+        extracting, sample_pdf):
+    client, calls, answers = extracting
+    stored = [{"id": "c-old", "name": "Page Extract"}]
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": stored, "total": 1}
+        if path == "/doc/":
+            if kw["data"].get("collection_id") != stored[0]["id"]:
+                return 404, {"detail": "Collection not found."}
+            return {"doc_id": "pi-1", "name": "sample.pdf"}
+        if path == "/doc/pi-1/metadata/":
+            return {"id": "pi-1", "status": "completed"}
+        return 202, {"id": "ext_1", "status": "pending"}
+    answers.to = to
+    client.extract(sample_pdf, {"type": "object"}, wait=False)
+    stored[0] = {"id": "c-new", "name": "Page Extract"}
+
+    client.extract(sample_pdf, {"type": "object"}, wait=False)
+
+    assert [c["data"]["collection_id"] for c in calls if c["path"] == "/doc/"] == [
+        "c-old", "c-old", "c-new"]
+    with pytest.raises(PageIndexAPIError, match="Collection not found") as raised:
+        client.extract(sample_pdf, {"type": "object"}, collection=None)
+    assert raised.value.status_code == 404
+
+
+def test_extract_from_an_uploaded_document(extracting):
+    client, calls, answers = extracting
     answers.to = lambda method, path, kw: (202, {"id": "ext_1", "status": "pending"})
     class Invoice:
         @staticmethod
@@ -2308,8 +2496,8 @@ def test_extract_from_an_uploaded_document(served):
     assert len(calls) == 1
 
 
-def test_extract_waits_for_a_document_still_processing(served, monkeypatch):
-    client, calls, answers = served
+def test_extract_waits_for_a_document_still_processing(extracting, monkeypatch):
+    client, calls, answers = extracting
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     not_ready = 409, {"detail": "The document's pages are not ready."}
     done = {"id": "ext_1", "status": "completed", "extract_result": {}}
@@ -2334,8 +2522,8 @@ def test_extract_waits_for_a_document_still_processing(served, monkeypatch):
     assert raised.value.status_code == 409 and len(calls) == 3
 
 
-def test_extract_raises_when_the_job_does_not_complete(served, monkeypatch):
-    client, _, answers = served
+def test_extract_raises_when_the_job_does_not_complete(extracting, monkeypatch):
+    client, _, answers = extracting
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     def ends(job):
         answers.to = lambda method, path, kw: (
@@ -2358,9 +2546,9 @@ def test_extract_raises_when_the_job_does_not_complete(served, monkeypatch):
     assert raised.value.status_code == 402
 
 
-def test_extract_names_the_job_when_reading_it_fails(served, monkeypatch):
+def test_extract_names_the_job_when_reading_it_fails(extracting, monkeypatch):
     import requests
-    client, _, answers = served
+    client, _, answers = extracting
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     def reads(fail):
         answers.to = lambda method, path, kw: (
@@ -2378,8 +2566,8 @@ def test_extract_names_the_job_when_reading_it_fails(served, monkeypatch):
         client.extract("pi-1", {"type": "object"})
 
 
-def test_extract_job_wiring(served):
-    client, calls, answers = served
+def test_extract_job_wiring(extracting):
+    client, calls, answers = extracting
     sent = lambda: (calls[-1]["method"], calls[-1]["path"])
 
     answers.to = lambda method, path, kw: {"jobs": [], "next": None}
@@ -2472,8 +2660,8 @@ def test_wait_document_local_is_ready_at_once(local_client, indexed_doc):
     assert local_client.wait_document(indexed_doc)["status"] == "completed"
 
 
-def test_wait_extract(served, monkeypatch):
-    client, calls, answers = served
+def test_wait_extract(extracting, monkeypatch):
+    client, calls, answers = extracting
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     done = {"id": "ext_1", "status": "completed", "extract_result": {"total": 5}}
     later = iter([{"id": "ext_1", "status": "running"}, done])
@@ -2498,11 +2686,10 @@ def test_get_collection(served):
         client.get_collection("c-3")
 
 
-def test_page_image_metadata_and_waits_are_cloud_only(local_client):
+def test_page_image_and_metadata_are_cloud_only(local_client):
     for call in (lambda: local_client.page_image("d", 1),
                  lambda: local_client.update_document("d", metadata={"year": 2025}),
-                 lambda: local_client.get_collection("c"),
-                 lambda: local_client.wait_extract("ext_1")):
+                 lambda: local_client.get_collection("c")):
         with pytest.raises(PageIndexAPIError, match="cloud-only"):
             call()
 

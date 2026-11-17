@@ -8,6 +8,8 @@ def _llm_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "0")
+    monkeypatch.delenv("PAGEINDEX_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("PAGEINDEX_EXTRACT_API_KEY", raising=False)
 
 
 @pytest.fixture(autouse=True)
