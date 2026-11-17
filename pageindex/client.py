@@ -7,7 +7,7 @@ import threading
 import time
 import warnings
 from typing import (TYPE_CHECKING, Any, Callable, Iterator, Literal, Mapping,
-                    Optional, Union, cast, overload)
+                    Optional, Sequence, Union, cast, overload)
 
 from .chat_stream import ChatStream, MessagesStream, ChatObject
 from .errors import PageIndexAPIError
@@ -185,11 +185,25 @@ _LOCAL_INDEX_KEYS = ("model", "summary_model", "backend", "storage_path",
 _RESERVED_MODE_WORDS = {"hosted", "managed"}
 
 
-def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
+# Page Search's and Page Extract's keys, which work here once their accounts
+# have moved, read only when PAGEINDEX_API_KEY is not set.
+_ENV_KEYS = ("PAGEINDEX_API_KEY", "PAGEINDEX_SEARCH_API_KEY",
+             "PAGEINDEX_EXTRACT_API_KEY")
+
+
+def _env_key(own: Optional[str] = None) -> Optional[str]:
+    """The key the environment gives; of the two older names, ``own`` is
+    read before the other."""
     # .env support lives in utils' import-time load_dotenv(): load it
     # before the read, or a key in .env is visible only by import order.
     from . import utils  # noqa: F401
-    key = os.environ.get("PAGEINDEX_API_KEY")
+    names = (_ENV_KEYS[0], own, *_ENV_KEYS[1:])
+    return next((os.environ[name] for name in names
+                 if name and os.environ.get(name)), None)
+
+
+def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
+    key = _env_key()
     if not key:
         raise PageIndexAPIError(
             f"{spelling} reads the PageIndex API key from the "
@@ -901,21 +915,33 @@ class PageIndexClient:
                 over every call, in the Chat Completions usage shape
                 LiteLLM returns.
         """
-        result = self._api.submit_document(
-            file_path=file_path, mode=mode,
-            beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
-            collection_id=collection_id,
-        )
+        return self._upload(
+            file_path, wait, mode=mode, beta_headers=beta_headers,
+            folder_id=folder_id, metadata=metadata, collection_id=collection_id)
+
+    def _upload(self, file_path: str, wait: bool, timeout: float = 1800.0,
+                **options) -> dict[str, Any]:
+        result = self._api.submit_document(file_path=file_path, **options)
         stored = result.get("name")
         if stored and stored != os.path.basename(file_path):
             warnings.warn(
                 f'Document "{os.path.basename(file_path)}" was stored as '
                 f'"{stored}".',
-                stacklevel=2,
+                stacklevel=3,
             )
         if wait:
-            self._wait_until_ready(result["doc_id"])
+            self._wait_until_ready(result["doc_id"], timeout)
         return result
+
+    def wait_document(self, doc_id: str, timeout: float = 1800.0) -> dict[str, Any]:
+        """
+        Wait until a document is ready for use, and return it as
+        ``get_document()`` does. Raises PageIndexAPIError if its processing
+        failed, or is not done within ``timeout`` seconds (it goes on in the
+        cloud). A local document is ready at once.
+        """
+        self._wait_until_ready(doc_id, timeout)
+        return self.get_document(doc_id)
 
     def _wait_until_ready(self, doc_id: str, timeout: float = 1800.0) -> None:
         import requests
@@ -1040,6 +1066,32 @@ class PageIndexClient:
             "rendering. Create the client with an api_key to get page images."
         ).get_page_image(doc_id=doc_id, page=page)
 
+    def page_image(self, doc_id: str, page: int,
+                   box: Optional[Sequence[float]] = None) -> bytes:
+        """
+        One page as JPEG bytes: the image itself, where ``get_page_image()``
+        gives a link to it. With ``box``, only that part of the page, drawn
+        sharper, to read small print. Cloud-only: local mode renders no page
+        images.
+
+            crop = client.page_image(doc_id, 12, box=(0.1, 0.4, 0.9, 0.7))
+
+        Args:
+            doc_id (str): Document ID.
+            page (int): 1-based page number.
+            box (sequence of 4 floats, optional): (x0, y0, x1, y1) as
+                fractions of the page's width and height from its top left,
+                each from 0 to 1, with x0 < x1 and y0 < y1. A box the cloud
+                cannot read raises PageIndexAPIError (HTTP 422).
+
+        Returns:
+            bytes: The JPEG.
+        """
+        return self._require_cloud(
+            "page_image is cloud-only — local mode has no page-image "
+            "rendering. Create the client with an api_key to get page images."
+        ).page_image(doc_id=doc_id, page=page, box=box)
+
     def get_document_image(self, doc_id: str, img_id: str) -> str:
         """
         A short-lived URL to an image OCR extracted from the document.
@@ -1077,10 +1129,17 @@ class PageIndexClient:
             ('summary',) ('text',) 'nodes'} in both modes. Each node's summary
             describes its own pages start_index..end_index; its text is the
             part no child holds, though a parent's may share the page its
-            first child starts on.
+            first child starts on. A cloud document that has no outline index,
+            as one uploaded with ``PageSearchClient`` or
+            ``PageExtractClient``, raises PageIndexAPIError:
+            ``build_outline_index()`` builds it.
         """
         tree = self._api.get_tree(doc_id=doc_id, node_summary=node_summary,
                                   include_text=include_text)
+        if not tree.get("result") and tree.get("index_status") == "skipped":
+            raise PageIndexAPIError(
+                f"Document '{doc_id}' has no outline index (index_status: "
+                "skipped). Build one with build_outline_index(doc_id).")
         if tree.get("result"):
             from .utils import _subtree, remove_fields, unify_tree
             page_count = None
@@ -1099,6 +1158,48 @@ class PageIndexClient:
             list: Tree nodes with titles, page ranges, and summaries.
         """
         return self.get_tree(doc_id, node_summary=True, include_text=False)["result"]
+
+    def build_outline_index(self, doc_id: str, wait: bool = True,
+                            timeout: float = 1800.0) -> dict[str, Any]:
+        """
+        Build the outline index of a cloud document that has none, as one
+        uploaded with ``PageSearchClient`` or ``PageExtractClient``;
+        ``get_tree()`` then returns it. Indexing is charged as an upload's
+        is. A document that has its outline index is left as it is.
+        Cloud-only: local mode raises PageIndexAPIError.
+
+        Args:
+            doc_id (str): Document ID. One still processing raises
+                PageIndexAPIError (HTTP 409).
+            wait (bool): Return once the outline index is built (default),
+                up to ``timeout`` seconds; raises PageIndexAPIError if it
+                could not be built or is not done in time (it goes on in the
+                cloud). False returns at once.
+
+        Returns:
+            dict: {'doc_id', 'index_status'}; 'index_status' is "queued",
+            "processing" or "completed".
+        """
+        api = self._require_cloud(
+            "build_outline_index is cloud-only — a local document is indexed "
+            "when it is submitted.")
+        built = api.build_index(doc_id)
+        deadline = time.monotonic() + timeout
+        while wait and built["index_status"] in ("queued", "processing"):
+            if time.monotonic() >= deadline:
+                raise PageIndexAPIError(
+                    f"Timed out after {int(timeout)}s waiting for the outline "
+                    f"index (doc_id: {doc_id}, index_status: "
+                    f"{built['index_status']}). It goes on being built in the "
+                    "cloud — read get_tree(doc_id)['index_status'].")
+            time.sleep(2)
+            built["index_status"] = api.get_tree(
+                doc_id, include_text=False).get("index_status")
+        if wait and built["index_status"] != "completed":
+            raise PageIndexAPIError(
+                f"The outline index could not be built (doc_id: {doc_id}, "
+                f"index_status: {built['index_status']}).")
+        return built
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """
@@ -2233,6 +2334,7 @@ class PageIndexClient:
         folder_id: Optional[str] = None,
         recursive: bool = False,
         collection_id: Optional[str] = None,
+        filter: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """
         List documents with pagination, newest first.
@@ -2247,6 +2349,10 @@ class PageIndexClient:
             collection_id (str, optional): Cloud-only: list one collection's
                 documents. Passing ``folder_id`` or ``recursive`` too raises
                 PageIndexAPIError (HTTP 400).
+            filter (dict, optional): Cloud-only: list only the documents
+                whose metadata meets it, e.g. ``{"year": {"$gte": 2023}}``.
+                A key alone is equality; the operators are $eq, $ne, $in,
+                $gt, $gte, $lt, $lte, and $and / $or over a list of filters.
 
         Returns:
             dict: {'documents': [...], 'total', 'limit', 'offset'}.
@@ -2257,9 +2363,42 @@ class PageIndexClient:
         collection, for a folder reached only through a share of
         something below it, and for every local document.
         """
+        if filter is not None:
+            return self._require_cloud(
+                "list_documents(filter=) is cloud-only — metadata filters "
+                "are not supported in local mode. Create the client with an "
+                "api_key to use them."
+            ).list_documents(limit=limit, offset=offset, folder_id=folder_id,
+                             recursive=recursive, collection_id=collection_id,
+                             metadata_filter=filter)
         return self._api.list_documents(limit=limit, offset=offset,
                                         folder_id=folder_id, recursive=recursive,
                                         collection_id=collection_id)
+
+    def update_document(self, doc_id: str, *,
+                        metadata: dict[str, Any]) -> dict[str, Any]:
+        """
+        Set metadata keys on a document: a key set to None is removed, and
+        the keys not named stay. The metadata rules of ``submit_document()``
+        apply: a breach raises PageIndexAPIError (HTTP 400). Cloud-only:
+        local mode raises PageIndexAPIError.
+
+            client.update_document(doc_id, metadata={"year": 2025, "draft": None})
+
+        The client reads the document's metadata, then writes the whole of
+        it back, so of two writers at once the later one wins.
+
+        Returns:
+            dict: {'doc_id', 'metadata'}: the metadata as it now stands.
+        """
+        api = self._require_cloud(
+            "update_document is cloud-only — local mode cannot change a "
+            "document's metadata. Create the client with an api_key to use "
+            "it.")
+        current = api.get_document(doc_id).get("metadata") or {}
+        return api.set_document_metadata(doc_id, {
+            key: value for key, value in {**current, **metadata}.items()
+            if value is not None})
 
     # ---------- AGENT INTEGRATION ----------
 
@@ -2973,6 +3112,22 @@ class PageIndexClient:
             "in local mode. Create the client with an api_key to use them."
         ).list_collections()
 
+    def get_collection(self, collection_id: str) -> dict[str, Any]:
+        """
+        Get one collection, as ``list_collections()`` gives it: {'id',
+        'name', 'description', 'metadata_schema', 'created_at',
+        'document_count'}. Raises PageIndexAPIError if you have no such
+        collection. Cloud-only: local mode raises PageIndexAPIError.
+        """
+        collections = self._require_cloud(
+            "get_collection is cloud-only — collections are not supported "
+            "in local mode. Create the client with an api_key to use them."
+        ).list_collections()["collections"]
+        for collection in collections:
+            if collection["id"] == collection_id:
+                return collection
+        raise PageIndexAPIError(f"Collection not found: {collection_id}")
+
     def delete_collection(self, collection_id: str) -> dict[str, Any]:
         """
         Delete a collection and every document in it. While one of its
@@ -3183,9 +3338,7 @@ class PageIndexCloudClient(PageIndexClient):
     ):
         if index is None:
             if api_key is None:
-                # .env keys arrive via utils' import-time load_dotenv().
-                from . import utils  # noqa: F401
-                api_key = os.environ.get("PAGEINDEX_API_KEY")
+                api_key = _env_key()
             if not api_key:
                 raise PageIndexAPIError(
                     "PageIndexCloudClient requires a PageIndex API key — "
@@ -3232,3 +3385,20 @@ class PageIndexLocalClient(PageIndexClient):
                          retrieve_model=retrieve_model, storage_path=storage_path,
                          index_backend=index_backend, chat_backend=chat_backend,
                          instructions=instructions)
+
+
+def _cloud_client(api_key: Optional[str], client: Optional[PageIndexClient],
+                  name: str, own_key: str) -> PageIndexClient:
+    """The cloud PageIndexClient that a cloud-only client works through.
+    ``own_key`` is the environment variable its product's key was kept in."""
+    if client is None:
+        # Its own product's key before the other's: a person's two keys may
+        # belong to two accounts.
+        return PageIndexCloudClient(
+            api_key if api_key is not None else _env_key(own_key))
+    if api_key is not None:
+        raise PageIndexAPIError(f"{name} takes api_key or client, not both.")
+    client._require_cloud(
+        f"{name} is cloud-only — the client given is in local mode. Pass one "
+        "created with an api_key.")
+    return client

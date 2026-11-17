@@ -14,6 +14,8 @@ def _llm_key(monkeypatch):
     # therefore keep their skip behavior.
     monkeypatch.setenv("PAGEINDEX_TEST_API_KEY", "pi-test-key")
     monkeypatch.setenv("PAGEINDEX_CLAUDE_CODE_WORKFLOW", "0")
+    monkeypatch.delenv("PAGEINDEX_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("PAGEINDEX_EXTRACT_API_KEY", raising=False)
 
 
 @pytest.fixture(autouse=True)
