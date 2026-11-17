@@ -1,4 +1,4 @@
-"""Cloud mode of the PageIndex SDK, based on the 0.2.8 client."""
+"""Cloud mode of the PageIndex SDK: the client of the PageIndex Cloud API."""
 import os
 import requests
 from pathlib import Path
