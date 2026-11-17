@@ -191,12 +191,15 @@ _ENV_KEYS = ("PAGEINDEX_API_KEY", "PAGEINDEX_SEARCH_API_KEY",
              "PAGEINDEX_EXTRACT_API_KEY")
 
 
-def _env_key() -> Optional[str]:
+def _env_key(own: Optional[str] = None) -> Optional[str]:
+    """The key the environment gives; of the two older names, ``own`` is
+    read before the other."""
     # .env support lives in utils' import-time load_dotenv(): load it
     # before the read, or a key in .env is visible only by import order.
     from . import utils  # noqa: F401
-    return next((os.environ[name] for name in _ENV_KEYS
-                 if os.environ.get(name)), None)
+    names = (_ENV_KEYS[0], own, *_ENV_KEYS[1:])
+    return next((os.environ[name] for name in names
+                 if name and os.environ.get(name)), None)
 
 
 def _env_cloud_key(spelling: str, inline: str = "api_key=...") -> str:
@@ -3384,10 +3387,14 @@ class PageIndexLocalClient(PageIndexClient):
 
 
 def _cloud_client(api_key: Optional[str], client: Optional[PageIndexClient],
-                  name: str) -> PageIndexClient:
-    """The cloud PageIndexClient that a cloud-only client works through."""
+                  name: str, own_key: str) -> PageIndexClient:
+    """The cloud PageIndexClient that a cloud-only client works through.
+    ``own_key`` is the environment variable its product's key was kept in."""
     if client is None:
-        return PageIndexCloudClient(api_key)
+        # Its own product's key before the other's: a person's two keys may
+        # belong to two accounts.
+        return PageIndexCloudClient(
+            api_key if api_key is not None else _env_key(own_key))
     if api_key is not None:
         raise PageIndexAPIError(f"{name} takes api_key or client, not both.")
     client._require_cloud(

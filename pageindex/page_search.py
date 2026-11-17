@@ -21,14 +21,16 @@ class PageSearchClient:
 
     Args:
         api_key (str, optional): Your PageIndex API key. Defaults to the
-            PAGEINDEX_API_KEY environment variable.
+            PAGEINDEX_API_KEY environment variable, then to
+            PAGEINDEX_SEARCH_API_KEY, where Page Search's SDK read its key.
         client (PageIndexClient, optional): A cloud ``PageIndexClient`` to
             work through, in place of ``api_key``.
     """
 
     def __init__(self, api_key: Optional[str] = None, *,
                  client: Optional[PageIndexClient] = None):
-        self.pageindex = _cloud_client(api_key, client, "PageSearchClient")
+        self.pageindex = _cloud_client(api_key, client, "PageSearchClient",
+                                       "PAGEINDEX_SEARCH_API_KEY")
 
     def upload(
         self,
