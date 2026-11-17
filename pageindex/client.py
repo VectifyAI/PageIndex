@@ -901,20 +901,22 @@ class PageIndexClient:
                 over every call, in the Chat Completions usage shape
                 LiteLLM returns.
         """
-        result = self._api.submit_document(
-            file_path=file_path, mode=mode,
-            beta_headers=beta_headers, folder_id=folder_id, metadata=metadata,
-            collection_id=collection_id,
-        )
+        return self._upload(
+            file_path, wait, mode=mode, beta_headers=beta_headers,
+            folder_id=folder_id, metadata=metadata, collection_id=collection_id)
+
+    def _upload(self, file_path: str, wait: bool, timeout: float = 1800.0,
+                **options) -> dict[str, Any]:
+        result = self._api.submit_document(file_path=file_path, **options)
         stored = result.get("name")
         if stored and stored != os.path.basename(file_path):
             warnings.warn(
                 f'Document "{os.path.basename(file_path)}" was stored as '
                 f'"{stored}".',
-                stacklevel=2,
+                stacklevel=3,
             )
         if wait:
-            self._wait_until_ready(result["doc_id"])
+            self._wait_until_ready(result["doc_id"], timeout)
         return result
 
     def wait_document(self, doc_id: str, timeout: float = 1800.0) -> dict[str, Any]:
@@ -1113,10 +1115,16 @@ class PageIndexClient:
             ('summary',) ('text',) 'nodes'} in both modes. Each node's summary
             describes its own pages start_index..end_index; its text is the
             part no child holds, though a parent's may share the page its
-            first child starts on.
+            first child starts on. A cloud document that has no index, as one
+            uploaded with ``PageSearchClient`` or ``PageExtractClient``,
+            raises PageIndexAPIError: ``build_index()`` builds it.
         """
         tree = self._api.get_tree(doc_id=doc_id, node_summary=node_summary,
                                   include_text=include_text)
+        if not tree.get("result") and tree.get("index_status") == "skipped":
+            raise PageIndexAPIError(
+                f"Document '{doc_id}' has no index (index_status: skipped). "
+                "Build one with build_index(doc_id).")
         if tree.get("result"):
             from .utils import _subtree, remove_fields, unify_tree
             page_count = None
@@ -1135,6 +1143,48 @@ class PageIndexClient:
             list: Tree nodes with titles, page ranges, and summaries.
         """
         return self.get_tree(doc_id, node_summary=True, include_text=False)["result"]
+
+    def build_index(self, doc_id: str, wait: bool = True,
+                    timeout: float = 1800.0) -> dict[str, Any]:
+        """
+        Build the index of a cloud document that has none, as one uploaded
+        with ``PageSearchClient`` or ``PageExtractClient``; ``get_tree()``
+        then returns it. Indexing is charged as an upload's is. A document
+        that has its index is left as it is. Cloud-only: local mode raises
+        PageIndexAPIError.
+
+        Args:
+            doc_id (str): Document ID. One still processing raises
+                PageIndexAPIError (HTTP 409).
+            wait (bool): Return once the index is built (default), up to
+                ``timeout`` seconds; raises PageIndexAPIError if it could not
+                be built or is not done in time (it goes on in the cloud).
+                False returns at once.
+
+        Returns:
+            dict: {'doc_id', 'index_status'}; 'index_status' is "queued",
+            "processing" or "completed".
+        """
+        api = self._require_cloud(
+            "build_index is cloud-only — a local document is indexed when it "
+            "is submitted.")
+        built = api.build_index(doc_id)
+        deadline = time.monotonic() + timeout
+        while wait and built["index_status"] in ("queued", "processing"):
+            if time.monotonic() >= deadline:
+                raise PageIndexAPIError(
+                    f"Timed out after {int(timeout)}s waiting for the index "
+                    f"(doc_id: {doc_id}, index_status: "
+                    f"{built['index_status']}). It goes on being built in the "
+                    "cloud — read get_tree(doc_id)['index_status'].")
+            time.sleep(2)
+            built["index_status"] = api.get_tree(
+                doc_id, include_text=False).get("index_status")
+        if wait and built["index_status"] != "completed":
+            raise PageIndexAPIError(
+                f"The index could not be built (doc_id: {doc_id}, "
+                f"index_status: {built['index_status']}).")
+        return built
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """
@@ -3188,428 +3238,6 @@ class PageIndexClient:
         ).delete_metadata_schema(folder_id=folder_id,
                                  collection_id=collection_id)
 
-    # ---------- SEARCH ----------
-
-    def search(
-        self,
-        questions: Union[str, list[str]],
-        *,
-        document: Optional[str] = None,
-        documents: Optional[list[str]] = None,
-        collection: Optional[str] = None,
-        folder: Optional[str] = None,
-        recursive: bool = False,
-        filter: Optional[dict[str, Any]] = None,
-        max_documents: Optional[int] = None,
-        document_top_k: Optional[int] = None,
-        top_k: Optional[int] = None,
-        include_text: bool = False,
-        start_page: Optional[int] = None,
-        end_page: Optional[int] = None,
-    ) -> dict[str, Any]:
-        """
-        Ask up to 10 questions. For each, the pages that help answer it,
-        under the documents they are in. Cloud-only: local mode raises
-        PageIndexAPIError.
-
-            client.search(questions, document=doc_id)         # one document's pages
-            client.search(questions, collection=collection_id)  # across documents
-            client.search(questions)                          # across all of yours
-
-        Across documents, the most relevant documents for each question are
-        found first, as ``search_documents()`` finds them, and only their
-        pages are searched: the documents likely to answer, at most
-        ``max_documents``, or exactly ``document_top_k``. Every page searched
-        is charged, and across documents every document judged too.
-
-        Args:
-            questions (str | list[str]): One question, or up to 10.
-            document (str, optional): The document whose pages to search.
-                Raises PageIndexAPIError (HTTP 409) while it is still
-                processing.
-            documents (list[str], optional): Search among these documents.
-            collection (str, optional): Search among a collection's documents,
-                by its ID.
-            folder (str, optional): Search among a folder's documents, by its
-                ID; "root" is the library root.
-            recursive (bool): With ``folder``, the documents of its
-                descendant folders too.
-            filter (dict, optional): Search among the documents whose metadata
-                meets it, e.g. ``{"year": {"$gte": 2023}}``.
-            max_documents (int, optional): Across documents, the most a
-                question's pages are searched in, 1 to 10. Defaults to 3.
-            document_top_k (int, optional): Across documents, search exactly
-                this many for each question, 1 to 10, in place of
-                ``max_documents``.
-            top_k (int, optional): List exactly this many pages of each
-                document. Without it, each lists the pages likely to help,
-                possibly none, and the next most relevant under 'more_pages'.
-            include_text (bool): Give each listed page's text.
-            start_page (int, optional): With ``document``, the first page to
-                search, from 1.
-            end_page (int, optional): With ``document``, the last page to
-                search, included.
-
-        Returns:
-            dict: {'id', 'results', 'failed_documents',
-            'processing_documents', 'usage', 'seconds'}. 'results' has one
-            {'question', 'documents'} for each question, in the order asked.
-            Each document is {'id', 'name', 'pageNum', 'folderId',
-            'collectionId', 'metadata', 'relevance', 'pages', 'more_pages',
-            'failed_pages'}, most relevant first; 'relevance' is 0 to 1, and
-            None for the one you named with ``document``. Each page is
-            {'page', 'relevance', 'read'} ('read' is "text" or "image": how
-            the page was read), with 'text' under ``include_text``.
-            'failed_pages' are the pages that could not be judged, and
-            'failed_documents' the documents that could not be judged or
-            searched: none of these is charged. 'processing_documents' were
-            not ready, and not searched. 'usage' is {'documents',
-            'billable_documents', 'pages', 'billable_pages', 'questions',
-            'credits', 'balance'}: what the search cost and what is left.
-        """
-        api = self._require_cloud(
-            "search is cloud-only — page search is not supported in local "
-            "mode. Create the client with an api_key to use it.")
-        questions = [questions] if isinstance(questions, str) else list(questions)
-        across = recursive or any(value is not None for value in (
-            documents, collection, folder, filter, max_documents, document_top_k))
-
-        def listed(item: dict) -> dict:
-            return {key: item[key] for key in ("pages", "more_pages") if key in item}
-
-        if document is not None:
-            if across:
-                raise PageIndexAPIError(
-                    "search takes document alone, or documents, collection, "
-                    "folder, recursive, filter, max_documents and "
-                    "document_top_k.")
-            info = api.get_document(document)
-            entry = {key: info.get(key) for key in (
-                "id", "name", "pageNum", "folderId", "collectionId", "metadata")}
-            found = api.search_pages(
-                document, questions, top_k=top_k, include_text=include_text,
-                start_page=start_page, end_page=end_page)
-            return {
-                "id": found["id"],
-                "results": [
-                    {"question": item["question"], "documents": [
-                        {**entry, "relevance": None, **listed(item),
-                         "failed_pages": found["failed_pages"]}]}
-                    for item in found["results"]],
-                "failed_documents": [],
-                "processing_documents": [],
-                "usage": {"documents": 0, "billable_documents": 0, **found["usage"]},
-                "seconds": found["seconds"],
-            }
-        if start_page is not None or end_page is not None:
-            raise PageIndexAPIError(
-                "start_page and end_page are for one document: pass document.")
-        if max_documents is not None and document_top_k is not None:
-            raise PageIndexAPIError(
-                "Pass max_documents or document_top_k, not both.")
-        most = next((n for n in (document_top_k, max_documents) if n is not None), 3)
-        if not 1 <= most <= 10:
-            raise PageIndexAPIError(
-                "max_documents and document_top_k are from 1 to 10.")
-
-        started = time.monotonic()
-        judged = api.search_documents(
-            questions, document_ids=documents, collection_id=collection,
-            folder_id=folder, recursive=recursive, metadata_filter=filter,
-            top_k=document_top_k)
-        chosen = [item["documents"][:most] for item in judged["results"]]
-        asked: dict[str, list[int]] = {}
-        for k, found in enumerate(chosen):
-            for doc in found:
-                asked.setdefault(doc["id"], []).append(k)
-
-        def search_pages(doc_id: str):
-            try:
-                return api.search_pages(
-                    doc_id, [questions[k] for k in asked[doc_id]],
-                    top_k=top_k, include_text=include_text)
-            except PageIndexAPIError as exc:
-                if exc.status_code == 402:
-                    raise
-                return exc
-
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            opened = dict(zip(asked, pool.map(search_pages, asked)))
-        done = [s for s in opened.values() if isinstance(s, dict)]
-        errors = [s for s in opened.values() if isinstance(s, PageIndexAPIError)]
-        if errors and not done:
-            raise errors[0]
-        results = []
-        for k, question in enumerate(questions):
-            shown = []
-            for doc in chosen[k]:
-                searched = opened[doc["id"]]
-                if isinstance(searched, dict):
-                    item = searched["results"][asked[doc["id"]].index(k)]
-                    shown.append({**doc, **listed(item),
-                                  "failed_pages": searched["failed_pages"]})
-            results.append({"question": question, "documents": shown})
-        charged = [judged["usage"], *(s["usage"] for s in done)]
-        balances = [u["balance"] for u in charged if u.get("balance") is not None]
-        return {
-            "id": judged["id"],
-            "results": results,
-            "failed_documents": judged["failed_documents"] + [
-                doc_id for doc_id, s in opened.items() if not isinstance(s, dict)],
-            "processing_documents": judged["processing_documents"],
-            "usage": {
-                "documents": judged["usage"]["documents"],
-                "billable_documents": judged["usage"]["billable_documents"],
-                "pages": sum(s["usage"]["pages"] for s in done),
-                "billable_pages": sum(s["usage"]["billable_pages"] for s in done),
-                "questions": len(questions),
-                "credits": round(sum(u["credits"] for u in charged), 6),
-                "balance": min(balances) if balances else None,
-            },
-            "seconds": round(time.monotonic() - started, 2),
-        }
-
-    def search_documents(
-        self,
-        questions: Union[str, list[str]],
-        *,
-        document_ids: Optional[list[str]] = None,
-        collection: Optional[str] = None,
-        folder: Optional[str] = None,
-        recursive: bool = False,
-        filter: Optional[dict[str, Any]] = None,
-        top_k: Optional[int] = None,
-    ) -> dict[str, Any]:
-        """
-        Ask up to 10 questions of your documents. For each, the documents
-        likely to hold the answer, most relevant first; ``search()`` then
-        finds the pages. Every document judged is charged. Cloud-only: local
-        mode raises PageIndexAPIError.
-
-        Args:
-            questions (str | list[str]): One question, or up to 10.
-            document_ids (list[str], optional): Judge only these documents.
-                Without it, every document of yours in scope, up to 1,000;
-                more raises PageIndexAPIError (HTTP 400).
-            collection (str, optional): Judge a collection's documents, by
-                its ID.
-            folder (str, optional): Judge a folder's documents, by its ID;
-                "root" is the library root.
-            recursive (bool): With ``folder``, the documents of its
-                descendant folders too.
-            filter (dict, optional): Judge the documents whose metadata
-                meets it, e.g. ``{"year": {"$gte": 2023}}``.
-            top_k (int, optional): List exactly this many documents for each
-                question. Without it, each lists the documents likely to
-                help, possibly none, and the next most relevant under
-                'more_documents'.
-
-        Returns:
-            dict: {'id', 'results', 'failed_documents',
-            'processing_documents', 'usage', 'seconds'}. 'results' has one
-            {'question', 'documents', 'more_documents'} for each question, in
-            the order asked; each document is {'id', 'name', 'pageNum',
-            'folderId', 'collectionId', 'metadata', 'relevance'}, with
-            'relevance' from 0 to 1. 'failed_documents' could not be judged
-            and are not charged; 'processing_documents' were not ready, and
-            not judged. 'usage' is {'documents', 'questions',
-            'billable_documents', 'credits', 'balance'}.
-        """
-        return self._require_cloud(
-            "search_documents is cloud-only — document search is not "
-            "supported in local mode. Create the client with an api_key to "
-            "use it."
-        ).search_documents(
-            [questions] if isinstance(questions, str) else list(questions),
-            document_ids=document_ids, collection_id=collection,
-            folder_id=folder, recursive=recursive, metadata_filter=filter,
-            top_k=top_k)
-
-    # ---------- EXTRACT ----------
-
-    def extract(
-        self,
-        document: Union[str, os.PathLike],
-        schema: Any,
-        *,
-        tier: str = "standard",
-        pages: Union[str, int, tuple[int, int], None] = None,
-        cite_sources: bool = False,
-        system_prompt: Optional[str] = None,
-        wait: bool = True,
-        timeout: float = 3600.0,
-    ) -> dict[str, Any]:
-        """
-        Extract JSON that fits ``schema`` from a PDF. Cloud-only: local mode
-        raises PageIndexAPIError.
-
-            job = client.extract("invoice.pdf", schema)
-            job["extract_result"]
-
-        Args:
-            document (str): A PDF's path: the file is read for this job only,
-                and not kept as a document. Or the ``doc_id`` of an uploaded
-                document: one still processing is waited for first, and with
-                ``wait=False`` raises PageIndexAPIError (HTTP 409).
-            schema (dict | type): A JSON Schema whose top is an object or an
-                array, or a Pydantic model class.
-            tier (str): "standard" (default) or "pro".
-            pages (str | int | tuple, optional): Extract from these pages
-                only, and only they are charged: "3-9", (3, 9) or 3.
-            cite_sources (bool): Give the page each list item is on, under
-                'extract_metadata'.
-            system_prompt (str, optional): Your own instructions for the
-                extraction.
-            wait (bool): Return the job once it is completed (default), up to
-                ``timeout`` seconds; raises PageIndexAPIError if it failed or
-                was cancelled, or is not done in time (it goes on running:
-                read it with ``get_extract()``). False returns it at once,
-                pending: ``wait_extract()`` waits for it later.
-            timeout (float): Seconds to wait, the document's processing
-                included. Defaults to an hour.
-
-        Returns:
-            dict: The job: {'id', 'status', 'doc_id', 'configuration',
-            'created_at', 'updated_at'}. 'status' is "pending", "running",
-            "completed", "failed" or "cancelled"; 'doc_id' is None for a
-            file. Completed, it also has 'extract_result' (the JSON that fits
-            the schema), 'extract_metadata' ({'field_metadata': {...}}, with
-            ``cite_sources`` the page of each list item by its JSON Pointer,
-            as ``{"/rows/0": {"page": 3}}``) and 'usage' ({'pages',
-            'credits'}); failed, 'error_message'.
-        """
-        api = self._require_cloud(
-            "extract is cloud-only — Extract is not supported in local "
-            "mode. Create the client with an api_key to use it.")
-        if isinstance(schema, dict):
-            data_schema = schema
-        elif hasattr(schema, "model_json_schema"):
-            data_schema = schema.model_json_schema()
-        else:
-            raise PageIndexAPIError(
-                "schema must be a JSON Schema (a dict) or a Pydantic model class.")
-        configuration: dict[str, Any] = {"data_schema": data_schema, "tier": tier}
-        if isinstance(pages, tuple):
-            pages = f"{pages[0]}-{pages[1]}"
-        if pages is not None:
-            configuration["target_pages"] = str(pages)
-        if cite_sources:
-            configuration["cite_sources"] = True
-        if system_prompt:
-            configuration["system_prompt"] = system_prompt
-        document = os.fspath(document)
-        deadline = time.monotonic() + timeout
-        if os.path.exists(document):
-            job = api.create_extract(configuration, file_path=document)
-        elif document.lower().endswith(".pdf"):
-            raise FileNotFoundError(document)
-        else:
-            try:
-                job = api.create_extract(configuration, doc_id=document)
-            except PageIndexAPIError as exc:
-                if not wait or exc.status_code != 409:
-                    raise
-                self._wait_until_ready(document, deadline - time.monotonic())
-                job = api.create_extract(configuration, doc_id=document)
-        return self._extract_done(api, job, deadline, timeout) if wait else job
-
-    def _extract_done(self, api, job: dict, deadline: float, timeout: float) -> dict:
-        import requests
-        while job["status"] in ("pending", "running"):
-            if time.monotonic() > deadline:
-                raise PageIndexAPIError(
-                    f"Extract job {job['id']} is still {job['status']} after "
-                    f"{int(timeout)}s. It goes on running in the cloud — read "
-                    "it with get_extract(job_id), or stop it with "
-                    "cancel_extract(job_id).")
-            time.sleep(3)
-            try:
-                job = api.get_extract(job["id"])
-            except (PageIndexAPIError, requests.RequestException) as exc:
-                raise PageIndexAPIError(
-                    f"Could not read extract job {job['id']}: {exc}. It may "
-                    "still be running in the cloud — read it with "
-                    "get_extract(job_id), or stop it with "
-                    "cancel_extract(job_id).",
-                    status_code=getattr(exc, "status_code", None)) from exc
-        if job["status"] != "completed":
-            raise PageIndexAPIError(
-                f"Extract job {job['id']} {job['status']}"
-                + (f": {job['error_message']}" if job.get("error_message") else "."))
-        return job
-
-    def wait_extract(self, job_id: str, timeout: float = 3600.0) -> dict[str, Any]:
-        """
-        Wait for an extract job, and return it once it is completed: the
-        dict ``extract()`` returns. Raises PageIndexAPIError if it failed or
-        was cancelled, or is not done within ``timeout`` seconds (it goes on
-        running). Cloud-only: local mode raises PageIndexAPIError.
-        """
-        api = self._require_cloud(
-            "wait_extract is cloud-only — Extract is not supported in local "
-            "mode. Create the client with an api_key to use it.")
-        return self._extract_done(
-            api, api.get_extract(job_id), time.monotonic() + timeout, timeout)
-
-    def get_extract(self, job_id: str) -> dict[str, Any]:
-        """
-        Get an extract job, with its result once it is completed: the dict
-        ``extract()`` returns. Cloud-only: local mode raises
-        PageIndexAPIError.
-        """
-        return self._require_cloud(
-            "get_extract is cloud-only — Extract is not supported in local "
-            "mode. Create the client with an api_key to use it."
-        ).get_extract(job_id=job_id)
-
-    def list_extracts(self, limit: int = 20,
-                      after: Optional[str] = None) -> dict[str, Any]:
-        """
-        List your extract jobs, newest first, without their results. Cloud-only:
-        local mode raises PageIndexAPIError.
-
-        Args:
-            limit (int): Maximum jobs to return (1-100).
-            after (str, optional): The last page's 'next', for the page after
-                it.
-
-        Returns:
-            dict: {'jobs': [...], 'next'}; 'next' is the id to pass as
-            ``after``, or None on the last page.
-        """
-        return self._require_cloud(
-            "list_extracts is cloud-only — Extract is not supported in local "
-            "mode. Create the client with an api_key to use it."
-        ).list_extracts(limit=limit, after=after)
-
-    def cancel_extract(self, job_id: str) -> dict[str, Any]:
-        """
-        Stop an extract job that is pending or running; nothing is charged.
-        One that has already ended raises PageIndexAPIError (HTTP 409).
-        Cloud-only: local mode raises PageIndexAPIError.
-
-        Returns:
-            dict: The job, cancelled.
-        """
-        return self._require_cloud(
-            "cancel_extract is cloud-only — Extract is not supported in local "
-            "mode. Create the client with an api_key to use it."
-        ).cancel_extract(job_id=job_id)
-
-    def delete_extract(self, job_id: str) -> dict[str, Any]:
-        """
-        Delete an extract job and its result. Cloud-only: local mode raises
-        PageIndexAPIError.
-
-        Returns:
-            dict: {'id', 'deleted': True}.
-        """
-        return self._require_cloud(
-            "delete_extract is cloud-only — Extract is not supported in local "
-            "mode. Create the client with an api_key to use it."
-        ).delete_extract(job_id=job_id)
-
     # ---------- PATH HELPERS ----------
 
     def _folder_paths(self) -> dict[str, str]:
@@ -3744,3 +3372,16 @@ class PageIndexLocalClient(PageIndexClient):
                          retrieve_model=retrieve_model, storage_path=storage_path,
                          index_backend=index_backend, chat_backend=chat_backend,
                          instructions=instructions)
+
+
+def _cloud_client(api_key: Optional[str], client: Optional[PageIndexClient],
+                  name: str) -> PageIndexClient:
+    """The cloud PageIndexClient that a cloud-only client works through."""
+    if client is None:
+        return PageIndexCloudClient(api_key)
+    if api_key is not None:
+        raise PageIndexAPIError(f"{name} takes api_key or client, not both.")
+    client._require_cloud(
+        f"{name} is cloud-only — the client given is in local mode. Pass one "
+        "created with an api_key.")
+    return client
