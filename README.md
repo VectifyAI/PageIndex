@@ -210,7 +210,7 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 
 ### Page Search and Page Extract
 
-The same API key also finds the pages that answer a question ([Page Search](https://docs.pageindex.ai/search/quick-start)) and extracts JSON that fits your schema ([Page Extract](https://docs.pageindex.ai/extract/quick-start)). Their uploads build no tree index:
+The same API key also finds the pages that answer a question ([Page Search](https://docs.pageindex.ai/search/quick-start)) and extracts JSON that fits your schema ([Page Extract](https://docs.pageindex.ai/extract/quick-start)). Their uploads build no outline index:
 
 ```python
 from pageindex import PageExtractClient, PageSearchClient
@@ -224,7 +224,7 @@ schema = {"type": "object", "properties": {"total": {"type": "number"}}}
 print(extract.extract("invoice.pdf", schema)["extract_result"])
 ```
 
-All three clients see the same documents. `PageIndexClient(index="cloud").build_index(doc_id)` builds the tree index of one uploaded without it.
+All three clients see the same documents. `PageIndexClient(index="cloud").build_outline_index(doc_id)` builds the outline index of one uploaded without it.
 
 ### More About PageIndex Cloud
 
