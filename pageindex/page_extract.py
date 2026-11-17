@@ -111,9 +111,13 @@ class PageExtractClient:
         document = os.fspath(document)
         deadline = time.monotonic() + timeout
         if os.path.exists(document):
-            document = self.pageindex._upload(
-                document, True, timeout,
-                collection_id=self._collection(collection), index=False)["doc_id"]
+            try:
+                document = self._store(document, collection, timeout)
+            except PageIndexAPIError as exc:
+                # The collection found earlier is gone: find or make it again.
+                if exc.status_code != 404 or not self._collections.pop(collection, None):
+                    raise
+                document = self._store(document, collection, timeout)
         elif document.lower().endswith(".pdf"):
             raise FileNotFoundError(document)
         try:
@@ -124,6 +128,11 @@ class PageExtractClient:
             self.pageindex._wait_until_ready(document, deadline - time.monotonic())
             job = api.create_extract(configuration, doc_id=document)
         return self._done(job, deadline, timeout) if wait else job
+
+    def _store(self, file_path: str, collection: Optional[str], timeout: float) -> str:
+        return self.pageindex._upload(
+            file_path, True, timeout,
+            collection_id=self._collection(collection), index=False)["doc_id"]
 
     def _collection(self, collection: Optional[str]) -> Optional[str]:
         if collection is None or collection in self._collections:

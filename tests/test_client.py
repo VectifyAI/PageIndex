@@ -2378,6 +2378,33 @@ def test_extract_stores_a_file_in_the_collection_named(extracting, sample_pdf):
     assert stored_in(collection=None) == [None]
 
 
+def test_extract_finds_its_collection_again_when_the_one_it_knew_is_gone(
+        extracting, sample_pdf):
+    client, calls, answers = extracting
+    stored = [{"id": "c-old", "name": "Page Extract"}]
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": stored, "total": 1}
+        if path == "/doc/":
+            if kw["data"].get("collection_id") != stored[0]["id"]:
+                return 404, {"detail": "Collection not found."}
+            return {"doc_id": "pi-1", "name": "sample.pdf"}
+        if path == "/doc/pi-1/metadata/":
+            return {"id": "pi-1", "status": "completed"}
+        return 202, {"id": "ext_1", "status": "pending"}
+    answers.to = to
+    client.extract(sample_pdf, {"type": "object"}, wait=False)
+    stored[0] = {"id": "c-new", "name": "Page Extract"}
+
+    client.extract(sample_pdf, {"type": "object"}, wait=False)
+
+    assert [c["data"]["collection_id"] for c in calls if c["path"] == "/doc/"] == [
+        "c-old", "c-old", "c-new"]
+    with pytest.raises(PageIndexAPIError, match="Collection not found") as raised:
+        client.extract(sample_pdf, {"type": "object"}, collection=None)
+    assert raised.value.status_code == 404
+
+
 def test_extract_from_an_uploaded_document(extracting):
     client, calls, answers = extracting
     answers.to = lambda method, path, kw: (202, {"id": "ext_1", "status": "pending"})
