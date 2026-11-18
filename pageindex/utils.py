@@ -457,8 +457,8 @@ def _is_unrecoverable(exc: BaseException) -> bool:
 
 
 # Claude's own ways to turn thinking off, then its lowest effort: the ladder
-# down a Claude model's thinking, as LiteLLM sends no thinking field for
-# reasoning_effort "none" (BerriAI/litellm#47924, #44298).
+# down a Claude model's thinking, as LiteLLM below 1.110 sends no thinking
+# field for reasoning_effort "none" (BerriAI/litellm#47924, #44298).
 _CLAUDE_LADDER = ({"thinking": {"type": "disabled"}}, {"thinking": {"type": "between_tools"}},
                   {"reasoning_effort": "low"})
 _CLAUDE_ROUTES = ("anthropic", "bedrock", "vertex_ai", "azure_ai", "databricks")

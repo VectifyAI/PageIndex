@@ -4226,33 +4226,6 @@ def test_a_refusal_is_one_litellm_puts_on_no_cause_or_on_a_param():
     assert not _refusal(litellm.AuthenticationError(**args))
 
 
-def test_litellm_still_drops_a_databricks_switch_beside_none():
-    """Fails once LiteLLM keeps a thinking switch sent beside
-    reasoning_effort "none" on Databricks, as it does on Claude's other
-    routes: then the fill hook (local_chat._register_fill) needn't take the
-    "none" off any more."""
-    pytest.importorskip("litellm")
-    from litellm.utils import get_optional_params
-    assert "thinking" not in get_optional_params(
-        model="databricks-claude-sonnet-5", custom_llm_provider="databricks",
-        reasoning_effort="none", thinking={"type": "disabled"})
-
-
-@pytest.mark.parametrize("model", ["claude-haiku-5-5", "claude-sonnet-5", "claude-opus-5",
-                                   "claude-sonnet-5-5"])
-def test_litellm_still_sends_claude_no_thinking_for_none(model):
-    """Fails once LiteLLM itself turns the model's thinking off for "none"
-    (BerriAI/litellm#47924, #44298), which can show only after the
-    litellm <1.106 cap is lifted: then the LiteLLM routes no longer need
-    _claude_none for it. Keep its _CLAUDE_NONE row: the Messages lane
-    still needs it, as Anthropic's effort takes no "none"."""
-    pytest.importorskip("litellm")
-    from litellm.utils import get_optional_params
-    assert "thinking" not in get_optional_params(
-        model=model, custom_llm_provider="anthropic", reasoning_effort="none",
-        drop_params=True)
-
-
 def test_parse_pages_keeps_whitespace_tolerance():
     """0.2.10 accepted whitespace around parts (int() tolerance); the SDK
     surface keeps that while the tool layer stays on the strict pattern."""
@@ -5122,7 +5095,7 @@ def test_summary_effort_ladder_is_what_litellm_would_send():
     """On LiteLLM's real map: a level LiteLLM would drop is skipped, read
     as LiteLLM reads it (azure/gpt-5-nano as gpt-5-nano); a model it
     doesn't know on an OpenAI-format API gets the effort as is, on any
-    other none it would drop; no rung LiteLLM sends as thinking turned on
+    other only what LiteLLM would send; no rung LiteLLM sends as thinking turned on
     (off stays); a Claude model, as LiteLLM tells one, goes down Claude's own
     switches, from its known one on, past disabled where LiteLLM's map says
     it always thinks; a rung this process saw refused is left out."""
@@ -5142,7 +5115,7 @@ def test_summary_effort_ladder_is_what_litellm_would_send():
                           ("azure/my-gpt-deployment", efforts("none", "low", forced=True)),
                           ("fireworks_ai/accounts/fireworks/models/test-unknown",
                            efforts("none", "low", forced=True)),
-                          ("bedrock/qwen.test-unknown-v9", []),
+                          ("bedrock/qwen.test-unknown-v9", efforts("none", "low")),
                           ("bedrock/arn:aws:bedrock:us-east-1:123456789012:"
                            "application-inference-profile/test", []),
                           ("bedrock/us.amazon.nova-2-lite-v1:0", []),
