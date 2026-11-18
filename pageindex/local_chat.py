@@ -1182,8 +1182,8 @@ def _cut_text(output) -> list:
 
 def _drop_repeated_thinking(chunk, streamed: list) -> None:
     """Blank a closing thinking block's text that repeats what streamed:
-    LiteLLM's Anthropic stream sends the whole text again beside the
-    signature. A test fails once it stops; this goes then."""
+    LiteLLM's Anthropic stream below our floor sends the whole text again
+    beside the signature, and an install can still land there."""
     choices = getattr(chunk, "choices", None)
     delta = getattr(choices[0], "delta", None) if choices else None
     for block in getattr(delta, "thinking_blocks", None) or ():
