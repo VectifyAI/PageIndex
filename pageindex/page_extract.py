@@ -70,8 +70,9 @@ class PageExtractClient:
                 array, or a Pydantic model class.
             tier (str): "standard" (default) or "pro".
             pages (str | int | tuple, optional): Extract from these pages
-                only, and the extraction is charged for them alone: "3-9",
-                (3, 9) or 3.
+                only: "3-9", (3, 9) or 3. The extraction is charged for them
+                alone, but a file still costs at least its upload price, for
+                all its pages.
             cite_sources (bool): Give the page each list item is on, under
                 'extract_metadata'.
             system_prompt (str, optional): Your own instructions for the
