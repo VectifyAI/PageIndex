@@ -2343,20 +2343,18 @@ def test_search_documents_wiring(searching):
     assert raised.value.status_code == 400
 
 
-def test_extract_uploads_a_file_without_an_index_and_waits_for_the_result(
+def test_extract_uploads_a_file_with_its_job_and_waits_for_the_result(
         extracting, sample_pdf, monkeypatch):
     client, calls, answers = extracting
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     done = {"id": "ext_1", "status": "completed", "extract_result": {"total": 5}}
-    later = iter([{"id": "ext_1", "status": "running"}, done])
+    later = iter([{"id": "ext_1", "status": "pending"}, done])
     def to(method, path, kw):
         if path == "/collections/":
             return {"collections": [{"id": "c-9", "name": "Page Extract"}], "total": 1}
         if path == "/doc/":
-            return {"doc_id": "pi-1", "name": "sample.pdf"}
-        if path == "/doc/pi-1/metadata/":
-            return {"id": "pi-1", "status": "completed"}
-        return (202, {"id": "ext_1", "status": "pending"}) if method == "POST" else next(later)
+            return {"doc_id": "pi-1", "name": "sample.pdf", "extract_job_id": "ext_1"}
+        return next(later)
     answers.to = to
     schema = {"type": "object", "properties": {"total": {"type": "number"}}}
 
@@ -2364,15 +2362,54 @@ def test_extract_uploads_a_file_without_an_index_and_waits_for_the_result(
                          system_prompt="Totals in USD.")
 
     assert job == done
+    # one upload starts the job: no wait for the document, no second request
     assert [(c["method"], c["path"]) for c in calls] == [
-        ("GET", "/collections/"), ("POST", "/doc/"), ("GET", "/doc/pi-1/metadata/"),
-        ("POST", "/extract/"), ("GET", "/extract/ext_1/"), ("GET", "/extract/ext_1/")]
+        ("GET", "/collections/"), ("POST", "/doc/"),
+        ("GET", "/extract/ext_1/"), ("GET", "/extract/ext_1/")]
     assert calls[1]["files"]["file"][0] == "sample.pdf"
-    assert calls[1]["data"] == {"algorithm": "none", "collection_id": "c-9"}
-    assert "files" not in calls[3] and calls[3]["data"]["doc_id"] == "pi-1"
-    assert json.loads(calls[3]["data"]["configuration"]) == {
+    sent = calls[1]["data"]
+    assert json.loads(sent.pop("extract")) == {
         "data_schema": schema, "tier": "standard", "target_pages": "3-9",
         "cite_sources": True, "system_prompt": "Totals in USD."}
+    assert sent == {"algorithm": "none", "collection_id": "c-9"}
+
+
+@pytest.mark.parametrize("stored", [
+    (409, {"detail": {"message": "not ready", "doc_id": "pi-1"}}),  # stored already
+    {"doc_id": "pi-1", "name": "sample.pdf"},  # a server before extract on upload
+])
+def test_extract_starts_the_job_itself_when_the_upload_does_not(
+        extracting, sample_pdf, monkeypatch, stored):
+    client, calls, answers = extracting
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    states = iter(["processing", "completed"])
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": [{"id": "c-9", "name": "Page Extract"}], "total": 1}
+        if path == "/doc/":
+            return stored
+        if path == "/doc/pi-1/metadata/":
+            return {"id": "pi-1", "status": next(states)}
+        return 202, {"id": "ext_1", "status": "pending"}
+    answers.to = to
+
+    assert client.extract(sample_pdf, {"type": "object"}, wait=False) == {
+        "id": "ext_1", "status": "pending"}
+    assert [(c["method"], c["path"]) for c in calls] == [
+        ("GET", "/collections/"), ("POST", "/doc/"), ("GET", "/doc/pi-1/metadata/"),
+        ("GET", "/doc/pi-1/metadata/"), ("POST", "/extract/")]
+    assert calls[-1]["data"]["doc_id"] == "pi-1"
+
+
+def test_extract_raises_a_conflict_that_names_no_document(extracting, sample_pdf):
+    client, calls, answers = extracting
+    answers.to = lambda method, path, kw: (
+        {"collections": [{"id": "c-9", "name": "Page Extract"}], "total": 1}
+        if path == "/collections/" else (409, {"detail": "Name taken."}))
+
+    with pytest.raises(PageIndexAPIError, match="Name taken") as raised:
+        client.extract(sample_pdf, {"type": "object"})
+    assert raised.value.status_code == 409
 
 
 def test_extract_stores_a_file_in_the_collection_named(extracting, sample_pdf):

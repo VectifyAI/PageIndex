@@ -58,12 +58,14 @@ class PageExtractClient:
 
         Args:
             document (str): A PDF's path: the file is uploaded to
-                ``collection`` first, with no outline index built (the upload
-                is charged for every page of the file), and uploading the
-                same file again uses the stored document. Or
-                the ``doc_id`` of an uploaded document: one still processing
-                is waited for first, and with ``wait=False`` raises
-                PageIndexAPIError (HTTP 409).
+                ``collection`` with the job, with no outline index built, and
+                the job is the only charge: the extraction, but not less than
+                the file's upload price ($0.10 per 1,000 pages), which is
+                also what the job costs if it fails or is cancelled after
+                reading the file. Uploading the same file again uses the
+                stored document. Or the ``doc_id`` of an uploaded document:
+                one still processing is waited for first, and with
+                ``wait=False`` raises PageIndexAPIError (HTTP 409).
             schema (dict | type): A JSON Schema whose top is an object or an
                 array, or a Pydantic model class.
             tier (str): "standard" (default) or "pro".
@@ -78,8 +80,7 @@ class PageExtractClient:
                 ``timeout`` seconds; raises PageIndexAPIError if it failed or
                 was cancelled, or is not done in time (it goes on running:
                 read it with ``get_extract()``). False returns it pending
-                once it starts, a file still uploaded and processed first:
-                ``wait_extract()`` waits for it later.
+                once it starts: ``wait_extract()`` waits for it later.
             timeout (float): Seconds to wait, the document's upload and
                 processing included. Defaults to an hour.
             collection (str, optional): Where a file is uploaded: a
@@ -118,12 +119,19 @@ class PageExtractClient:
         deadline = time.monotonic() + timeout
         if os.path.exists(document):
             try:
-                document = self._store(document, collection, timeout)
+                stored = self._store(document, collection, configuration)
             except PageIndexAPIError as exc:
                 # The collection found earlier is gone: find or make it again.
                 if exc.status_code != 404 or not self._collections.pop(collection, None):
                     raise
-                document = self._store(document, collection, timeout)
+                stored = self._store(document, collection, configuration)
+            if "extract_job_id" in stored:
+                job = api.get_extract(stored["extract_job_id"])
+                return self._done(job, deadline, timeout) if wait else job
+            # No job started: the file is stored already and not ready, or
+            # the server is older than extraction on upload.
+            document = stored["doc_id"]
+            self.pageindex._wait_until_ready(document, deadline - time.monotonic())
         elif document.lower().endswith(".pdf"):
             raise FileNotFoundError(document)
         try:
@@ -135,10 +143,11 @@ class PageExtractClient:
             job = api.create_extract(configuration, doc_id=document)
         return self._done(job, deadline, timeout) if wait else job
 
-    def _store(self, file_path: str, collection: Optional[str], timeout: float) -> str:
+    def _store(self, file_path: str, collection: Optional[str],
+               configuration: dict) -> dict:
         return self.pageindex._upload(
-            file_path, True, timeout,
-            collection_id=self._collection(collection), index=False)["doc_id"]
+            file_path, False, collection_id=self._collection(collection),
+            index=False, extract=configuration)
 
     def _collection(self, collection: Optional[str]) -> Optional[str]:
         if collection is None or collection in self._collections:
@@ -230,8 +239,10 @@ class PageExtractClient:
 
     def cancel_extract(self, job_id: str) -> dict[str, Any]:
         """
-        Stop an extract job that is pending or running; nothing is charged.
-        One that has already ended raises PageIndexAPIError (HTTP 409).
+        Stop an extract job that is pending or running; nothing is charged,
+        but for a job started with its file's upload that has read the file:
+        the upload price. One that has already ended raises
+        PageIndexAPIError (HTTP 409).
 
         Returns:
             dict: The job, cancelled.
