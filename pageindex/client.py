@@ -2512,8 +2512,9 @@ class PageIndexClient:
         instructions and ``as_openai_tools`` as the tools; clients with a
         configured ``chat_model`` — local mode, or cloud with
         ``chat_model=`` — also carry it (a plain cloud client omits
-        ``model`` so the framework default applies). To target a folder
-        or documents, prepend ``folder_context(folder_id)`` /
+        ``model`` so the framework default applies). To target a folder,
+        a collection or documents, prepend ``folder_context(folder_id)`` /
+        ``collection_context(collection_id)`` /
         ``document_context(doc_id)`` to your first message; to
         customize further, switch to those methods directly. You run this
         config in your own environment, so its model auth comes from
@@ -2645,8 +2646,9 @@ class PageIndexClient:
         as Bedrock's InvokeModel integration rejects it for Sonnet 4.5 and
         Opus 4.5). Unlike the chat lane,
         ``system`` here is the bare instructions string, without the chat
-        header or its block-level breakpoint. To target a folder or
-        documents, prepend ``folder_context(folder_id)`` /
+        header or its block-level breakpoint. To target a folder, a
+        collection or documents, prepend ``folder_context(folder_id)`` /
+        ``collection_context(collection_id)`` /
         ``document_context(doc_id)`` to your first message; to
         customize further, switch to those methods directly.
 
@@ -2759,9 +2761,10 @@ class PageIndexClient:
         everywhere; a chosen model adds ``model`` (and its route's
         ``env`` switch) — those keys are then taken, so pop them from
         the result before passing your own ``model=`` or ``env=``
-        alongside the unpack. To target a folder or documents, prepend
-        ``folder_context(folder_id)`` / ``document_context(doc_id)`` to
-        your prompt; to customize (your own system prompt, extra
+        alongside the unpack. To target a folder, a collection or
+        documents, prepend ``folder_context(folder_id)`` /
+        ``collection_context(collection_id)`` /
+        ``document_context(doc_id)`` to your prompt; to customize (your own system prompt, extra
         servers), switch to those methods directly.
 
         Args:
