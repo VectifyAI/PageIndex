@@ -55,6 +55,7 @@ class CloudAPI:
         metadata: Optional[Dict[str, Any]] = None,
         collection_id: Optional[str] = None,
         index: bool = True,
+        extract: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Upload a PDF document for processing; the tree is built in the background,
@@ -70,11 +71,17 @@ class CloudAPI:
             metadata (dict, optional): Your own JSON-serializable tags for the document;
                 returned in get_tree/get_ocr responses and list_documents entries. Defaults to None.
             collection_id (str, optional): Collection ID to store the document in, in place of a folder. Defaults to None.
+            extract (dict, optional): With ``index=False``, an extract job's
+                configuration, as ``create_extract()`` takes it: the job
+                starts on the document, and the upload is not charged on its
+                own.
 
         Returns:
             dict: {'doc_id': ...} — plus 'name', the stored document name
                 (a taken name gains a numeric suffix), when the server
-                returns it.
+                returns it, and with ``extract`` 'extract_job_id'. A file
+                stored already whose pages are not ready starts no job:
+                {'doc_id', 'duplicate': True}.
         """
         if mode not in (None, "flash"):
             raise PageIndexAPIError(
@@ -96,6 +103,8 @@ class CloudAPI:
             data['metadata'] = json.dumps(metadata)
         if collection_id is not None:
             data['collection_id'] = collection_id
+        if extract is not None:
+            data['extract'] = json.dumps(extract)
 
         with open(file_path, "rb") as f:
             response = self._http.post(
@@ -105,6 +114,13 @@ class CloudAPI:
                 data=data
             )
 
+        if response.status_code == 409 and extract is not None:
+            try:
+                stored = response.json()["detail"]["doc_id"]
+            except (ValueError, KeyError, TypeError):
+                stored = None
+            if stored:
+                return {"doc_id": stored, "duplicate": True}
         if response.status_code != 200:
             raise PageIndexAPIError(
                 f"Failed to submit document: {response.text}",
