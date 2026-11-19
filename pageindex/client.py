@@ -1491,8 +1491,9 @@ class PageIndexClient:
                 Keep it identical across a conversation's calls.
             collection_id: Collection ID to keep discovery in that
                 collection's documents. Cloud own-model chat only: the
-                conversation opens with the collection's targeting text,
-                and every tool that takes a collection searches this one.
+                conversation opens with the collection's targeting text
+                (``collection_context``), and every tool that takes a
+                collection searches this one.
                 Not with ``doc_id`` or ``folder_id``. Keep it identical
                 across a conversation's calls.
             stream: Answer lane: return a ``ChatStream`` — iterate it for
@@ -3045,6 +3046,22 @@ class PageIndexClient:
         if folder_id is None:
             raise PageIndexAPIError("folder_id must be a string.")
         return folder_targeting_block(self, folder_id) or ""
+
+    def collection_context(self, collection_id: str) -> str:
+        """
+        Collection targeting text for the first user message, placed as
+        ``document_context`` is: the collection's name and metadata, and
+        the directive to discover its documents there, by the name the
+        tools address it by. ``chat(collection_id=...)`` places it for you
+        and holds the tools to that collection; on the framework routes it
+        steers the agent, and the tools still reach your other documents.
+        Cloud-only: local libraries have no collections. Raises
+        PageIndexAPIError if the collection does not exist.
+        """
+        from .agent_tools import collection_targeting_block
+        if collection_id is None:
+            raise PageIndexAPIError("collection_id must be a non-empty string.")
+        return cast(str, collection_targeting_block(self, collection_id)[0])
 
     # ---------- FOLDER MANAGEMENT ----------
 

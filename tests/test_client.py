@@ -1920,7 +1920,8 @@ def test_collections_are_cloud_only(local_client, sample_pdf):
     for call in (lambda: local_client.create_collection("papers"),
                  local_client.list_collections,
                  lambda: local_client.delete_collection("c"),
-                 lambda: local_client.get_metadata_schema(collection_id="c")):
+                 lambda: local_client.get_metadata_schema(collection_id="c"),
+                 lambda: local_client.collection_context("c")):
         with pytest.raises(PageIndexAPIError, match="cloud-only"):
             call()
     for call in (lambda: local_client.submit_document(sample_pdf, collection_id="c"),
@@ -2875,6 +2876,7 @@ def test_cloud_errors_carry_status_code(cloud, monkeypatch, sample_pdf):
         lambda: client.get_metadata_schema("f"),
         lambda: client.delete_metadata_schema("f"),
         lambda: client.folder_context("f"),
+        lambda: client.collection_context("c"),
     ]
     for attempt in attempts:
         with pytest.raises(PageIndexAPIError) as err:
@@ -3485,6 +3487,35 @@ def test_folder_context(cloud):
     assert client.folder_context("root") == ""
     assert client.folder_context("") == ""
     assert calls == []
+
+
+def test_collection_context(cloud):
+    """Collection targeting is the text chat(collection_id=...) leads with:
+    the name, an id/name/description metadata row (empty description
+    dropped), and the discovery directive naming the collection as the
+    tools address it."""
+    client, calls, fake = cloud
+    fake.payload = {"collections": [
+        {"id": "c-1", "name": "Filings", "description": "",
+         "metadata_schema": None, "document_count": 2},
+        {"id": "c-2", "name": "Q3", "description": "quarterly",
+         "metadata_schema": None, "document_count": 1},
+    ], "total": 2}
+    text = client.collection_context("c-2")
+    assert calls[-1]["url"] == "https://api.pageindex.ai/collections/"
+    assert text == (
+        "The user has specified collection: Q3\n"
+        'Collection metadata: {"id": "c-2", "name": "Q3", '
+        '"description": "quarterly"}\n'
+        'Discover its documents with list_documents(collection="Q3") or '
+        'search_documents(questions, collection="Q3").')
+    assert ('Collection metadata: {"id": "c-1", "name": "Filings"}\n'
+            in client.collection_context("c-1"))
+    with pytest.raises(PageIndexAPIError, match="not found"):
+        client.collection_context("c-9")
+    for bad in (None, "", ["c-1"]):
+        with pytest.raises(PageIndexAPIError, match="non-empty string"):
+            client.collection_context(bad)
 
 
 # ── backend: the indexing lane ──
