@@ -2401,6 +2401,31 @@ def test_extract_starts_the_job_itself_when_the_upload_does_not(
     assert calls[-1]["data"]["doc_id"] == "pi-1"
 
 
+def test_extract_uploads_again_when_the_document_it_waited_for_is_deleted(
+        extracting, sample_pdf, monkeypatch):
+    client, calls, answers = extracting
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    # stored by another job, which then does not complete and deletes it
+    uploads = iter([
+        (409, {"detail": {"message": "still processed", "doc_id": "pi-1"}}),
+        {"doc_id": "pi-2", "name": "sample.pdf", "extract_job_id": "ext_1"}])
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": [{"id": "c-9", "name": "Page Extract"}], "total": 1}
+        if path == "/doc/":
+            return next(uploads)
+        if path == "/doc/pi-1/metadata/":
+            return 404, {"detail": "Document not found."}
+        return {"id": "ext_1", "status": "pending"}
+    answers.to = to
+
+    assert client.extract(sample_pdf, {"type": "object"}, wait=False) == {
+        "id": "ext_1", "status": "pending"}
+    assert [(c["method"], c["path"]) for c in calls] == [
+        ("GET", "/collections/"), ("POST", "/doc/"), ("GET", "/doc/pi-1/metadata/"),
+        ("POST", "/doc/"), ("GET", "/extract/ext_1/")]
+
+
 def test_extract_raises_a_conflict_that_names_no_document(extracting, sample_pdf):
     client, calls, answers = extracting
     answers.to = lambda method, path, kw: (

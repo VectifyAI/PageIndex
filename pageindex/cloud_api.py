@@ -73,8 +73,9 @@ class CloudAPI:
             collection_id (str, optional): Collection ID to store the document in, in place of a folder. Defaults to None.
             extract (dict, optional): With ``index=False``, an extract job's
                 configuration, as ``create_extract()`` takes it: the job
-                starts on the document, and the upload is not charged on its
-                own.
+                starts on the document, and only its extraction is charged,
+                once it completes. A job that does not complete deletes the
+                document.
 
         Returns:
             dict: {'doc_id': ...} — plus 'name', the stored document name
