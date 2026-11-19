@@ -61,9 +61,12 @@ class PageExtractClient:
                 ``collection`` with the job, with no outline index built.
                 Only the extraction is charged, once the job completes, and
                 the file is kept as a document from then on; a job that fails
-                or is cancelled is not charged, and keeps of a file it uploaded
-                only a failed entry with its name.
-                Uploading the same file again uses the stored document. Or
+                or is cancelled is not charged, and leaves a file it uploaded
+                as a failed document, with its name and file but no pages,
+                until you delete it. Uploading the same file again uses the
+                stored document, unless it failed: then the file is uploaded
+                as a new document, usually under a suffixed name such as
+                ``name_1.pdf``. Or
                 the ``doc_id`` of an uploaded document:
                 one still processing is waited for first, and with
                 ``wait=False`` raises PageIndexAPIError (HTTP 409).
@@ -256,8 +259,9 @@ class PageExtractClient:
     def cancel_extract(self, job_id: str) -> dict[str, Any]:
         """
         Stop an extract job that is pending or running: nothing is charged,
-        and of a file uploaded with it only a failed entry with its name is
-        kept. One that has already ended raises PageIndexAPIError (HTTP 409).
+        and a file uploaded with it stays as a failed document, with its name
+        and file but no pages, until you delete it. One that has already ended
+        raises PageIndexAPIError (HTTP 409).
 
         Returns:
             dict: The job, cancelled.
