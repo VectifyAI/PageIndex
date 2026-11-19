@@ -61,7 +61,8 @@ class PageExtractClient:
                 ``collection`` with the job, with no outline index built.
                 Only the extraction is charged, once the job completes, and
                 the file is kept as a document from then on; a job that fails
-                or is cancelled is not charged, and the file is not kept.
+                or is cancelled is not charged, and keeps of a file it uploaded
+                only a failed entry with its name.
                 Uploading the same file again uses the stored document. Or
                 the ``doc_id`` of an uploaded document:
                 one still processing is waited for first, and with
@@ -130,8 +131,12 @@ class PageExtractClient:
                         stored["doc_id"], deadline - time.monotonic())
                     break
                 except PageIndexAPIError as exc:
-                    # The job it was stored with did not complete, and deleted it.
-                    if exc.status_code != 404 or last:
+                    # The job it was stored with did not complete, and failed
+                    # it, or it was deleted: the file is uploaded again.
+                    if last or not (
+                            exc.status_code == 404
+                            or self.pageindex.get_document(
+                                stored["doc_id"]).get("status") == "failed"):
                         raise
             document = stored["doc_id"]
         elif document.lower().endswith(".pdf"):
@@ -251,8 +256,8 @@ class PageExtractClient:
     def cancel_extract(self, job_id: str) -> dict[str, Any]:
         """
         Stop an extract job that is pending or running: nothing is charged,
-        and a file uploaded with it is not kept. One that has already ended
-        raises PageIndexAPIError (HTTP 409).
+        and of a file uploaded with it only a failed entry with its name is
+        kept. One that has already ended raises PageIndexAPIError (HTTP 409).
 
         Returns:
             dict: The job, cancelled.
@@ -261,7 +266,8 @@ class PageExtractClient:
 
     def delete_extract(self, job_id: str) -> dict[str, Any]:
         """
-        Delete an extract job and its result. The document it read stays.
+        Delete an extract job and its result. The document it read stays;
+        one uploaded with a job deleted before it completes stays failed.
 
         Returns:
             dict: {'id', 'deleted': True}.

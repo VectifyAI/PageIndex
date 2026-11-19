@@ -74,8 +74,8 @@ class CloudAPI:
             extract (dict, optional): With ``index=False``, an extract job's
                 configuration, as ``create_extract()`` takes it: the job
                 starts on the document, and only its extraction is charged,
-                once it completes. A job that does not complete deletes the
-                document.
+                once it completes. A job that does not complete fails the
+                document this upload made and deletes its file.
 
         Returns:
             dict: {'doc_id': ...} — plus 'name', the stored document name

@@ -2401,11 +2401,15 @@ def test_extract_starts_the_job_itself_when_the_upload_does_not(
     assert calls[-1]["data"]["doc_id"] == "pi-1"
 
 
-def test_extract_uploads_again_when_the_document_it_waited_for_is_deleted(
-        extracting, sample_pdf, monkeypatch):
+@pytest.mark.parametrize("stored, reads", [
+    ({"id": "pi-1", "status": "failed"}, 2),  # its job did not complete
+    ((404, {"detail": "Document not found."}), 1),  # deleted meanwhile
+])
+def test_extract_uploads_again_when_the_document_it_waited_for_fails(
+        extracting, sample_pdf, monkeypatch, stored, reads):
     client, calls, answers = extracting
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
-    # stored by another job, which then does not complete and deletes it
+    # stored by another job, still processing
     uploads = iter([
         (409, {"detail": {"message": "still processed", "doc_id": "pi-1"}}),
         {"doc_id": "pi-2", "name": "sample.pdf", "extract_job_id": "ext_1"}])
@@ -2415,15 +2419,33 @@ def test_extract_uploads_again_when_the_document_it_waited_for_is_deleted(
         if path == "/doc/":
             return next(uploads)
         if path == "/doc/pi-1/metadata/":
-            return 404, {"detail": "Document not found."}
+            return stored
         return {"id": "ext_1", "status": "pending"}
     answers.to = to
 
     assert client.extract(sample_pdf, {"type": "object"}, wait=False) == {
         "id": "ext_1", "status": "pending"}
     assert [(c["method"], c["path"]) for c in calls] == [
-        ("GET", "/collections/"), ("POST", "/doc/"), ("GET", "/doc/pi-1/metadata/"),
+        ("GET", "/collections/"), ("POST", "/doc/"),
+        *[("GET", "/doc/pi-1/metadata/")] * reads,
         ("POST", "/doc/"), ("GET", "/extract/ext_1/")]
+
+
+def test_extract_raises_when_the_document_it_waited_for_fails_again(
+        extracting, sample_pdf, monkeypatch):
+    client, calls, answers = extracting
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": [{"id": "c-9", "name": "Page Extract"}], "total": 1}
+        if path == "/doc/":
+            return 409, {"detail": {"message": "still processed", "doc_id": "pi-1"}}
+        return {"id": "pi-1", "status": "failed"}
+    answers.to = to
+
+    with pytest.raises(PageIndexAPIError, match="failed"):
+        client.extract(sample_pdf, {"type": "object"})
+    assert [c["path"] for c in calls].count("/doc/") == 2  # one upload again
 
 
 def test_extract_raises_a_conflict_that_names_no_document(extracting, sample_pdf):
