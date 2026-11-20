@@ -276,7 +276,7 @@ print(response["output"])
 </details>
 
 <details>
-<summary>Conversations and several documents</summary>
+<summary>Conversations and multiple documents</summary>
 <br>
 
 **Continue a conversation.** Pass the messages so far in place of the question:
