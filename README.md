@@ -315,7 +315,7 @@ Leave out the first message to let the agent look across every indexed document.
 
 #### *Agent frameworks*
 
-Pass `instructions`, PageIndex's tools, and `messages` to your framework:
+Pass `instructions`, PageIndex's tools, and `messages` to your agent framework:
 
 <details>
 <summary>OpenAI Agents SDK</summary>
@@ -506,7 +506,7 @@ Explore the full FinanceBench [evaluation results](https://github.com/VectifyAI/
 
 # PageIndex Cloud
 
-The open-source version is ideal for text-heavy PDFs and local workflows. With **PageIndex Cloud, document indexing and storage run in the cloud**: PageIndex handles parsing, OCR, image understanding, tree-index construction, and managed storage for you. The chat and retrieval layer remains **compatible with your model**, so you can search the cloud-hosted index using the model provider your application already uses.
+The open-source version is ideal for text-heavy PDFs and local workflows. With **PageIndex Cloud, document indexing and storage run in the cloud**: PageIndex handles parsing, image understanding, tree-index construction, and managed storage for you. The chat and retrieval layer remains **compatible with your model**, so you can search the cloud-hosted index using the model provider your application already uses.
 
 Moving indexing and storage from Local to Cloud only requires a [PageIndex API key](https://developer.pageindex.ai/):
 
@@ -530,8 +530,8 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Handles | Text-based PDFs | Text-based, scanned, and image-rich documents |
 | Indexing | On your machine | Managed by PageIndex |
 | Storage | Local directory | Cloud storage |
-| Citations | Page-level | Block-level |
-| OCR & image understanding | — | ✓ |
+| Citations | Page-level | Line-level |
+| Multimodal understanding | — | ✓ |
 | [Metadata](https://pageindex.ai/docs/documents/collections) | — | ✓ |
 | [Folders](https://pageindex.ai/docs/documents/folders) | — | ✓ |
 | [MCP server](https://pageindex.ai/docs/sdk/agents#connect-over-mcp) | — | ✓ |
