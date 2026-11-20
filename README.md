@@ -92,7 +92,7 @@ os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
     index="gpt-6-luna",                 # model to build the tree index
-    chat="gpt-6-sol",                   # model to search the tree
+    chat="gpt-6.2-sol",                 # model to search the tree
 )
 doc_id = client.submit_document("report.pdf")["doc_id"]
 
@@ -114,7 +114,7 @@ Run PageIndex on your machine, step by step. Each step builds on the one before.
 ## Step 1: Set up the client
 
 <details>
-<summary>Install and create the client</summary>
+<summary>Install and initialize</summary>
 <br>
 
 ```bash
@@ -129,7 +129,7 @@ os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
     index="gpt-6-luna",                 # model to build the tree index
-    chat="gpt-6-sol",                   # model to search the tree
+    chat="gpt-6.2-sol",                 # model to search the tree
 )
 ```
 
@@ -146,9 +146,9 @@ Model names follow [LiteLLM's naming](https://docs.litellm.ai/docs/providers). T
 
 | Provider | `index=` | `chat=` | API key |
 |---|---|---|---|
-| OpenAI | `gpt-6-luna` | `gpt-6-sol` | `OPENAI_API_KEY` |
-| Anthropic | `anthropic/claude-haiku-5-5` | `anthropic/claude-opus-5` | `ANTHROPIC_API_KEY` |
-| OpenRouter | `openrouter/anthropic/claude-haiku-5-5` | `openrouter/anthropic/claude-opus-5` | `OPENROUTER_API_KEY` |
+| OpenAI | `gpt-6-luna` | `gpt-6.2-sol` | `OPENAI_API_KEY` |
+| Anthropic | `anthropic/claude-haiku-5-5` | `anthropic/claude-opus-5-5` | `ANTHROPIC_API_KEY` |
+| OpenRouter | `openrouter/anthropic/claude-haiku-5-5` | `openrouter/anthropic/claude-opus-5-5` | `OPENROUTER_API_KEY` |
 | Claude subscription | `claude-code/haiku` | `claude-code/opus` | none; install `pageindex[claude]` ([example](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex-claude-subscription.py)) |
 
 Leave out `index=`, and indexing uses `gpt-6-luna`, which needs `OPENAI_API_KEY`. For other providers, see the [LiteLLM provider list](https://docs.litellm.ai/docs/providers).
@@ -313,7 +313,9 @@ messages = [
 
 Leave out the first message to let the agent look across every indexed document. The context guides the agent; it is not a lock.
 
-Then pass `instructions`, PageIndex's tools, and `messages` to your framework:
+#### Frameworks
+
+Pass `instructions`, PageIndex's tools, and `messages` to your framework:
 
 <details>
 <summary>OpenAI Agents SDK</summary>
@@ -328,7 +330,7 @@ agent = Agent(
     name="PageIndex",
     instructions=instructions,
     tools=client.as_openai_tools(),
-    model="gpt-6-sol",
+    model="gpt-6.2-sol",
 )
 result = Runner.run_sync(agent, messages)
 print(result.final_output)
@@ -346,7 +348,7 @@ Install with `pip install -U "pageindex[anthropic]"`:
 import anthropic
 
 runner = anthropic.Anthropic().beta.messages.tool_runner(
-    model="claude-opus-5",
+    model="claude-opus-5-5",
     max_tokens=16000,
     system=instructions,
     tools=client.as_anthropic_tools(),          # asynchronous=True for AsyncAnthropic
@@ -369,7 +371,7 @@ import asyncio
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 options = ClaudeAgentOptions(
-    model="claude-opus-5",
+    model="claude-opus-5-5",
     system_prompt=instructions,
     mcp_servers={"pageindex": client.as_claude_mcp()},
     allowed_tools=["mcp__pageindex"],
@@ -402,24 +404,38 @@ These are plain Python functions for LangChain, PydanticAI, or any other framewo
 
 </details>
 
+#### More options
+
 <details>
-<summary>Citations, document management, and one-call setup</summary>
+<summary>Citations</summary>
 <br>
 
-**Citations.** Add the citation prompt to the instructions, and the agent cites each claim's page in the same tags as `chat(citations=True)`. Read them with `resolve_citations()`, as in Citations under With your LLM:
+Add the citation prompt to the instructions, and the agent cites each claim's page in the same tags as `chat(citations=True)`. Read them with `resolve_citations()`, as in Citations under With your LLM:
 
 ```python
 instructions = client.agent_instructions() + "\n\n" + client.citation_prompt()
 ```
 
-**Document management.** The tools only read by default. Pass `include_management=True` to both `agent_instructions()` and the tool method, such as `as_openai_tools()`, to also let the agent delete documents.
+</details>
 
-**One-call setup.** These helpers return the instructions and tools together, in place of the setup above:
+<details>
+<summary>Document management</summary>
+<br>
+
+The tools only read by default. Pass `include_management=True` to both `agent_instructions()` and the tool method, such as `as_openai_tools()`, to also let the agent delete documents.
+
+</details>
+
+<details>
+<summary>One-call setup</summary>
+<br>
+
+These helpers return the instructions and tools together, in place of the setup above:
 
 ```python
-agent = Agent(**client.openai_agent_config(model="gpt-6-sol"))
-runner_config = client.anthropic_runner_config(model="claude-opus-5")
-options = ClaudeAgentOptions(**client.claude_agent_config(model="claude-opus-5"))
+agent = Agent(**client.openai_agent_config(model="gpt-6.2-sol"))
+runner_config = client.anthropic_runner_config(model="claude-opus-5-5")
+options = ClaudeAgentOptions(**client.claude_agent_config(model="claude-opus-5-5"))
 ```
 
 </details>
@@ -503,7 +519,7 @@ os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
     index="cloud",                       # build and store the index in PageIndex Cloud
-    chat="gpt-6-sol",                    # use your preferred compatible model for chat
+    chat="gpt-6.2-sol",                  # use your preferred compatible model for chat
 )
 doc_id = client.submit_document("report.pdf", wait=True)["doc_id"]
 print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
