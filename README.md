@@ -134,7 +134,6 @@ client = PageIndexClient(
 ```
 
 </details>
-<br>
 
 <details>
 <summary>Models and API keys</summary>
@@ -249,7 +248,6 @@ answer = client.chat("How did the operating margin change from 2022?", doc_id=[d
 ```
 
 </details>
-<br>
 
 <details>
 <summary>Citations</summary>
@@ -274,7 +272,6 @@ for c in resolved["citations"]:
 ```
 
 </details>
-<br>
 
 <details>
 <summary>Streaming</summary>
@@ -288,7 +285,6 @@ for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True)
 ```
 
 </details>
-<br>
 
 <details>
 <summary>API protocols</summary>
@@ -339,7 +335,6 @@ print(result.final_output)
 ```
 
 </details>
-<br>
 
 <details>
 <summary>Anthropic SDK</summary>
@@ -362,7 +357,6 @@ print("".join(block.text for block in final.content if block.type == "text"))
 ```
 
 </details>
-<br>
 
 <details>
 <summary>Claude Agent SDK</summary>
@@ -395,7 +389,6 @@ asyncio.run(main())
 ```
 
 </details>
-<br>
 
 <details>
 <summary>Other agent frameworks</summary>
@@ -408,7 +401,6 @@ tools = client.agent_tools()
 These are plain Python functions for LangChain, PydanticAI, or any other framework. Each takes JSON arguments and returns a JSON string. Give them and `instructions` to your agent, and pass `messages` as the conversation.
 
 </details>
-<br>
 
 <details>
 <summary>Citations, document management, and one-call setup</summary>
