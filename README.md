@@ -109,11 +109,9 @@ print(answer)
 
 # Usage Guide
 
-Run PageIndex on your machine, step by step. Each step builds on the one before. Expand a step for its code.
+Run PageIndex on your machine, step by step. Each step builds on the one before.
 
-<details>
-<summary><b>Step 1: Set up the client</b></summary>
-<br>
+### Step 1: Set up the client
 
 ```bash
 pip install -U pageindex
@@ -130,6 +128,10 @@ client = PageIndexClient(
     chat="gpt-6-sol",                   # model to search the tree
 )
 ```
+
+<details>
+<summary><b>Models and API keys</b></summary>
+<br>
 
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
 - **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
@@ -148,17 +150,20 @@ Leave out `index=`, and indexing uses `gpt-6-luna`, which needs `OPENAI_API_KEY`
 Indexed documents are kept in `./.pageindex`. To keep them elsewhere, pass the index side as a dict: `index={"model": "gpt-6-luna", "storage_path": "my-index"}`.
 
 </details>
-<br>
 
-<details>
-<summary><a id="step-2-index-your-documents"></a><b>Step 2: Index your documents</b></summary>
-<br>
+### Step 2: Index your documents
 
 ```python
 doc_id = client.submit_document("report.pdf")["doc_id"]
 ```
 
-`submit_document` indexes with **PageIndex Flash** by default: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree. It takes seconds. Pass `mode="standard"` to have the LLM build the whole tree instead (slower).
+`submit_document` indexes with **PageIndex Flash** by default: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree. It takes seconds.
+
+<details>
+<summary><b>Indexing options and reading documents</b></summary>
+<br>
+
+Pass `mode="standard"` to have the LLM build the whole tree instead (slower).
 
 Local mode takes **PDFs** and reads their text layer. It runs no OCR, so a scanned page has no text locally.
 
@@ -210,17 +215,15 @@ Ask with your own LLM through `chat()`, or give PageIndex's tools to an agent yo
 
 #### With your LLM
 
-`chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer.
-
-<details>
-<summary><b>Ask a question</b></summary>
-<br>
-
-`chat()` returns the answer as a string:
+`chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer. It returns the answer as a string:
 
 ```python
 answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
+
+<details>
+<summary><b>Conversations and several documents</b></summary>
+<br>
 
 **Continue a conversation.** Pass the messages so far in place of the question:
 
