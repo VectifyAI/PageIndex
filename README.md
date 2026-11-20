@@ -32,7 +32,7 @@
 
 - [Oct '26] 🔥 [**Page Search API**](https://search.pageindex.ai): find the pages that answer each question in about a second, and send your LLM only those. *Cut 97% token cost on document question answering*; more accurate and faster than vector search ([benchmark](https://github.com/VectifyAI/page-search-benchmark)).
 - [Aug '26] [**PageIndex SDK**](#quickstart): **local** and **cloud** modes — one client to index, retrieve, and chat on your machine (with your own LLM API key) or on [PageIndex Cloud](https://developer.pageindex.ai/).
-- [Aug '26] ⚡ [**PageIndex Flash**](#step-2-build-the-tree-index): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
+- [Aug '26] ⚡ [**PageIndex Flash**](#step-2-index-your-documents): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
 - [Scale PageIndex to Millions of Documents](https://pageindex.ai/docs/documents/folders): *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [PageIndex App](https://app.pageindex.ai): a human-like document analysis agent for long professional documents.<!-- Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer). -->
 
@@ -109,18 +109,19 @@ print(answer)
 
 # Usage Guide
 
-Two ways to use PageIndex on your machine: (a) through the SDK client, or (b) inside your own agent. Expand a section for its code.
+Run PageIndex on your machine, step by step. Each step builds on the one before.
 
-### (a) Use PageIndex through the SDK client
+### Step 1: Set up the client
 
-Three steps: set up the client, build the tree index, ask questions.
-
-<details>
-<summary><b>Step 1: Set up the client</b></summary>
-<br>
+```bash
+pip install -U pageindex
+```
 
 ```python
+import os
 from pageindex import PageIndexClient
+
+os.environ["OPENAI_API_KEY"] = "your-openai-key"
 
 client = PageIndexClient(
     index="gpt-6-luna",                 # model to build the tree index
@@ -128,24 +129,23 @@ client = PageIndexClient(
 )
 ```
 
+- **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
+- **`chat=`: use the best model you can afford.** The chat model searches the tree to retrieve information. See [Query cost and accuracy](#query-cost-and-accuracy).
+
+Model names follow [LiteLLM's naming](https://docs.litellm.ai/docs/providers). The two models can come from different providers; set the API key of each provider you use:
+
+| Provider | `index=` | `chat=` | API key |
+|---|---|---|---|
+| OpenAI | `gpt-6-luna` | `gpt-6-sol` | `OPENAI_API_KEY` |
+| Anthropic | `anthropic/claude-haiku-5-5` | `anthropic/claude-opus-5` | `ANTHROPIC_API_KEY` |
+| OpenRouter | `openrouter/anthropic/claude-haiku-5-5` | `openrouter/anthropic/claude-opus-5` | `OPENROUTER_API_KEY` |
+| Claude subscription | `claude-code/haiku` | `claude-code/opus` | none; install `pageindex[claude]` ([example](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex-claude-subscription.py)) |
+
+Leave out `index=`, and indexing uses `gpt-6-luna`, which needs `OPENAI_API_KEY`. For other providers, see the [LiteLLM provider list](https://docs.litellm.ai/docs/providers).
+
 Indexed documents are kept in `./.pageindex`. To keep them elsewhere, pass the index side as a dict: `index={"model": "gpt-6-luna", "storage_path": "my-index"}`.
 
-Model names follow [LiteLLM's naming](https://docs.litellm.ai/docs/providers). Set the API key of the provider you use:
-
-| Provider | Model name | API key |
-|---|---|---|
-| OpenAI | `gpt-6-sol` | `OPENAI_API_KEY` |
-| Anthropic | `anthropic/claude-opus-5` | `ANTHROPIC_API_KEY` |
-| OpenRouter | `openrouter/anthropic/claude-opus-5` | `OPENROUTER_API_KEY` |
-
-For other providers, see the [LiteLLM provider list](https://docs.litellm.ai/docs/providers).
-
-</details>
-<br>
-
-<details>
-<summary><a id="step-2-build-the-tree-index"></a><b>Step 2: Build the tree index</b></summary>
-<br>
+### Step 2: Index your documents
 
 ```python
 doc_id = client.submit_document("report.pdf")["doc_id"]
@@ -154,6 +154,10 @@ doc_id = client.submit_document("report.pdf")["doc_id"]
 `submit_document` indexes with **PageIndex Flash** by default: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree. It takes seconds. Pass `mode="standard"` to have the LLM build the whole tree instead (slower).
 
 Local mode takes **PDFs** and reads their text layer. It runs no OCR, so a scanned page has no text locally.
+
+<details>
+<summary><b>Read and manage your documents</b></summary>
+<br>
 
 Read what you indexed:
 
@@ -196,11 +200,14 @@ A PageIndex tree looks like a table of contents optimized for LLMs and agents:
 See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/examples/results).
 
 </details>
-<br>
 
-<details>
-<summary><b>Step 3: Ask questions</b></summary>
-<br>
+### Step 3: Ask questions
+
+Ask with your own LLM through `chat()`, or give PageIndex's tools to an agent you already have.
+
+#### With your LLM
+
+`chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer.
 
 **Ask a question.** `chat()` returns the answer as a string:
 
@@ -219,20 +226,18 @@ messages = [
 answer = client.chat(messages, doc_id=doc_id)
 ```
 
-**Ask across documents.** Pass a list of IDs, and keep the same list for every call in a conversation. Leave out `doc_id` to search every indexed document:
+**Ask across documents.** Index another document, then pass a list of IDs, and keep the same list for every call in a conversation. Leave out `doc_id` to search every indexed document:
 
 ```python
-answer = client.chat("Compare the two reports.", doc_id=[doc_id_1, doc_id_2])
+doc_id_2022 = client.submit_document("report-2022.pdf")["doc_id"]
+answer = client.chat("How did the operating margin change from 2022?", doc_id=[doc_id, doc_id_2022])
 ```
 
-**Stream the answer.** The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
+<details>
+<summary><b>Citations</b></summary>
+<br>
 
-```python
-for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True):
-    print(chunk, end="", flush=True)
-```
-
-**Cite the sources.** Pass `citations=True`, and every claim cites its page:
+Pass `citations=True`, and every claim cites its page:
 
 ```python
 answer = client.chat("Summarize this document.", doc_id=doc_id, citations=True)
@@ -250,7 +255,28 @@ for c in resolved["citations"]:
 # 1 report.pdf 12
 ```
 
-**Get a native API response.** `protocol=` returns the response in that API's own shape: `"chat_completions"` or `"responses"` (OpenAI), or `"messages"` (Anthropic, with a Claude model):
+</details>
+<br>
+
+<details>
+<summary><b>Streaming</b></summary>
+<br>
+
+The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
+
+```python
+for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True):
+    print(chunk, end="", flush=True)
+```
+
+</details>
+<br>
+
+<details>
+<summary><b>API protocols</b></summary>
+<br>
+
+`protocol=` returns the response in that API's own shape: `"chat_completions"` or `"responses"` (OpenAI), or `"messages"` (Anthropic, with a Claude model):
 
 ```python
 response = client.chat("Summarize this document.", doc_id=doc_id, protocol="responses")
@@ -259,9 +285,9 @@ print(response["output"])
 
 </details>
 
-### (b) Integrate PageIndex with your own agent
+#### With your agent
 
-Your agent keeps its own model and gets PageIndex's tools to find and read your indexed documents. Name the documents in a first message and put the question in a second:
+Your agent keeps its own model and gets PageIndex's tools to find and read your indexed documents, so the client needs no `chat=` here. Name the documents in a first message and put the question in a second:
 
 ```python
 instructions = client.agent_instructions()     # PageIndex's system prompt, or write your own
@@ -370,7 +396,7 @@ These are plain Python functions for LangChain, PydanticAI, or any other framewo
 <summary><b>Citations, document management, and one-call setup</b></summary>
 <br>
 
-**Citations.** Add the citation prompt to the instructions, and the agent cites each claim's page in the same tags as `chat(citations=True)`. Read them with `resolve_citations()`, as in Step 3:
+**Citations.** Add the citation prompt to the instructions, and the agent cites each claim's page in the same tags as `chat(citations=True)`. Read them with `resolve_citations()`, as in Citations under With your LLM:
 
 ```python
 instructions = client.agent_instructions() + "\n\n" + client.citation_prompt()
