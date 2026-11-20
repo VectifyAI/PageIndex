@@ -113,6 +113,10 @@ Run PageIndex on your machine, step by step. Each step builds on the one before.
 
 ### Step 1: Set up the client
 
+<details>
+<summary><b>Install and create the client</b></summary>
+<br>
+
 ```bash
 pip install -U pageindex
 ```
@@ -128,6 +132,9 @@ client = PageIndexClient(
     chat="gpt-6-sol",                   # model to search the tree
 )
 ```
+
+</details>
+<br>
 
 <details>
 <summary><b>Models and API keys</b></summary>
@@ -157,15 +164,13 @@ Indexed documents are kept in `./.pageindex`. To keep them elsewhere, pass the i
 doc_id = client.submit_document("report.pdf")["doc_id"]
 ```
 
-`submit_document` indexes with **PageIndex Flash** by default: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree. It takes seconds.
-
-<details>
-<summary><b>Indexing options and reading documents</b></summary>
-<br>
-
-Pass `mode="standard"` to have the LLM build the whole tree instead (slower).
+`submit_document` indexes with **PageIndex Flash**: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree.
 
 Local mode takes **PDFs** and reads their text layer. It runs no OCR, so a scanned page has no text locally.
+
+<details>
+<summary><b>Read and manage your documents</b></summary>
+<br>
 
 Read what you indexed:
 
