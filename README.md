@@ -111,7 +111,7 @@ print(answer)
 
 Run PageIndex on your machine, step by step. Each step builds on the one before.
 
-### Step 1: Set up the client
+## Step 1: Set up the client
 
 <details>
 <summary><b>Install and create the client</b></summary>
@@ -158,7 +158,7 @@ Indexed documents are kept in `./.pageindex`. To keep them elsewhere, pass the i
 
 </details>
 
-### Step 2: Index your documents
+## Step 2: Index your documents
 
 ```python
 doc_id = client.submit_document("report.pdf")["doc_id"]
@@ -214,11 +214,11 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 
 </details>
 
-### Step 3: Ask questions
+## Step 3: Ask questions
 
-Ask with your own LLM through `chat()`, or give PageIndex's tools to an agent you already have.
+Ask with your own LLM, or with an agent you already have.
 
-#### With your LLM
+### With your LLM
 
 `chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer. It returns the answer as a string:
 
@@ -303,7 +303,7 @@ print(response["output"])
 
 </details>
 
-#### With your agent
+### With your agent
 
 Your agent keeps its own model and gets PageIndex's tools to find and read your indexed documents, so the client needs no `chat=` here. Name the documents in a first message and put the question in a second:
 
