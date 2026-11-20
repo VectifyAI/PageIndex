@@ -165,7 +165,7 @@ doc_id = client.submit_document("report.pdf")["doc_id"]
 
 `submit_document` indexes with **PageIndex Flash**: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree.
 
-Local mode takes **PDFs** and reads their text layer. It runs no OCR, so a scanned page has no text locally.
+Local mode (PageIndex Flash) works with text-based PDFs. For scanned files and image understanding, use [PageIndex Cloud](#pageindex-cloud).
 
 <details>
 <summary>Read and manage your documents</summary>
