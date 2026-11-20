@@ -109,9 +109,11 @@ print(answer)
 
 # Usage Guide
 
-Run PageIndex on your machine, step by step. Each step builds on the one before.
+Run PageIndex on your machine, step by step. Each step builds on the one before. Expand a step for its code.
 
-### Step 1: Set up the client
+<details>
+<summary><b>Step 1: Set up the client</b></summary>
+<br>
 
 ```bash
 pip install -U pageindex
@@ -145,7 +147,12 @@ Leave out `index=`, and indexing uses `gpt-6-luna`, which needs `OPENAI_API_KEY`
 
 Indexed documents are kept in `./.pageindex`. To keep them elsewhere, pass the index side as a dict: `index={"model": "gpt-6-luna", "storage_path": "my-index"}`.
 
-### Step 2: Index your documents
+</details>
+<br>
+
+<details>
+<summary><a id="step-2-index-your-documents"></a><b>Step 2: Index your documents</b></summary>
+<br>
 
 ```python
 doc_id = client.submit_document("report.pdf")["doc_id"]
@@ -154,10 +161,6 @@ doc_id = client.submit_document("report.pdf")["doc_id"]
 `submit_document` indexes with **PageIndex Flash** by default: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree. It takes seconds. Pass `mode="standard"` to have the LLM build the whole tree instead (slower).
 
 Local mode takes **PDFs** and reads their text layer. It runs no OCR, so a scanned page has no text locally.
-
-<details>
-<summary><b>Read and manage your documents</b></summary>
-<br>
 
 Read what you indexed:
 
@@ -209,7 +212,11 @@ Ask with your own LLM through `chat()`, or give PageIndex's tools to an agent yo
 
 `chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer.
 
-**Ask a question.** `chat()` returns the answer as a string:
+<details>
+<summary><b>Ask a question</b></summary>
+<br>
+
+`chat()` returns the answer as a string:
 
 ```python
 answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
@@ -232,6 +239,9 @@ answer = client.chat(messages, doc_id=doc_id)
 doc_id_2022 = client.submit_document("report-2022.pdf")["doc_id"]
 answer = client.chat("How did the operating margin change from 2022?", doc_id=[doc_id, doc_id_2022])
 ```
+
+</details>
+<br>
 
 <details>
 <summary><b>Citations</b></summary>
