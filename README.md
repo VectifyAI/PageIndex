@@ -225,6 +225,8 @@ Ask with your own LLM, or with an agent you already have.
 answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
 
+#### *More options:*
+
 <details>
 <summary>Streaming</summary>
 <br>
