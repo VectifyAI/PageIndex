@@ -218,7 +218,7 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 
 Ask with your own LLM, or with an agent you already have.
 
-### With your LLM
+### ↳ With your LLM
 
 `chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer. It returns the answer as a string:
 
@@ -303,7 +303,7 @@ print(response["output"])
 
 </details>
 
-### With your agent
+### ↳ With your agent
 
 Your agent keeps its own model and gets PageIndex's tools to find and read your indexed documents, so the client needs no `chat=` here. Name the documents in a first message and put the question in a second:
 
