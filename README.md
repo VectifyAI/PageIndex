@@ -116,7 +116,7 @@ Two ways to use PageIndex on your machine: (a) through the SDK client, or (b) in
 Three steps: set up the client, build the tree index, ask questions.
 
 <details>
-<summary><b>⚙️ Step 1: Set up the client</b></summary>
+<summary><b>Step 1: Set up the client</b></summary>
 <br>
 
 ```python
@@ -125,7 +125,6 @@ from pageindex import PageIndexClient
 client = PageIndexClient(
     index="gpt-6-luna",                 # model to build the tree index
     chat="gpt-6-sol",                   # model to search the tree
-    # instructions="Answer in one short paragraph.",   # optional: added after PageIndex's system prompt
 )
 ```
 
@@ -145,7 +144,7 @@ For other providers, see the [LiteLLM provider list](https://docs.litellm.ai/doc
 <br>
 
 <details>
-<summary><a id="step-2-build-the-tree-index"></a><b>🌲 Step 2: Build the tree index</b></summary>
+<summary><a id="step-2-build-the-tree-index"></a><b>Step 2: Build the tree index</b></summary>
 <br>
 
 ```python
@@ -200,7 +199,7 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 <br>
 
 <details>
-<summary><b>💬 Step 3: Ask questions</b></summary>
+<summary><b>Step 3: Ask questions</b></summary>
 <br>
 
 **Ask a question.** `chat()` returns the answer as a string:
