@@ -113,8 +113,6 @@ Run PageIndex on your machine, step by step. Each step builds on the one before.
 
 ## Step 1: Set up the client
 
-<dl><dd>
-
 <details>
 <summary>Install and initialize</summary>
 <br>
@@ -159,8 +157,6 @@ Indexed documents are kept in `./.pageindex`. To keep them elsewhere, pass the i
 
 </details>
 
-</dd></dl>
-
 ## Step 2: Index your documents
 
 ```python
@@ -170,8 +166,6 @@ doc_id = client.submit_document("report.pdf")["doc_id"]
 `submit_document` indexes with **PageIndex Flash**: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree.
 
 Local mode (PageIndex Flash) works with text-based PDFs. For scanned files and image understanding, use [PageIndex Cloud](#pageindex-cloud).
-
-<dl><dd>
 
 <details>
 <summary>Read and manage your documents</summary>
@@ -219,8 +213,6 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 
 </details>
 
-</dd></dl>
-
 ## Step 3: Ask questions
 
 Ask with your own LLM, or with an agent you already have.
@@ -232,8 +224,6 @@ Ask with your own LLM, or with an agent you already have.
 ```python
 answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
-
-<dl><dd>
 
 <details>
 <summary>Citations</summary>
@@ -309,8 +299,6 @@ answer = client.chat("How did the operating margin change from 2022?", doc_id=[d
 
 </details>
 
-</dd></dl>
-
 ### Option B: With your agent
 
 Your agent keeps its own model and gets PageIndex's tools to find and read your indexed documents, so the client needs no `chat=` here. Name the documents in a first message and put the question in a second:
@@ -325,11 +313,9 @@ messages = [
 
 Leave out the first message to let the agent look across every indexed document. The context guides the agent; it is not a lock.
 
-#### Agent frameworks
+#### *Agent frameworks*
 
 Pass `instructions`, PageIndex's tools, and `messages` to your framework:
-
-<dl><dd>
 
 <details>
 <summary>OpenAI Agents SDK</summary>
@@ -418,11 +404,7 @@ These are plain Python functions for LangChain, PydanticAI, or any other framewo
 
 </details>
 
-</dd></dl>
-
-#### More options
-
-<dl><dd>
+#### *More options*
 
 <details>
 <summary>Citations</summary>
@@ -457,8 +439,6 @@ options = ClaudeAgentOptions(**client.claude_agent_config(model="claude-opus-5-5
 ```
 
 </details>
-
-</dd></dl>
 
 
 # Benchmarks
