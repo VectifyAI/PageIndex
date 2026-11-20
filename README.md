@@ -32,8 +32,8 @@
 
 - [Oct '26] 🔥 [**Page Search API**](https://search.pageindex.ai): find the pages that answer each question in about a second, and send your LLM only those. *Cut 97% token cost on document question answering*; more accurate and faster than vector search ([benchmark](https://github.com/VectifyAI/page-search-benchmark)).
 - [Aug '26] [**PageIndex SDK**](#quickstart): **local** and **cloud** modes — one client to index, retrieve, and chat on your machine (with your own LLM API key) or on [PageIndex Cloud](https://developer.pageindex.ai/).
-- [Aug '26] ⚡ [**PageIndex Flash**](https://pageindex.ai/blog/pageindex-flash): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
-- [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
+- [Aug '26] ⚡ [**PageIndex Flash**](#step-2-build-the-tree-index): fast tree index generation for text-based PDFs, now the default indexing method in PageIndex SDK local mode.
+- [Scale PageIndex to Millions of Documents](https://pageindex.ai/docs/documents/folders): *PageIndex File System* is a file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 - [PageIndex App](https://app.pageindex.ai): a human-like document analysis agent for long professional documents.<!-- Also available via [MCP](https://pageindex.ai/developer) or [API](https://pageindex.ai/developer). -->
 
 </details>
@@ -51,7 +51,10 @@ Inspired by AlphaGo, **[PageIndex](https://vectify.ai/pageindex)** replaces the 
 
 <div align="center">
   <a href="https://pageindex.ai/blog/pageindex-intro" target="_blank" title="The PageIndex Framework">
-    <img src="https://docs.pageindex.ai/images/cookbook/vectorless-rag.png" width="70%">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/vectorless-rag-dark.svg">
+      <img src="https://raw.githubusercontent.com/VectifyAI/PageIndex/main/assets/vectorless-rag-light.svg" width="70%" alt="Vectorless RAG with PageIndex: a document becomes a tree index, and LLM reasoning searches the tree to answer a query.">
+    </picture>
   </a>
 </div>
 
@@ -104,13 +107,287 @@ print(answer)
 
 **Have a Claude subscription?** PageIndex can use your subscription to call Claude models through Claude Code: usage is covered by your plan, no API key needed. Install with `pip install -U "pageindex[claude]"`, then prefix model names with `claude-code/`, e.g., `index="claude-code/haiku"`, `chat="claude-code/opus"` (see [example](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex-claude-subscription.py)).
 
-### [Use PageIndex through the SDK client →](https://docs.pageindex.ai/getting-started)
+# Usage Guide
 
-Configure other models, streaming, multi-document search, citations, and more.
+Two ways to use PageIndex on your machine: (a) through the SDK client, or (b) inside your own agent. Expand a section for its code.
 
-### [Integrate PageIndex with your own agent →](https://docs.pageindex.ai/sdk/agents)
+### (a) Use PageIndex through the SDK client
 
-Drop PageIndex tools into the OpenAI Agents SDK, the Claude Agent SDK, or any other framework.
+Three steps: set up the client, build the tree index, ask questions.
+
+<details>
+<summary><b>⚙️ Step 1: Set up the client</b></summary>
+<br>
+
+```python
+from pageindex import PageIndexClient
+
+client = PageIndexClient(
+    index="gpt-6-luna",                 # model to build the tree index
+    chat="gpt-6-sol",                   # model to search the tree
+    # instructions="Answer in one short paragraph.",   # optional: added after PageIndex's system prompt
+)
+```
+
+Indexed documents are kept in `./.pageindex`. To keep them elsewhere, pass the index side as a dict: `index={"model": "gpt-6-luna", "storage_path": "my-index"}`.
+
+Model names follow [LiteLLM's naming](https://docs.litellm.ai/docs/providers). Set the API key of the provider you use:
+
+| Provider | Model name | API key |
+|---|---|---|
+| OpenAI | `gpt-6-sol` | `OPENAI_API_KEY` |
+| Anthropic | `anthropic/claude-opus-5` | `ANTHROPIC_API_KEY` |
+| OpenRouter | `openrouter/anthropic/claude-opus-5` | `OPENROUTER_API_KEY` |
+
+For other providers, see the [LiteLLM provider list](https://docs.litellm.ai/docs/providers).
+
+</details>
+<br>
+
+<details>
+<summary><a id="step-2-build-the-tree-index"></a><b>🌲 Step 2: Build the tree index</b></summary>
+<br>
+
+```python
+doc_id = client.submit_document("report.pdf")["doc_id"]
+```
+
+`submit_document` indexes with **PageIndex Flash** by default: the structure comes from the PDF's own layout, without an LLM, and the index model only writes node summaries and refines the tree. It takes seconds. Pass `mode="standard"` to have the LLM build the whole tree instead (slower).
+
+Local mode takes **PDFs** and reads their text layer. It runs no OCR, so a scanned page has no text locally.
+
+Read what you indexed:
+
+```python
+tree = client.get_document_structure(doc_id)    # titles, page ranges, summaries; no text
+pages = client.get_page_content(doc_id, "5-7")  # the text of pages 5 to 7
+docs = client.list_documents()                  # every indexed document
+```
+
+To remove a document, call `client.delete_document(doc_id)`.
+
+A PageIndex tree looks like a table of contents optimized for LLMs and agents:
+
+```jsonc
+{
+  "title": "Financial Stability",
+  "node_id": "0006",
+  "start_index": 21,
+  "end_index": 22,
+  "summary": "The Federal Reserve ...",
+  "nodes": [
+    {
+      "title": "Monitoring Financial Vulnerabilities",
+      "node_id": "0007",
+      "start_index": 22,
+      "end_index": 28,
+      "summary": "The Federal Reserve's monitoring ..."
+    },
+    {
+      "title": "Domestic and International Cooperation and Coordination",
+      "node_id": "0008",
+      "start_index": 28,
+      "end_index": 31,
+      "summary": "In 2023, the Federal Reserve collaborated ..."
+    }
+  ]
+}
+```
+
+See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/examples/results).
+
+</details>
+<br>
+
+<details>
+<summary><b>💬 Step 3: Ask questions</b></summary>
+<br>
+
+**Ask a question.** `chat()` returns the answer as a string:
+
+```python
+answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
+```
+
+**Continue a conversation.** Pass the messages so far in place of the question:
+
+```python
+messages = [
+    {"role": "user", "content": "What was the operating margin in 2023?"},
+    {"role": "assistant", "content": answer},
+    {"role": "user", "content": "How did it compare with 2022?"},
+]
+answer = client.chat(messages, doc_id=doc_id)
+```
+
+**Ask across documents.** Pass a list of IDs, and keep the same list for every call in a conversation. Leave out `doc_id` to search every indexed document:
+
+```python
+answer = client.chat("Compare the two reports.", doc_id=[doc_id_1, doc_id_2])
+```
+
+**Stream the answer.** The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
+
+```python
+for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True):
+    print(chunk, end="", flush=True)
+```
+
+**Cite the sources.** Pass `citations=True`, and every claim cites its page:
+
+```python
+answer = client.chat("Summarize this document.", doc_id=doc_id, citations=True)
+# Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/>
+```
+
+`citations="markdown"` writes `[report.pdf, p. 12]` instead. To show the citations, `resolve_citations()` turns the tags into numbered links and lists the sources:
+
+```python
+resolved = client.resolve_citations(answer)
+print(resolved["answer"])
+# Revenue increased during the reporting period. [[1]](#pageindex-citation-01)
+for c in resolved["citations"]:
+    print(c["index"], c["document"], c["page"])
+# 1 report.pdf 12
+```
+
+**Get a native API response.** `protocol=` returns the response in that API's own shape: `"chat_completions"` or `"responses"` (OpenAI), or `"messages"` (Anthropic, with a Claude model):
+
+```python
+response = client.chat("Summarize this document.", doc_id=doc_id, protocol="responses")
+print(response["output"])
+```
+
+</details>
+
+### (b) Integrate PageIndex with your own agent
+
+Your agent keeps its own model and gets PageIndex's tools to find and read your indexed documents. Name the documents in a first message and put the question in a second:
+
+```python
+instructions = client.agent_instructions()     # PageIndex's system prompt, or write your own
+messages = [
+    {"role": "user", "content": client.document_context(doc_id)},   # one ID or a list
+    {"role": "user", "content": "What are the auditor's main concerns?"},
+]
+```
+
+Leave out the first message to let the agent look across every indexed document. The context guides the agent; it is not a lock.
+
+Then pass `instructions`, PageIndex's tools, and `messages` to your framework:
+
+<details>
+<summary><b>OpenAI Agents SDK</b></summary>
+<br>
+
+Ships with the SDK, no extras needed:
+
+```python
+from agents import Agent, Runner
+
+agent = Agent(
+    name="PageIndex",
+    instructions=instructions,
+    tools=client.as_openai_tools(),
+    model="gpt-6-sol",
+)
+result = Runner.run_sync(agent, messages)
+print(result.final_output)
+```
+
+</details>
+<br>
+
+<details>
+<summary><b>Anthropic SDK</b></summary>
+<br>
+
+Install with `pip install -U "pageindex[anthropic]"`:
+
+```python
+import anthropic
+
+runner = anthropic.Anthropic().beta.messages.tool_runner(
+    model="claude-opus-5",
+    max_tokens=16000,
+    system=instructions,
+    tools=client.as_anthropic_tools(),          # asynchronous=True for AsyncAnthropic
+    messages=messages,
+)
+final = runner.until_done()
+print("".join(block.text for block in final.content if block.type == "text"))
+```
+
+</details>
+<br>
+
+<details>
+<summary><b>Claude Agent SDK</b></summary>
+<br>
+
+Install with `pip install -U "pageindex[claude]"`:
+
+```python
+import asyncio
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+options = ClaudeAgentOptions(
+    model="claude-opus-5",
+    system_prompt=instructions,
+    mcp_servers={"pageindex": client.as_claude_mcp()},
+    allowed_tools=["mcp__pageindex"],
+)
+
+async def input_messages():
+    for message in messages:
+        yield {"type": "user", "message": message,
+               "parent_tool_use_id": None, "session_id": ""}
+
+async def main():
+    async for message in query(prompt=input_messages(), options=options):
+        if isinstance(message, ResultMessage):
+            print(message.result)
+
+asyncio.run(main())
+```
+
+</details>
+<br>
+
+<details>
+<summary><b>Other agent frameworks</b></summary>
+<br>
+
+```python
+tools = client.agent_tools()
+```
+
+These are plain Python functions for LangChain, PydanticAI, or any other framework. Each takes JSON arguments and returns a JSON string. Give them and `instructions` to your agent, and pass `messages` as the conversation.
+
+</details>
+<br>
+
+<details>
+<summary><b>Citations, document management, and one-call setup</b></summary>
+<br>
+
+**Citations.** Add the citation prompt to the instructions, and the agent cites each claim's page in the same tags as `chat(citations=True)`. Read them with `resolve_citations()`, as in Step 3:
+
+```python
+instructions = client.agent_instructions() + "\n\n" + client.citation_prompt()
+```
+
+**Document management.** The tools only read by default. Pass `include_management=True` to both `agent_instructions()` and the tool method, such as `as_openai_tools()`, to also let the agent delete documents.
+
+**One-call setup.** These helpers return the instructions and tools together, in place of the setup above:
+
+```python
+agent = Agent(**client.openai_agent_config(model="gpt-6-sol"))
+runner_config = client.anthropic_runner_config(model="claude-opus-5")
+options = ClaudeAgentOptions(**client.claude_agent_config(model="claude-opus-5"))
+```
+
+</details>
 
 
 # Benchmarks
@@ -204,13 +481,13 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Storage | Local directory | Cloud storage |
 | Citations | Page-level | Block-level |
 | OCR & image understanding | — | ✓ |
-| [Metadata](https://docs.pageindex.ai/sdk/documents#metadata) | — | ✓ |
-| [Folders](https://docs.pageindex.ai/sdk/documents#folders-cloud) | — | ✓ |
-| [MCP server](https://docs.pageindex.ai/mcp) | — | ✓ |
+| [Metadata](https://pageindex.ai/docs/documents/collections) | — | ✓ |
+| [Folders](https://pageindex.ai/docs/documents/folders) | — | ✓ |
+| [MCP server](https://pageindex.ai/docs/sdk/agents#connect-over-mcp) | — | ✓ |
 
 ### More About PageIndex Cloud
 
-- [Scale PageIndex to Millions of Documents](https://pageindex.ai/blog/pageindex-filesystem): **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
+- [Scale PageIndex to Millions of Documents](https://pageindex.ai/docs/documents/folders): **PageIndex File System** is a Cloud-only, file-level tree indexing layer that lets PageIndex reason over an entire corpus, not just a single document.
 
 ### Ready to Try It?
 
