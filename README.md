@@ -114,7 +114,7 @@ Run PageIndex on your machine, step by step. Each step builds on the one before.
 ## Step 1: Set up the client
 
 <details>
-<summary>Install and initialize</summary>
+<summary>Install and initialize:</summary>
 <br>
 
 ```bash
@@ -136,7 +136,7 @@ client = PageIndexClient(
 </details>
 
 <details>
-<summary>Models and API keys</summary>
+<summary>Models and API keys:</summary>
 <br>
 
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
@@ -168,7 +168,7 @@ doc_id = client.submit_document("report.pdf")["doc_id"]
 Local mode (PageIndex Flash) works with text-based PDFs. For scanned files and image understanding, use [PageIndex Cloud](#pageindex-cloud).
 
 <details>
-<summary>Read and manage your documents</summary>
+<summary>Read and manage your documents:</summary>
 <br>
 
 Read what you indexed:
@@ -226,7 +226,7 @@ answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
 
 <details>
-<summary>Streaming</summary>
+<summary>Streaming:</summary>
 <br>
 
 The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
@@ -239,7 +239,7 @@ for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True)
 </details>
 
 <details>
-<summary>Citations</summary>
+<summary>Citations:</summary>
 <br>
 
 Pass `citations=True`, and every claim cites its page:
@@ -263,7 +263,7 @@ for c in resolved["citations"]:
 </details>
 
 <details>
-<summary>Protocols (Chat Completions / Responses / Messages)</summary>
+<summary>Protocols (Chat Completions / Responses / Messages):</summary>
 <br>
 
 `protocol=` returns the response in that API's own shape: `"chat_completions"` or `"responses"` (OpenAI), or `"messages"` (Anthropic, with a Claude model):
@@ -276,7 +276,7 @@ print(response["output"])
 </details>
 
 <details>
-<summary>Conversations and multiple documents</summary>
+<summary>Conversations and multiple documents:</summary>
 <br>
 
 **Continue a conversation.** Pass the messages so far in place of the question:
@@ -318,7 +318,7 @@ Leave out the first message to let the agent look across every indexed document.
 Pass `instructions`, PageIndex's tools, and `messages` to your agent framework:
 
 <details>
-<summary>OpenAI Agents SDK</summary>
+<summary>OpenAI Agents SDK:</summary>
 <br>
 
 Ships with the SDK, no extras needed:
@@ -339,7 +339,7 @@ print(result.final_output)
 </details>
 
 <details>
-<summary>Anthropic SDK</summary>
+<summary>Anthropic SDK:</summary>
 <br>
 
 Install with `pip install -U "pageindex[anthropic]"`:
@@ -361,7 +361,7 @@ print("".join(block.text for block in final.content if block.type == "text"))
 </details>
 
 <details>
-<summary>Claude Agent SDK</summary>
+<summary>Claude Agent SDK:</summary>
 <br>
 
 Install with `pip install -U "pageindex[claude]"`:
@@ -393,7 +393,7 @@ asyncio.run(main())
 </details>
 
 <details>
-<summary>Other agent frameworks</summary>
+<summary>Other agent frameworks:</summary>
 <br>
 
 ```python
@@ -407,7 +407,7 @@ These are plain Python functions for LangChain, PydanticAI, or any other framewo
 #### *More options:*
 
 <details>
-<summary>Citations</summary>
+<summary>Citations:</summary>
 <br>
 
 Add the citation prompt to the instructions, and the agent cites each claim's page in the same tags as `chat(citations=True)`. Read them with `resolve_citations()`, as in Citations under With your LLM:
@@ -419,7 +419,7 @@ instructions = client.agent_instructions() + "\n\n" + client.citation_prompt()
 </details>
 
 <details>
-<summary>Document management</summary>
+<summary>Document management:</summary>
 <br>
 
 The tools only read by default. Pass `include_management=True` to both `agent_instructions()` and the tool method, such as `as_openai_tools()`, to also let the agent delete documents.
@@ -427,7 +427,7 @@ The tools only read by default. Pass `include_management=True` to both `agent_in
 </details>
 
 <details>
-<summary>One-call setup</summary>
+<summary>One-call setup:</summary>
 <br>
 
 These helpers return the instructions and tools together, in place of the setup above:
