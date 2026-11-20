@@ -114,7 +114,7 @@ Run PageIndex on your machine, step by step. Each step builds on the one before.
 ## Step 1: Set up the client
 
 <details>
-<summary><b>Install and create the client</b></summary>
+<summary>Install and create the client</summary>
 <br>
 
 ```bash
@@ -137,7 +137,7 @@ client = PageIndexClient(
 <br>
 
 <details>
-<summary><b>Models and API keys</b></summary>
+<summary>Models and API keys</summary>
 <br>
 
 - **`index=`: a basic model is sufficient.** The tree structure itself is extracted from the document layout without an LLM; the index model only summarizes and refines it, which a basic model does well.
@@ -169,7 +169,7 @@ doc_id = client.submit_document("report.pdf")["doc_id"]
 Local mode takes **PDFs** and reads their text layer. It runs no OCR, so a scanned page has no text locally.
 
 <details>
-<summary><b>Read and manage your documents</b></summary>
+<summary>Read and manage your documents</summary>
 <br>
 
 Read what you indexed:
@@ -218,16 +218,16 @@ See more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/ex
 
 Ask with your own LLM, or with an agent you already have.
 
-### ↳ With your LLM
+### Option A: With your LLM
 
-`chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer. It returns the answer as a string:
+`chat()` runs PageIndex's agent on your LLM: it finds the right pages, then writes the answer.
 
 ```python
 answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
 
 <details>
-<summary><b>Conversations and several documents</b></summary>
+<summary>Conversations and several documents</summary>
 <br>
 
 **Continue a conversation.** Pass the messages so far in place of the question:
@@ -252,7 +252,7 @@ answer = client.chat("How did the operating margin change from 2022?", doc_id=[d
 <br>
 
 <details>
-<summary><b>Citations</b></summary>
+<summary>Citations</summary>
 <br>
 
 Pass `citations=True`, and every claim cites its page:
@@ -277,7 +277,7 @@ for c in resolved["citations"]:
 <br>
 
 <details>
-<summary><b>Streaming</b></summary>
+<summary>Streaming</summary>
 <br>
 
 The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
@@ -291,7 +291,7 @@ for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True)
 <br>
 
 <details>
-<summary><b>API protocols</b></summary>
+<summary>API protocols</summary>
 <br>
 
 `protocol=` returns the response in that API's own shape: `"chat_completions"` or `"responses"` (OpenAI), or `"messages"` (Anthropic, with a Claude model):
@@ -303,7 +303,7 @@ print(response["output"])
 
 </details>
 
-### ↳ With your agent
+### Option B: With your agent
 
 Your agent keeps its own model and gets PageIndex's tools to find and read your indexed documents, so the client needs no `chat=` here. Name the documents in a first message and put the question in a second:
 
@@ -320,7 +320,7 @@ Leave out the first message to let the agent look across every indexed document.
 Then pass `instructions`, PageIndex's tools, and `messages` to your framework:
 
 <details>
-<summary><b>OpenAI Agents SDK</b></summary>
+<summary>OpenAI Agents SDK</summary>
 <br>
 
 Ships with the SDK, no extras needed:
@@ -342,7 +342,7 @@ print(result.final_output)
 <br>
 
 <details>
-<summary><b>Anthropic SDK</b></summary>
+<summary>Anthropic SDK</summary>
 <br>
 
 Install with `pip install -U "pageindex[anthropic]"`:
@@ -365,7 +365,7 @@ print("".join(block.text for block in final.content if block.type == "text"))
 <br>
 
 <details>
-<summary><b>Claude Agent SDK</b></summary>
+<summary>Claude Agent SDK</summary>
 <br>
 
 Install with `pip install -U "pageindex[claude]"`:
@@ -398,7 +398,7 @@ asyncio.run(main())
 <br>
 
 <details>
-<summary><b>Other agent frameworks</b></summary>
+<summary>Other agent frameworks</summary>
 <br>
 
 ```python
@@ -411,7 +411,7 @@ These are plain Python functions for LangChain, PydanticAI, or any other framewo
 <br>
 
 <details>
-<summary><b>Citations, document management, and one-call setup</b></summary>
+<summary>Citations, document management, and one-call setup</summary>
 <br>
 
 **Citations.** Add the citation prompt to the instructions, and the agent cites each claim's page in the same tags as `chat(citations=True)`. Read them with `resolve_citations()`, as in Citations under With your LLM:
