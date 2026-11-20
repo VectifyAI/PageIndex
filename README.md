@@ -532,9 +532,16 @@ print(client.chat("What was the 2023 operating margin?", doc_id=doc_id))
 | Storage | Local directory | Cloud storage |
 | Citations | Page-level | Line-level |
 | Multimodal understanding | — | ✓ |
-| [Metadata](https://pageindex.ai/docs/documents/collections) | — | ✓ |
+| [Collections & metadata](https://pageindex.ai/docs/documents/collections) | — | ✓ |
 | [Folders](https://pageindex.ai/docs/documents/folders) | — | ✓ |
 | [MCP server](https://pageindex.ai/docs/sdk/agents#connect-over-mcp) | — | ✓ |
+
+### Also on PageIndex Cloud
+
+The same API key and SDK also work with:
+
+- [**Page Search API**](https://pageindex.ai/docs/search/quick-start): find the pages that answer a question.
+- [**Page Extract API**](https://pageindex.ai/docs/extract/quick-start): extract fields and tables as JSON.
 
 ### More About PageIndex Cloud
 
