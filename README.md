@@ -226,6 +226,19 @@ answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
 
 <details>
+<summary>Streaming</summary>
+<br>
+
+The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
+
+```python
+for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True):
+    print(chunk, end="", flush=True)
+```
+
+</details>
+
+<details>
 <summary>Citations</summary>
 <br>
 
@@ -245,19 +258,6 @@ print(resolved["answer"])
 for c in resolved["citations"]:
     print(c["index"], c["document"], c["page"])
 # 1 report.pdf 12
-```
-
-</details>
-
-<details>
-<summary>Streaming</summary>
-<br>
-
-The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
-
-```python
-for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True):
-    print(chunk, end="", flush=True)
 ```
 
 </details>
@@ -313,7 +313,7 @@ messages = [
 
 Leave out the first message to let the agent look across every indexed document. The context guides the agent; it is not a lock.
 
-#### *Agent frameworks*
+#### *Agent frameworks:*
 
 Pass `instructions`, PageIndex's tools, and `messages` to your agent framework:
 
@@ -404,7 +404,7 @@ These are plain Python functions for LangChain, PydanticAI, or any other framewo
 
 </details>
 
-#### *More options*
+#### *More options:*
 
 <details>
 <summary>Citations</summary>
