@@ -226,44 +226,20 @@ answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
 
 <details>
-<summary>Conversations and several documents</summary>
-<br>
-
-**Continue a conversation.** Pass the messages so far in place of the question:
-
-```python
-messages = [
-    {"role": "user", "content": "What was the operating margin in 2023?"},
-    {"role": "assistant", "content": answer},
-    {"role": "user", "content": "How did it compare with 2022?"},
-]
-answer = client.chat(messages, doc_id=doc_id)
-```
-
-**Ask across documents.** Index another document, then pass a list of IDs, and keep the same list for every call in a conversation. Leave out `doc_id` to search every indexed document:
-
-```python
-doc_id_2022 = client.submit_document("report-2022.pdf")["doc_id"]
-answer = client.chat("How did the operating margin change from 2022?", doc_id=[doc_id, doc_id_2022])
-```
-
-</details>
-
-<details>
 <summary>Citations</summary>
 <br>
 
 Pass `citations=True`, and every claim cites its page:
 
 ```python
-answer = client.chat("Summarize this document.", doc_id=doc_id, citations=True)
+cited = client.chat("Summarize this document.", doc_id=doc_id, citations=True)
 # Revenue increased during the reporting period. <cite doc="report.pdf" page="12"/>
 ```
 
 `citations="markdown"` writes `[report.pdf, p. 12]` instead. To show the citations, `resolve_citations()` turns the tags into numbered links and lists the sources:
 
 ```python
-resolved = client.resolve_citations(answer)
+resolved = client.resolve_citations(cited)
 print(resolved["answer"])
 # Revenue increased during the reporting period. [[1]](#pageindex-citation-01)
 for c in resolved["citations"]:
@@ -287,7 +263,7 @@ for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True)
 </details>
 
 <details>
-<summary>API protocols</summary>
+<summary>Protocols (Chat Completions / Responses / Messages)</summary>
 <br>
 
 `protocol=` returns the response in that API's own shape: `"chat_completions"` or `"responses"` (OpenAI), or `"messages"` (Anthropic, with a Claude model):
@@ -295,6 +271,30 @@ for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True)
 ```python
 response = client.chat("Summarize this document.", doc_id=doc_id, protocol="responses")
 print(response["output"])
+```
+
+</details>
+
+<details>
+<summary>Conversations and several documents</summary>
+<br>
+
+**Continue a conversation.** Pass the messages so far in place of the question:
+
+```python
+messages = [
+    {"role": "user", "content": "What changed in the risk factors?"},
+    {"role": "assistant", "content": answer},
+    {"role": "user", "content": "Which of these changes matters most?"},
+]
+answer = client.chat(messages, doc_id=doc_id)
+```
+
+**Ask across documents.** Index another document, then pass a list of IDs, and keep the same list for every call in a conversation. Leave out `doc_id` to search every indexed document:
+
+```python
+doc_id_2022 = client.submit_document("report-2022.pdf")["doc_id"]
+answer = client.chat("How did the operating margin change from 2022?", doc_id=[doc_id, doc_id_2022])
 ```
 
 </details>
