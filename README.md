@@ -225,10 +225,8 @@ Ask with your own LLM, or with an agent you already have.
 answer = client.chat("What changed in the risk factors?", doc_id=doc_id)
 ```
 
-#### *More options:*
-
 <details>
-<summary>Streaming</summary>
+<summary><b><i>Streaming:</i></b></summary>
 <br>
 
 The stream shows the agent's thinking and tool calls as it works; pass `show_process=False` to stream only the answer:
@@ -241,7 +239,7 @@ for chunk in client.chat("Summarize this document.", doc_id=doc_id, stream=True)
 </details>
 
 <details>
-<summary>Citations</summary>
+<summary><b><i>Citations:</i></b></summary>
 <br>
 
 Pass `citations=True`, and every claim cites its page:
@@ -265,7 +263,7 @@ for c in resolved["citations"]:
 </details>
 
 <details>
-<summary>Protocols (Chat Completions / Responses / Messages)</summary>
+<summary><b><i>Protocols (Chat Completions / Responses / Messages):</i></b></summary>
 <br>
 
 `protocol=` returns the response in that API's own shape: `"chat_completions"` or `"responses"` (OpenAI), or `"messages"` (Anthropic, with a Claude model):
@@ -278,7 +276,7 @@ print(response["output"])
 </details>
 
 <details>
-<summary>Conversations and multiple documents</summary>
+<summary><b><i>Conversations and multiple documents:</i></b></summary>
 <br>
 
 **Continue a conversation.** Pass the messages so far in place of the question:
