@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import islice
 from typing import Optional
 
 from ..classification import FIGURE_KEYWORDS_TRIE, TABLE_KEYWORDS_TRIE, CHART_KEYWORDS_TRIE
@@ -329,6 +330,18 @@ def iter_page_blocks(doc):
 # --------------------------------------------------------------------------- #
 
 
+def is_heading_not_caption(tokens: TokenView, keyword_length: int) -> bool:
+    """A caption word spelled out and followed by a plain word starts a heading
+    ("Graph Theory", "Chart of Accounts", "图数据库"). A digit in the next three
+    tokens ("TBL GEN 0.1-1", "Figure SA-08.0"), a lone capital ("Table A") or
+    an abbreviated caption word ("Sl. No.") makes it a label instead."""
+    words = [token.str for token in islice(tokens, keyword_length + 3)]
+    keyword, head = words[:keyword_length], words[keyword_length:]
+    return (keyword[-1] not in PERIOD_CHARS
+            and bool(head) and head[0][:1].isalpha() and not (len(head[0]) == 1 and head[0].isupper())
+            and not any(char.isdigit() for text in head for char in text))
+
+
 def detect_captions(caption_context: CaptionContext) -> None:
     """Find figure, table, and chart labels and record their structural prefixes."""
     for entry in iter_page_blocks(caption_context.primary_slot):
@@ -354,6 +367,8 @@ def detect_captions(caption_context: CaptionContext) -> None:
 
         remainder = strip_leading_if_in(tokens.slice(prefix.length), PERIOD_CHARS)
         number = extract_structural_number(remainder)
+        if number is None and is_heading_not_caption(tokens, prefix.length):
+            continue
         label = format_caption_label(type_value, number)
         if number is not None:
             caption_context.state_slot = True
