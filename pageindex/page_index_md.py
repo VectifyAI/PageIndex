@@ -86,7 +86,31 @@ def extract_node_text_content(node_list, markdown_lines):
             end_line = len(markdown_lines)
         
         node['text'] = '\n'.join(markdown_lines[start_line:end_line]).strip()    
+
+    # Text before the first heading (or a file with no headings) belongs to no
+    # section. Keep it as a Preface node, as the PDF paths do, instead of
+    # dropping it from the tree.
+    preface_start = _front_matter_end(markdown_lines)
+    preface_end = all_nodes[0]['line_num'] - 1 if all_nodes else len(markdown_lines)
+    preface = '\n'.join(markdown_lines[preface_start:preface_end]).strip()
+    if preface:
+        all_nodes.insert(0, {
+            'title': 'Preface',
+            'line_num': preface_start + 1,
+            'level': all_nodes[0]['level'] if all_nodes else 1,
+            'text': preface,
+        })
     return all_nodes
+
+
+def _front_matter_end(markdown_lines):
+    """Index of the first line after a leading YAML front matter block, else 0."""
+    if not markdown_lines or markdown_lines[0].strip() != '---':
+        return 0
+    for i in range(1, len(markdown_lines)):
+        if markdown_lines[i].strip() in ('---', '...'):
+            return i + 1
+    return 0
 
 def update_node_list_with_text_token_count(node_list, model=None):
 
