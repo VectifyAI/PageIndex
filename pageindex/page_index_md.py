@@ -37,8 +37,13 @@ def extract_nodes_from_markdown(markdown_content):
     
     lines = markdown_content.split('\n')
     in_code_block = False
+    front_matter_end = _front_matter_end(lines)
     
     for line_num, line in enumerate(lines, 1):
+        # Metadata can contain headings and fence markers in comments/literal
+        # values. Skip it before updating any Markdown parser state.
+        if line_num <= front_matter_end:
+            continue
         stripped_line = line.strip()
         
         # Check for code block delimiters (triple backticks)
@@ -87,6 +92,17 @@ def extract_node_text_content(node_list, markdown_lines):
         
         node['text'] = '\n'.join(markdown_lines[start_line:end_line]).strip()    
     return all_nodes
+
+
+def _front_matter_end(markdown_lines):
+    """Index after a closed leading YAML block; 0 means ordinary Markdown."""
+    if not markdown_lines or markdown_lines[0].strip() != '---':
+        return 0
+    for i in range(1, len(markdown_lines)):
+        # An indented --- or ... can be a literal block's content.
+        if markdown_lines[i].rstrip() in ('---', '...'):
+            return i + 1
+    return 0
 
 def update_node_list_with_text_token_count(node_list, model=None):
 
