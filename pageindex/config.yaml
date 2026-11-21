@@ -4,6 +4,13 @@
 # (model, summary_model, retrieve_model) keep working.
 # Model names are LiteLLM's: bare names are OpenAI models; for other
 # providers, use "provider/model" (e.g. "anthropic/claude-sonnet-5-5").
+# MiniMax OpenAI-compatible examples (global/cn_zh):
+# index_model: "minimax/MiniMax-M3.1-Flash"
+# chat_model: "minimax/MiniMax-M3"
+# index_backend: {api_base: "https://api.minimax.io/v1", api_key: "your_minimax_key"}
+# MiniMax Anthropic-compatible example:
+# chat_model: "anthropic/MiniMax-M3.1-Flash"
+# chat_backend: {base_url: "https://api.minimax.io/anthropic", api_key: "your_minimax_key"}
 # index_model: "gpt-6-luna"
 # chat_model: "gpt-6-sol"
 toc_check_page_num: 20
