@@ -70,17 +70,24 @@ def _resource_dict_xrefs(pdf_doc, owner_xref: int, sub: str) -> dict[bytes, int]
 
 def _page_show_codes(
     pdf_doc, page_idx: int, page_tokens: tuple | None = None,
+    form_tokens: dict | None = None,
 ) -> list[tuple[int | None, tuple[int, ...], float]] | None:
-    """Every show op the page paints, in paint order, as ``(font_xref | None, charcode units, horizontal scale)-- including text inside Form XObjects, spliced at their ``Do`` position with the XObject's own font redefinitions (span merger text-content extraction recurses the same way; PDFium's textpage flattens them inline). The recursion runs on a CLONE of the live text state, so a form inherits both the active font and the horizontal scale; a Tz inside the form REPLACES it and never leaks back out. None when the page can't be read. ``page_tokens`` is the page's own stream already run through ``_tokenize_show_operators`` (the caller tokenized it), so it is not parsed twice."""
+    """Every show op the page paints, in paint order, as ``(font_xref | None, charcode units, horizontal scale)-- including text inside Form XObjects, spliced at their ``Do`` position with the XObject's own font redefinitions (span merger text-content extraction recurses the same way; PDFium's textpage flattens them inline). The recursion runs on a CLONE of the live text state, so a form inherits both the active font and the horizontal scale; a Tz inside the form REPLACES it and never leaks back out. None when the page can't be read. ``page_tokens`` is the page's own stream already run through ``_tokenize_show_operators`` (the caller tokenized it), so it is not parsed twice. ``form_tokens`` memoizes each Form XObject's tokens by (xref, entry horizontal scale), the tokenizer's only inputs; a caller passing one dict for the whole document tokenizes a form every page paints (a running header, a vector logo) once instead of once per page."""
     page_xref = pdf_doc.page_xref(page_idx)
+    if form_tokens is None:
+        form_tokens = {}
 
     def walk(stream: bytes, fonts_res: dict[bytes, int],
              xobjs_res: dict[bytes, int], cur_font: int | None, cur_tz: float,
              visited: frozenset, depth: int,
              out: list[tuple[int | None, tuple[int, ...], float]],
-             tokens: tuple | None = None) -> None:
+             tokens: tuple | None = None, form_ref: int | None = None) -> None:
         if depth > 8:
             return
+        if not tokens and form_ref is not None:
+            tokens = form_tokens.get((form_ref, cur_tz))
+            if tokens is None:
+                tokens = form_tokens[(form_ref, cur_tz)] = _tokenize_show_operators(stream, cur_tz)
         flush_ids, fonts, show_text_units, horizontal_scales, xobject_paints = tokens or _tokenize_show_operators(stream, cur_tz)
         dict_index = 0
         for key_value in range(len(show_text_units) + 1):
@@ -105,7 +112,8 @@ def _page_show_codes(
                     # as /Form has no stream; must not kill the whole page).
                     continue
                 walk(sub_stream, sub_fonts, sub_xobjs,
-                     inherited, tz_at_do, visited | {xobject_ref}, depth + 1, out)
+                     inherited, tz_at_do, visited | {xobject_ref}, depth + 1, out,
+                     form_ref=xobject_ref)
             if key_value < len(show_text_units):
                 resource_font_name = fonts[key_value]
                 resource_font_index = (fonts_res.get(resource_font_name)

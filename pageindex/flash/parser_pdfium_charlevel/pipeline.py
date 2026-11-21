@@ -50,7 +50,8 @@ from .remerge import (
 )
 
 
-def _page_pass1(pdf, pdf_doc, page_idx: int, type3_ext: dict, font_map_cache: dict):
+def _page_pass1(pdf, pdf_doc, page_idx: int, type3_ext: dict, font_map_cache: dict,
+                form_tokens: dict | None = None):
     """Pass-1 body for ONE page: extract raw chars, tag objects, accumulate
     Type-3 extents into ``type3_ext``. Returns ``(page, raw_chars, page_vb,
     page_rot)``; the PAGE is returned still open — the caller owns closing it
@@ -90,7 +91,7 @@ def _page_pass1(pdf, pdf_doc, page_idx: int, type3_ext: dict, font_map_cache: di
         # the page's own stream alone under-counts every form page and the
         # ordinal gate below would then drop the tag for the whole page.
         try:
-            show_codes = _page_show_codes(pdf_doc, page_idx, page_tokens)
+            show_codes = _page_show_codes(pdf_doc, page_idx, page_tokens, form_tokens)
             if show_codes:
                 show_tzs = [horizontal_scale for _fx, _s, horizontal_scale in show_codes]
                 # Patch per-char unicode to span merger glyph Unicode where
@@ -247,17 +248,19 @@ def parse_charlevel_meta(doc_handle: Union[str, Path, BytesIO]) -> tuple[list[li
     # page's (different) font could then be allocated at the same address,
     # silently merging two fonts' extent bins. Pages closed early carry no
     # such chars, so their fonts never key the union; font_map_cache keys on
-    # xref, not on font pointers.
+    # xref, not on font pointers, and so does form_tokens (each Form XObject's
+    # show-op tokens, read once however many pages paint it).
     n_pages = len(pdf)
     out: list = [None] * n_pages
     page_meta: list = [None] * n_pages  # (text extraction page view box, PDFium /Rotate)
     type3_ext: dict = {}
     font_map_cache: dict = {}
+    form_tokens: dict = {}
     held: dict = {}
     try:
         for page_idx in range(n_pages):
             page, raw_chars, page_vb, page_rot = _page_pass1(
-                pdf, pdf_doc, page_idx, type3_ext, font_map_cache)
+                pdf, pdf_doc, page_idx, type3_ext, font_map_cache, form_tokens)
             page_meta[page_idx] = (page_vb, page_rot)
             if any(_type3_sized(char) for char in raw_chars):
                 held[page_idx] = page
@@ -267,7 +270,7 @@ def parse_charlevel_meta(doc_handle: Union[str, Path, BytesIO]) -> tuple[list[li
         size_by_font = _type3_size_by_font(type3_ext)
         for page_idx in held:
             page, raw_chars, page_vb, _page_rot = _page_pass1(
-                pdf, pdf_doc, page_idx, {}, font_map_cache)
+                pdf, pdf_doc, page_idx, {}, font_map_cache, form_tokens)
             out[page_idx] = _page_spans(_page_pass2(raw_chars, page_vb, size_by_font))
             page.close()
     finally:
