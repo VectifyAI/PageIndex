@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterator, Optional
 
-from .errors import PageIndexAPIError
+from .errors import PageIndexAPIError, PageIndexValidationError
 
 
 class ChatObject(dict[str, Any]):
@@ -72,7 +72,7 @@ class ChatStream:
 
     def _claim(self, view: str) -> None:
         if self._view is not None and self._view != view:
-            raise PageIndexAPIError(
+            raise PageIndexValidationError(
                 f"This chat stream is being consumed as {self._view}; one "
                 "run serves one view — call chat() again for the other.")
         self._view = view
