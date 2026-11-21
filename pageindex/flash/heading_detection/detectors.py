@@ -60,7 +60,13 @@ def detect_numbered_heading(page_scan: PageScanState, block: Block, tokens: Toke
             if len(item_list) >= 4:
                 break
             val = token_numeric_value(token)
-            if math.isnan(val) or val <= 0 or val >= limit:
+            # a number of four parts is a section number past ``limit`` too ("20.2.4.1")
+            ahead = [tokens.token_at(index + step) for step in range(1, 7)] if not item_list else []
+            long_number = (bool(ahead) and not token.boundary_slot and None not in ahead
+                           and all(part.str == "." for part in ahead[0::2])
+                           and all(part.type == 1 for part in ahead[1::2])
+                           and not any(part.boundary_slot for part in ahead[:-1]))
+            if math.isnan(val) or val <= 0 or (val >= limit and not long_number):
                 break
             if len(token.str) >= 3:
                 break
