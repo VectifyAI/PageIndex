@@ -22,7 +22,11 @@
   <a href="https://pageindex.ai/blog">📝 Blog</a>&nbsp; • &nbsp;
   <a href="https://pageindex.ai/contact">✉️ Contact</a>&nbsp;
 </h4>
-  
+
+<p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 </div>
 
 
