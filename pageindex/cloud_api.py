@@ -113,7 +113,8 @@ class CloudAPI:
                 f"{self.BASE_URL}/doc/",
                 headers=self._headers(),
                 files={'file': (sanitize_filename(Path(file_path).name), f)},
-                data=data
+                data=data,
+                timeout=600
             )
 
         if response.status_code == 409 and extract is not None:
