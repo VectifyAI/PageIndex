@@ -504,6 +504,9 @@ options = ClaudeAgentOptions(**client.claude_agent_config(model="claude-opus-5-5
 
 </details>
 
+For document research with current web sources, try the runnable
+[local PageIndex + Parallel Search MCP example](examples/parallel_search/README.md).
+
 
 # Benchmarks
 
