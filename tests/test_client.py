@@ -11,6 +11,7 @@ import subprocess
 import sys
 import types
 from pathlib import Path
+from unittest import mock
 
 import httpx
 import pytest
@@ -2077,8 +2078,13 @@ def test_page_search_and_extract_clients_are_cloud_only(cls, local_client, monke
     assert cls().documents._api.api_key == "from-env"
     client = cls("given")
     assert client.documents._api.api_key == "given"
-    with pytest.warns(DeprecationWarning, match=r"\.documents"):
-        assert client.pageindex is client.documents
+    documents, other = client.documents, PageIndexClient(api_key="other")
+    with pytest.warns(DeprecationWarning, match=r"\.documents") as record:
+        assert client.pageindex is documents
+        with mock.patch.object(client, "pageindex", other):
+            assert client.documents is other
+    assert client.documents is documents
+    assert record[0].filename == __file__
     monkeypatch.setenv("PAGEINDEX_API_KEY", "")
     with pytest.raises(PageIndexAPIError, match="API key"):
         cls()

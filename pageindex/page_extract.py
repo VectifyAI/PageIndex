@@ -1,10 +1,9 @@
 """Page Extract: JSON that fits a schema, extracted from a PDF."""
 import os
 import time
-import warnings
 from typing import Any, Optional, Union
 
-from .client import PageIndexClient, _cloud_client
+from .client import PageIndexClient, _cloud_client, _pageindex_alias
 from .errors import PageIndexAPIError
 
 COLLECTION = "Page Extract"
@@ -38,12 +37,7 @@ class PageExtractClient:
                                        "PAGEINDEX_EXTRACT_API_KEY")
         self._collections: dict[str, str] = {}
 
-    @property
-    def pageindex(self) -> PageIndexClient:
-        warnings.warn("PageExtractClient.pageindex is now .documents; "
-                      ".pageindex will be removed in a future release.",
-                      DeprecationWarning, stacklevel=2)
-        return self.documents
+    pageindex = _pageindex_alias("PageExtractClient")
 
     def extract(
         self,

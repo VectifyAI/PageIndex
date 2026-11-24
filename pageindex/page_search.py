@@ -1,9 +1,8 @@
 """Page Search: the pages, and the documents, that help answer a question."""
 import time
-import warnings
 from typing import Any, Optional, Union
 
-from .client import PageIndexClient, _cloud_client
+from .client import PageIndexClient, _cloud_client, _pageindex_alias
 from .errors import PageIndexAPIError
 
 
@@ -33,12 +32,7 @@ class PageSearchClient:
         self.documents = _cloud_client(api_key, client, "PageSearchClient",
                                        "PAGEINDEX_SEARCH_API_KEY")
 
-    @property
-    def pageindex(self) -> PageIndexClient:
-        warnings.warn("PageSearchClient.pageindex is now .documents; "
-                      ".pageindex will be removed in a future release.",
-                      DeprecationWarning, stacklevel=2)
-        return self.documents
+    pageindex = _pageindex_alias("PageSearchClient")
 
     def upload(
         self,
