@@ -1,5 +1,6 @@
 """Page Search: the pages, and the documents, that help answer a question."""
 import time
+import warnings
 from typing import Any, Optional, Union
 
 from .client import PageIndexClient, _cloud_client
@@ -16,7 +17,7 @@ class PageSearchClient:
 
     ``upload()`` stores a document's pages and builds no outline index. The
     documents are the ones ``PageIndexClient`` and ``PageExtractClient`` see
-    with the same key; ``client.pageindex`` is that ``PageIndexClient``, for
+    with the same key; ``client.documents`` is that ``PageIndexClient``, for
     listing and deleting them, collections and metadata.
 
     Args:
@@ -29,8 +30,15 @@ class PageSearchClient:
 
     def __init__(self, api_key: Optional[str] = None, *,
                  client: Optional[PageIndexClient] = None):
-        self.pageindex = _cloud_client(api_key, client, "PageSearchClient",
+        self.documents = _cloud_client(api_key, client, "PageSearchClient",
                                        "PAGEINDEX_SEARCH_API_KEY")
+
+    @property
+    def pageindex(self) -> PageIndexClient:
+        warnings.warn("PageSearchClient.pageindex is now .documents; "
+                      ".pageindex will be removed in a future release.",
+                      DeprecationWarning, stacklevel=2)
+        return self.documents
 
     def upload(
         self,
@@ -61,7 +69,7 @@ class PageSearchClient:
         Returns:
             dict: {'doc_id': ..., 'name': ...}.
         """
-        return self.pageindex._upload(
+        return self.documents._upload(
             file_path, wait, timeout, metadata=metadata,
             collection_id=collection, index=False)
 
@@ -141,7 +149,7 @@ class PageSearchClient:
             'billable_documents', 'pages', 'billable_pages', 'questions',
             'credits', 'balance'}: what the search cost and what is left.
         """
-        api = self.pageindex._api
+        api = self.documents._api
         questions = [questions] if isinstance(questions, str) else list(questions)
         across = recursive or any(value is not None for value in (
             documents, collection, folder, filter, max_documents, document_top_k))
@@ -287,7 +295,7 @@ class PageSearchClient:
             not judged. 'usage' is {'documents', 'questions',
             'billable_documents', 'credits', 'balance'}.
         """
-        return self.pageindex._api.search_documents(
+        return self.documents._api.search_documents(
             [questions] if isinstance(questions, str) else list(questions),
             document_ids=document_ids, collection_id=collection,
             folder_id=folder, recursive=recursive, metadata_filter=filter,

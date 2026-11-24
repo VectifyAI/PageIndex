@@ -243,14 +243,14 @@ def test_a_product_s_client_reads_its_own_older_key_before_the_other_s(monkeypat
     # A person's two keys may belong to two accounts.
     monkeypatch.delenv("PAGEINDEX_API_KEY", raising=False)
     monkeypatch.setenv("PAGEINDEX_SEARCH_API_KEY", "pis_live_x")
-    assert PageExtractClient().pageindex.api_key == "pis_live_x"  # the only one set
+    assert PageExtractClient().documents.api_key == "pis_live_x"  # the only one set
     monkeypatch.setenv("PAGEINDEX_EXTRACT_API_KEY", "pie_live_x")
-    assert PageSearchClient().pageindex.api_key == "pis_live_x"
-    assert PageExtractClient().pageindex.api_key == "pie_live_x"
+    assert PageSearchClient().documents.api_key == "pis_live_x"
+    assert PageExtractClient().documents.api_key == "pie_live_x"
     monkeypatch.setenv("PAGEINDEX_API_KEY", "pi-env")
-    assert PageSearchClient().pageindex.api_key == "pi-env"
-    assert PageExtractClient().pageindex.api_key == "pi-env"
-    assert PageExtractClient("pi-given").pageindex.api_key == "pi-given"
+    assert PageSearchClient().documents.api_key == "pi-env"
+    assert PageExtractClient().documents.api_key == "pi-env"
+    assert PageExtractClient("pi-given").documents.api_key == "pi-given"
 
 
 def test_mode_words_normalize_like_the_label(monkeypatch):
@@ -2074,8 +2074,11 @@ def test_page_search_and_extract_clients_are_cloud_only(cls, local_client, monke
         cls("secret", client=PageIndexClient(api_key="secret"))
 
     monkeypatch.setenv("PAGEINDEX_API_KEY", "from-env")
-    assert cls().pageindex._api.api_key == "from-env"
-    assert cls("given").pageindex._api.api_key == "given"
+    assert cls().documents._api.api_key == "from-env"
+    client = cls("given")
+    assert client.documents._api.api_key == "given"
+    with pytest.warns(DeprecationWarning, match=r"\.documents"):
+        assert client.pageindex is client.documents
     monkeypatch.setenv("PAGEINDEX_API_KEY", "")
     with pytest.raises(PageIndexAPIError, match="API key"):
         cls()
