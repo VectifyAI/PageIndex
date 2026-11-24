@@ -3423,3 +3423,25 @@ def _cloud_client(api_key: Optional[str], client: Optional[PageIndexClient],
         f"{name} is cloud-only — the client given is in local mode. Pass one "
         "created with an api_key.")
     return client
+
+
+def _pageindex_alias(name: str) -> property:
+    """``.pageindex``, the deprecated name of a cloud-only client's ``.documents``."""
+    def warn() -> None:
+        warnings.warn(f"{name}.pageindex is now .documents; .pageindex will be "
+                      "removed in a future release.", DeprecationWarning,
+                      stacklevel=3)
+
+    def get(self) -> PageIndexClient:
+        warn()
+        return self.documents
+
+    def set_(self, client: PageIndexClient) -> None:
+        warn()
+        self.documents = client
+
+    def delete(self) -> None:
+        warn()
+        del self.documents
+
+    return property(get, set_, delete)
