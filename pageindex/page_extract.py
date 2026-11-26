@@ -74,7 +74,8 @@ class PageExtractClient:
                 ``wait=False`` raises PageIndexAPIError (HTTP 409).
             schema (dict | type): A JSON Schema whose top is an object or an
                 array, or a Pydantic model class.
-            tier (str): "standard" (default) or "pro".
+            tier (str): "standard" (default, $0.03 a page), "pro" ($0.05)
+                or "max" ($0.10, the most accurate).
             pages (str | int | tuple, optional): Extract from these pages
                 only: "3-9", (3, 9) or 3. The extraction is charged for them
                 alone.
