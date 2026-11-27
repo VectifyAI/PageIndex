@@ -44,6 +44,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Check the tag matches pyproject.toml
+        run: grep -qxF "version = \"${GITHUB_REF_NAME#v}\"" pyproject.toml || { echo "::error::Tag $GITHUB_REF_NAME does not match the version in pyproject.toml"; exit 1; }
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
@@ -81,7 +83,6 @@ jobs:
           # Fail early on a malformed tag instead of publishing a junk version.
           export VERSION
           python -c "import os; from packaging.version import Version; Version(os.environ['VERSION'])"
-          grep -qxF "version = \"$VERSION\"" pyproject.toml || { echo "::error::Tag $GITHUB_REF_NAME does not match the version in pyproject.toml"; exit 1; }
           python -m build
 
       - name: Publish to PyPI
