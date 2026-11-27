@@ -2183,7 +2183,7 @@ def test_outline_builds_the_structure_asked_for_and_returns_it_once_built(served
 
     serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"},
           dict(built))
-    assert client.outline("pi/1", "hierarchical") == built
+    assert client.outline("pi/1", "hierarchical") == {**built, "usage": {"credits": 0.4}}
     assert [c["method"] for c in calls] == ["POST", "GET", "GET", "POST"]
     assert calls[0]["json"] == calls[3]["json"] == {"structure": "hierarchical"}
 

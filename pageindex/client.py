@@ -1222,15 +1222,16 @@ class PageIndexClient:
                 False returns at once.
 
         Returns:
-            dict: {'doc_id', 'index_status', 'pages', 'outline'}: 'outline'
-            lists the headings in reading order, each {'title', 'level',
-            'page'}, without 'level' when flat. 'pages' and 'outline' are
-            there once 'index_status' is "completed".
+            dict: {'doc_id', 'index_status', 'usage', 'pages', 'outline'}:
+            'outline' lists the headings in reading order, each {'title',
+            'level', 'page'}, without 'level' when flat. 'pages' and 'outline'
+            are there once 'index_status' is "completed". 'usage' is what the
+            outline costs, for a caller who pays in credits.
         """
         api = self._require_cloud(
             "outline is cloud-only — a local document is indexed when it is "
             "submitted.")
-        answer = api.build_outline_index(doc_id, structure)
+        first = answer = api.build_outline_index(doc_id, structure)
         deadline = time.monotonic() + timeout
         while wait and answer["index_status"] in ("queued", "processing"):
             if time.monotonic() >= deadline:
@@ -1249,6 +1250,9 @@ class PageIndexClient:
             raise PageIndexAPIError(
                 f"The outline could not be built (doc_id: {doc_id}, "
                 f"index_status: {answer['index_status']}).")
+        if "usage" in first:
+            # what the build costs; asking again once it is built is free
+            answer["usage"] = first["usage"]
         return answer
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
