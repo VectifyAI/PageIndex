@@ -2170,6 +2170,16 @@ def test_build_outline_index_builds_the_index_of_a_document_stored_without_one(s
     assert raised.value.status_code == 402
 
 
+def test_build_outline_index_asks_for_the_outline_mode_it_is_given(served):
+    client, calls, answers = served
+    answers.to = lambda method, path, kw: {"doc_id": "pi-1", "index_status": "queued"}
+
+    client.build_outline_index("pi-1", wait=False, outline_mode="sequential")
+    client.build_outline_index("pi-1", wait=False)
+
+    assert [c.get("json") for c in calls] == [{"outline_mode": "sequential"}, None]
+
+
 def test_get_tree_of_a_document_without_an_outline_index_says_how_to_build_it(served):
     client, _, answers = served
     answers.to = lambda method, path, kw: {

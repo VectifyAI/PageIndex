@@ -1160,13 +1160,16 @@ class PageIndexClient:
         return self.get_tree(doc_id, node_summary=True, include_text=False)["result"]
 
     def build_outline_index(self, doc_id: str, wait: bool = True,
-                            timeout: float = 1800.0) -> dict[str, Any]:
+                            timeout: float = 1800.0, *,
+                            outline_mode: Optional[Literal["parallel", "sequential"]] = None
+                            ) -> dict[str, Any]:
         """
-        Build the outline index of a cloud document that has none, as one
-        uploaded with ``PageSearchClient`` or ``PageExtractClient``;
-        ``get_tree()`` then returns it. Building it is charged, at the price
-        of an upload that builds its index. A document that has its outline
-        index is left as it is.
+        Build the outline index of a cloud document; ``get_tree()`` then
+        returns it. Building it is charged, at the price of an upload that
+        builds its index. Without ``outline_mode``, a document that has its
+        index keeps it, and one that has none, as one uploaded with
+        ``PageSearchClient`` or ``PageExtractClient``, gets a sequential
+        outline.
         Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
@@ -1176,6 +1179,10 @@ class PageIndexClient:
                 up to ``timeout`` seconds; raises PageIndexAPIError if it
                 could not be built or is not done in time (it goes on in the
                 cloud). False returns at once.
+            outline_mode (str): "sequential" nests the headings by level;
+                "parallel" puts every heading at one level. The document gets
+                an outline of that mode, and keeps the one it has if it is of
+                that mode already.
 
         Returns:
             dict: {'doc_id', 'index_status'}; 'index_status' is "queued",
@@ -1184,7 +1191,7 @@ class PageIndexClient:
         api = self._require_cloud(
             "build_outline_index is cloud-only — a local document is indexed "
             "when it is submitted.")
-        built = api.build_outline_index(doc_id)
+        built = api.build_outline_index(doc_id, outline_mode)
         deadline = time.monotonic() + timeout
         while wait and built["index_status"] in ("queued", "processing"):
             if time.monotonic() >= deadline:
