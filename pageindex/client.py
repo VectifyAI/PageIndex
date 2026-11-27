@@ -1247,7 +1247,12 @@ class PageIndexClient:
                 f"The outline could not be built (doc_id: {doc_id}, "
                 f"index_status: {answer['index_status']}).")
         if answer["index_status"] == "completed":
-            answer |= api.get_outline(doc_id)["result"]
+            read = api.get_outline(doc_id)
+            if read["structure"] not in (structure, "hierarchical"):
+                raise PageIndexAPIError(
+                    f"The {structure} outline could not be built (doc_id: "
+                    f"{doc_id}); the document keeps the outline it had.")
+            answer |= read["result"]
         return answer
 
     def is_retrieval_ready(self, doc_id: str) -> bool:

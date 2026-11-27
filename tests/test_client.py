@@ -2181,7 +2181,7 @@ def test_outline_builds_the_structure_asked_for_and_returns_it_once_built(served
     outline = {"pages": 2, "outline": [{"title": "Intro", "level": 1, "page": 1}]}
 
     serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"},
-          {"index_status": "completed", "result": outline})
+          {"index_status": "completed", "structure": "hierarchical", "result": outline})
     assert client.outline("pi/1", "hierarchical") == {
         **queued, "index_status": "completed", **outline}
     assert [c["method"] for c in calls] == ["POST", "GET", "GET", "GET"]
@@ -2193,6 +2193,10 @@ def test_outline_builds_the_structure_asked_for_and_returns_it_once_built(served
     serve(dict(queued), {"index_status": "failed"})
     with pytest.raises(PageIndexAPIError, match="could not be built"):
         client.outline("pi/1", "flat")
+    serve(dict(queued), {"index_status": "completed"},
+          {"index_status": "completed", "structure": "flat", "result": outline})
+    with pytest.raises(PageIndexAPIError, match="keeps the outline it had"):
+        client.outline("pi/1", "hierarchical")
     serve(dict(queued))
     with pytest.raises(PageIndexAPIError, match="Timed out"):
         client.outline("pi/1", "flat", timeout=-1)

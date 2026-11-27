@@ -292,8 +292,8 @@ class CloudAPI:
         Get a document's outline.
 
         Returns:
-            dict: API response with 'index_status' and, as 'result',
-            {'pages', 'outline'}.
+            dict: API response with 'index_status', 'structure' ("flat",
+            "hierarchical" or None) and, as 'result', {'pages', 'outline'}.
         """
         response = self._http.get(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=outline",
