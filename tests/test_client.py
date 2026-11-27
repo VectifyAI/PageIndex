@@ -18,8 +18,8 @@ import pytest
 
 import pageindex.flash
 import pageindex.utils
-from pageindex import (PageExtractClient, PageIndexAPIError, PageIndexClient,
-                       PageSearchClient)
+from pageindex import (PageClassifyClient, PageExtractClient, PageIndexAPIError,
+                       PageIndexClient, PageSearchClient)
 
 page_index_module = importlib.import_module("pageindex.page_index_classic")
 
@@ -2122,6 +2122,14 @@ def extracting(served):
     return PageExtractClient(client=client), calls, answers
 
 
+@pytest.fixture
+def classifying(served, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.page_classify.time.sleep", lambda s: None)
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    return PageClassifyClient(client=client), calls, answers
+
+
 def test_an_upload_to_search_builds_no_index(searching, sample_pdf, monkeypatch):
     client, calls, answers = searching
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
@@ -2654,6 +2662,78 @@ def test_extract_job_wiring(extracting):
     with pytest.raises(PageIndexAPIError, match="already completed") as raised:
         client.cancel_extract("ext/1")
     assert raised.value.status_code == 409
+
+
+def test_page_classify_client_is_cloud_only(local_client, monkeypatch):
+    with pytest.raises(PageIndexAPIError, match="cloud-only"):
+        PageClassifyClient(client=local_client)
+    with pytest.raises(PageIndexAPIError, match="not both"):
+        PageClassifyClient("secret", client=PageIndexClient(api_key="secret"))
+    monkeypatch.setenv("PAGEINDEX_API_KEY", "from-env")
+    assert PageClassifyClient().documents._api.api_key == "from-env"
+
+
+def test_classify_sends_a_file_with_its_job_and_waits_for_the_result(
+        classifying, sample_pdf):
+    client, calls, answers = classifying
+    done = {"id": "cls_1", "status": "completed", "pages": [
+        {"page": 3, "class": "invoice", "confidence": 0.9}]}
+    later = iter([{"id": "cls_1", "status": "running"}, done])
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": [{"id": "c-9", "name": "Page Classify"}], "total": 1}
+        if path == "/classify/":
+            return 202, {"id": "cls_1", "status": "pending", "doc_id": "pi-1"}
+        return next(later)
+    answers.to = to
+
+    job = client.classify(sample_pdf, {"invoice": "A bill", "receipt": None},
+                          granularity="page", pages=(3, 9))
+
+    assert job == done
+    assert [(c["method"], c["path"]) for c in calls] == [
+        ("GET", "/collections/"), ("POST", "/classify/"),
+        ("GET", "/classify/cls_1/"), ("GET", "/classify/cls_1/")]
+    assert calls[1]["files"]["file"][0] == "sample.pdf"
+    sent = calls[1]["data"]
+    assert json.loads(sent.pop("configuration")) == {
+        "classes": [{"name": "invoice", "description": "A bill"}, {"name": "receipt"}],
+        "granularity": "page", "target_pages": "3-9"}
+    assert sent == {"collection_id": "c-9"}
+
+
+def test_classify_waits_for_a_file_stored_already_and_classifies_its_document(
+        classifying, sample_pdf):
+    client, calls, answers = classifying
+    states = iter(["processing", "completed"])
+    def to(method, path, kw):
+        if path == "/collections/":
+            return {"collections": [{"id": "c-9", "name": "Page Classify"}], "total": 1}
+        if path == "/classify/" and "files" in kw:
+            return 409, {"detail": {"message": "not ready", "doc_id": "pi-1"}}
+        if path == "/doc/pi-1/metadata/":
+            return {"id": "pi-1", "status": next(states)}
+        return 202, {"id": "cls_1", "status": "pending", "doc_id": "pi-1"}
+    answers.to = to
+
+    assert client.classify(sample_pdf, ["invoice"], wait=False) == {
+        "id": "cls_1", "status": "pending", "doc_id": "pi-1"}
+    assert [(c["method"], c["path"]) for c in calls][-1] == ("POST", "/classify/")
+    assert calls[-1]["data"]["doc_id"] == "pi-1"
+    assert json.loads(calls[-1]["data"]["configuration"]) == {
+        "classes": [{"name": "invoice"}], "granularity": "document"}
+
+
+def test_classify_raises_when_the_job_fails(classifying):
+    client, calls, answers = classifying
+    answers.to = lambda method, path, kw: (
+        (202, {"id": "cls_1", "status": "pending", "doc_id": "pi-1"})
+        if method == "POST" else
+        {"id": "cls_1", "status": "failed", "error_message": "try again"})
+
+    with pytest.raises(PageIndexAPIError, match="cls_1 failed: try again"):
+        client.classify("pi-1", ["invoice"])
+    assert calls[0]["data"]["doc_id"] == "pi-1"
 
 
 def test_page_image_gives_the_picture(served):
