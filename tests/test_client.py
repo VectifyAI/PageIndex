@@ -2736,6 +2736,29 @@ def test_classify_raises_when_the_job_fails(classifying):
     assert calls[0]["data"]["doc_id"] == "pi-1"
 
 
+def test_classify_takes_one_name_as_one_class(classifying):
+    client, calls, answers = classifying
+    answers.to = lambda method, path, kw: (
+        202, {"id": "cls_1", "status": "pending", "doc_id": "pi-1"})
+
+    client.classify("pi-1", "email", wait=False)
+    assert json.loads(calls[0]["data"]["configuration"])["classes"] == [
+        {"name": "email"}]
+
+
+def test_classify_raises_when_pages_could_not_be_read(classifying):
+    client, calls, answers = classifying
+    answers.to = lambda method, path, kw: (
+        (202, {"id": "cls_1", "status": "pending", "doc_id": "pi-1"})
+        if method == "POST" else
+        {"id": "cls_1", "status": "completed", "class": "invoice",
+         "confidence": 0.95, "failed_pages": [1, 2]})
+
+    with pytest.raises(PageIndexAPIError, match="cls_1 has pages it could not "
+                       "read: 1, 2. Its result leaves them out"):
+        client.classify("pi-1", ["invoice", "receipt"])
+
+
 def test_page_image_gives_the_picture(served):
     client, calls, answers = served
     link = "https://files.example/p12.jpg?sig=1"

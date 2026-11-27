@@ -15,6 +15,8 @@ Classes = Union[Mapping[str, Optional[str]], Iterable[Union[str, Mapping[str, An
 
 def _classes(classes: Classes) -> list[dict]:
     """The API's classes: [{"name", "description"}]."""
+    if isinstance(classes, str):
+        classes = [classes]
     if isinstance(classes, Mapping):
         return [{"name": name, **({"description": about} if about else {})}
                 for name, about in classes.items()]
@@ -81,10 +83,10 @@ class PageClassifyClient:
                 the ``doc_id`` of an uploaded document: one still processing
                 is waited for first, and with ``wait=False`` raises
                 PageIndexAPIError (HTTP 409).
-            classes (dict | list): The classes, by name: {name: description}
-                (a description may be None), or a list of names. 1 to 50;
-                names and descriptions hold at most 8,000 characters, all
-                told.
+            classes (dict | list | str): The classes, by name: {name:
+                description} (a description may be None), a list of names,
+                or one name. 1 to 50; names and descriptions hold at most
+                8,000 characters, all told.
             granularity (str): "document" (default): one class for the
                 document, from its first 5 pages unless ``pages`` names
                 others. "page": a class for each page, every page unless
@@ -92,10 +94,11 @@ class PageClassifyClient:
             pages (str | int | tuple, optional): Read these pages only:
                 "3-9", (3, 9) or 3.
             wait (bool): Return the job once it is completed (default), up to
-                ``timeout`` seconds; raises PageIndexAPIError if it failed, or
-                is not done in time (it goes on running: read it with
-                ``get_classify()``). False returns it pending once it starts:
-                ``wait_classify()`` waits for it later.
+                ``timeout`` seconds; raises PageIndexAPIError if it failed,
+                could not read some of its pages, or is not done in time (it
+                goes on running). Read such a job with ``get_classify()``.
+                False returns it pending once it starts: ``wait_classify()``
+                waits for it later.
             timeout (float): Seconds to wait, the document's upload and
                 processing included. Defaults to 30 minutes.
             collection (str, optional): Where a file is uploaded: a
@@ -188,13 +191,19 @@ class PageClassifyClient:
             raise PageIndexAPIError(
                 f"Classify job {job['id']} {job['status']}"
                 + (f": {job['error_message']}" if job.get("error_message") else "."))
+        if job.get("failed_pages"):
+            raise PageIndexAPIError(
+                f"Classify job {job['id']} has pages it could not read: "
+                f"{', '.join(map(str, job['failed_pages']))}. Its result leaves "
+                "them out: read it with get_classify(job_id).")
         return job
 
     def wait_classify(self, job_id: str, timeout: float = 1800.0) -> dict[str, Any]:
         """
         Wait for a classify job, and return it once it is completed: the dict
-        ``classify()`` returns. Raises PageIndexAPIError if it failed, or is
-        not done within ``timeout`` seconds (it goes on running).
+        ``classify()`` returns. Raises PageIndexAPIError if it failed, could
+        not read some of its pages, or is not done within ``timeout`` seconds
+        (it goes on running).
         """
         return self._done(
             self.documents._api.get_classify(job_id),
