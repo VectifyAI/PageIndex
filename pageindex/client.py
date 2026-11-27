@@ -1160,16 +1160,13 @@ class PageIndexClient:
         return self.get_tree(doc_id, node_summary=True, include_text=False)["result"]
 
     def build_outline_index(self, doc_id: str, wait: bool = True,
-                            timeout: float = 1800.0, *,
-                            outline_mode: Optional[Literal["parallel", "sequential"]] = None
-                            ) -> dict[str, Any]:
+                            timeout: float = 1800.0) -> dict[str, Any]:
         """
-        Build the outline index of a cloud document; ``get_tree()`` then
-        returns it. Building it is charged, at the price of an upload that
-        builds its index. Without ``outline_mode``, a document that has its
-        index keeps it, and one that has none, as one uploaded with
-        ``PageSearchClient`` or ``PageExtractClient``, gets a sequential
-        outline.
+        Build the outline index of a cloud document that has none, as one
+        uploaded with ``PageSearchClient`` or ``PageExtractClient``;
+        ``get_tree()`` then returns it. Building it is charged, at the price
+        of an upload that builds its index. A document that has its outline
+        index is left as it is.
         Cloud-only: local mode raises PageIndexAPIError.
 
         Args:
@@ -1179,10 +1176,6 @@ class PageIndexClient:
                 up to ``timeout`` seconds; raises PageIndexAPIError if it
                 could not be built or is not done in time (it goes on in the
                 cloud). False returns at once.
-            outline_mode (str): "sequential" nests the headings by level;
-                "parallel" puts every heading at one level. The document gets
-                an outline of that mode, and keeps the one it has if it is of
-                that mode already.
 
         Returns:
             dict: {'doc_id', 'index_status'}; 'index_status' is "queued",
@@ -1191,7 +1184,7 @@ class PageIndexClient:
         api = self._require_cloud(
             "build_outline_index is cloud-only — a local document is indexed "
             "when it is submitted.")
-        built = api.build_outline_index(doc_id, outline_mode)
+        built = api.build_outline_index(doc_id)
         deadline = time.monotonic() + timeout
         while wait and built["index_status"] in ("queued", "processing"):
             if time.monotonic() >= deadline:
@@ -1208,6 +1201,55 @@ class PageIndexClient:
                 f"The outline index could not be built (doc_id: {doc_id}, "
                 f"index_status: {built['index_status']}).")
         return built
+
+    def outline(self, doc_id: str, structure: Literal["flat", "hierarchical"],
+                wait: bool = True, timeout: float = 1800.0) -> dict[str, Any]:
+        """
+        Get a cloud document's outline, building it if the document lacks it.
+        "flat" lists the headings at one level, at $1 per 1,000 pages;
+        "hierarchical" nests them, each with its level, at $2 per 1,000 pages,
+        or $1 for a document with a flat outline. An outline the document has
+        is free, and a hierarchical one serves as the flat one.
+        Cloud-only: local mode raises PageIndexAPIError.
+
+        Args:
+            doc_id (str): Document ID. One still processing raises
+                PageIndexAPIError (HTTP 409).
+            structure (str): "flat" or "hierarchical".
+            wait (bool): Return once the outline is built (default), up to
+                ``timeout`` seconds; raises PageIndexAPIError if it could not
+                be built or is not done in time (it goes on in the cloud).
+                False returns at once.
+
+        Returns:
+            dict: {'doc_id', 'index_status', 'pages', 'outline'}: 'outline'
+            lists the headings in reading order, each {'title', 'level',
+            'page'}, without 'level' when flat. 'pages' and 'outline' are
+            there once 'index_status' is "completed".
+        """
+        api = self._require_cloud(
+            "outline is cloud-only — a local document is indexed when it is "
+            "submitted.")
+        answer = api.build_outline_index(doc_id, structure)
+        deadline = time.monotonic() + timeout
+        while wait and answer["index_status"] in ("queued", "processing"):
+            if time.monotonic() >= deadline:
+                raise PageIndexAPIError(
+                    f"Timed out after {int(timeout)}s waiting for the outline "
+                    f"(doc_id: {doc_id}, index_status: "
+                    f"{answer['index_status']}). It goes on being built in the "
+                    "cloud — call outline() again.")
+            time.sleep(2)
+            status = api.get_tree(doc_id, include_text=False).get("index_status")
+            # once it is built, asking again returns the outline, free
+            answer = (api.build_outline_index(doc_id, structure)
+                      if status == "completed"
+                      else {**answer, "index_status": status})
+        if wait and answer["index_status"] != "completed":
+            raise PageIndexAPIError(
+                f"The outline could not be built (doc_id: {doc_id}, "
+                f"index_status: {answer['index_status']}).")
+        return answer
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
         """

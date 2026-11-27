@@ -2170,14 +2170,31 @@ def test_build_outline_index_builds_the_index_of_a_document_stored_without_one(s
     assert raised.value.status_code == 402
 
 
-def test_build_outline_index_asks_for_the_outline_mode_it_is_given(served):
+def test_outline_builds_the_structure_asked_for_and_returns_it_once_built(served, monkeypatch):
     client, calls, answers = served
-    answers.to = lambda method, path, kw: {"doc_id": "pi-1", "index_status": "queued"}
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    def serve(*replies):
+        del calls[:]
+        replies = iter(replies)
+        answers.to = lambda method, path, kw: next(replies)
+    queued = {"doc_id": "pi/1", "index_status": "queued", "usage": {"credits": 0.4}}
+    built = {"doc_id": "pi/1", "index_status": "completed", "usage": {"credits": 0},
+             "pages": 2, "outline": [{"title": "Intro", "level": 1, "page": 1}]}
 
-    client.build_outline_index("pi-1", wait=False, outline_mode="sequential")
-    client.build_outline_index("pi-1", wait=False)
+    serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"},
+          dict(built))
+    assert client.outline("pi/1", "hierarchical") == built
+    assert [c["method"] for c in calls] == ["POST", "GET", "GET", "POST"]
+    assert calls[0]["json"] == calls[3]["json"] == {"structure": "hierarchical"}
 
-    assert [c.get("json") for c in calls] == [{"outline_mode": "sequential"}, None]
+    serve(dict(queued))
+    assert client.outline("pi/1", "flat", wait=False) == queued
+    serve(dict(queued), {"index_status": "failed"})
+    with pytest.raises(PageIndexAPIError, match="could not be built"):
+        client.outline("pi/1", "flat")
+    serve(dict(queued))
+    with pytest.raises(PageIndexAPIError, match="Timed out"):
+        client.outline("pi/1", "flat", timeout=-1)
 
 
 def test_get_tree_of_a_document_without_an_outline_index_says_how_to_build_it(served):

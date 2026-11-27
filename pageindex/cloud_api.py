@@ -288,19 +288,20 @@ class CloudAPI:
         return response.json()
 
     def build_outline_index(self, doc_id: str,
-                            outline_mode: Optional[str] = None) -> Dict[str, Any]:
+                            structure: Optional[str] = None) -> Dict[str, Any]:
         """
-        Build the document's outline: of ``outline_mode`` ("parallel" or
-        "sequential") when given, else a sequential one for a document that
-        has no index.
+        Build the tree of a document stored without one, or, with
+        ``structure`` ("flat" or "hierarchical"), get that outline, building
+        it if the document lacks it.
 
         Returns:
-            dict: {'doc_id', 'index_status'}.
+            dict: {'doc_id', 'index_status'}, and with ``structure``, once
+            'index_status' is "completed", 'pages' and 'outline'.
         """
         response = self._http.post(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/index",
             headers=self._headers(),
-            json={"outline_mode": outline_mode} if outline_mode else None,
+            json={"structure": structure} if structure else None,
             timeout=30
         )
         if response.status_code != 200:
