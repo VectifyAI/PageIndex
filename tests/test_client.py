@@ -2178,14 +2178,15 @@ def test_outline_builds_the_structure_asked_for_and_returns_it_once_built(served
         replies = iter(replies)
         answers.to = lambda method, path, kw: next(replies)
     queued = {"doc_id": "pi/1", "index_status": "queued", "usage": {"credits": 0.4}}
-    built = {"doc_id": "pi/1", "index_status": "completed", "usage": {"credits": 0},
-             "pages": 2, "outline": [{"title": "Intro", "level": 1, "page": 1}]}
+    outline = {"pages": 2, "outline": [{"title": "Intro", "level": 1, "page": 1}]}
 
     serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"},
-          dict(built))
-    assert client.outline("pi/1", "hierarchical") == {**built, "usage": {"credits": 0.4}}
-    assert [c["method"] for c in calls] == ["POST", "GET", "GET", "POST"]
-    assert calls[0]["json"] == calls[3]["json"] == {"structure": "hierarchical"}
+          {"index_status": "completed", "result": outline})
+    assert client.outline("pi/1", "hierarchical") == {
+        **queued, "index_status": "completed", **outline}
+    assert [c["method"] for c in calls] == ["POST", "GET", "GET", "GET"]
+    assert calls[0]["json"] == {"structure": "hierarchical"}
+    assert calls[3]["path"].endswith("?type=outline")
 
     serve(dict(queued))
     assert client.outline("pi/1", "flat", wait=False) == queued

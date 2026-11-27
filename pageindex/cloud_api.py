@@ -287,16 +287,34 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
+    def get_outline(self, doc_id: str) -> Dict[str, Any]:
+        """
+        Get a document's outline.
+
+        Returns:
+            dict: API response with 'index_status' and, as 'result',
+            {'pages', 'outline'}.
+        """
+        response = self._http.get(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=outline",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get outline: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
     def build_outline_index(self, doc_id: str,
                             structure: Optional[str] = None) -> Dict[str, Any]:
         """
         Build the tree of a document stored without one, or, with
-        ``structure`` ("flat" or "hierarchical"), get that outline, building
-        it if the document lacks it.
+        ``structure`` ("flat" or "hierarchical"), build that outline unless
+        the document has it.
 
         Returns:
-            dict: {'doc_id', 'index_status'}, and with ``structure``, once
-            'index_status' is "completed", 'pages' and 'outline'.
+            dict: {'doc_id', 'index_status'}.
         """
         response = self._http.post(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/index",

@@ -1231,7 +1231,7 @@ class PageIndexClient:
         api = self._require_cloud(
             "outline is cloud-only — a local document is indexed when it is "
             "submitted.")
-        first = answer = api.build_outline_index(doc_id, structure)
+        answer = api.build_outline_index(doc_id, structure)
         deadline = time.monotonic() + timeout
         while wait and answer["index_status"] in ("queued", "processing"):
             if time.monotonic() >= deadline:
@@ -1241,18 +1241,13 @@ class PageIndexClient:
                     f"{answer['index_status']}). It goes on being built in the "
                     "cloud — call outline() again.")
             time.sleep(2)
-            status = api.get_tree(doc_id, include_text=False).get("index_status")
-            # once it is built, asking again returns the outline, free
-            answer = (api.build_outline_index(doc_id, structure)
-                      if status == "completed"
-                      else {**answer, "index_status": status})
+            answer["index_status"] = api.get_outline(doc_id)["index_status"]
         if wait and answer["index_status"] != "completed":
             raise PageIndexAPIError(
                 f"The outline could not be built (doc_id: {doc_id}, "
                 f"index_status: {answer['index_status']}).")
-        if "usage" in first:
-            # what the build costs; asking again once it is built is free
-            answer["usage"] = first["usage"]
+        if answer["index_status"] == "completed":
+            answer |= api.get_outline(doc_id)["result"]
         return answer
 
     def is_retrieval_ready(self, doc_id: str) -> bool:
