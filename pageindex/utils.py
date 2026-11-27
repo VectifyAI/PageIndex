@@ -402,6 +402,27 @@ def run_off_loop(func, *args):
     return func(*args)
 
 
+ATLASCLOUD_MODEL_PREFIX = "atlascloud/"
+ATLASCLOUD_API_BASE = "https://api.atlascloud.ai/v1"
+
+
+def _atlascloud_kwargs(model):
+    """Credential kwargs for an ``atlascloud/`` model, or ``{}`` for anything else.
+
+    Atlas Cloud is reached over LiteLLM's ``openai/`` wire form, so the endpoint
+    and key have to travel as completion kwargs rather than being inferred from
+    the provider name."""
+    if not model or not model.removeprefix("litellm/").startswith(ATLASCLOUD_MODEL_PREFIX):
+        return {}
+    api_key = os.getenv("ATLASCLOUD_API_KEY")
+    if not api_key:
+        raise ValueError("ATLASCLOUD_API_KEY is required when using Atlas Cloud models.")
+    return {
+        "api_base": os.getenv("ATLASCLOUD_API_BASE", ATLASCLOUD_API_BASE),
+        "api_key": api_key,
+    }
+
+
 def _litellm_model(model):
     """Normalize to LiteLLM's grammar (``litellm/`` strips, bare names get
     the ``openai/`` wire form — same as the chat lane) and refuse an
@@ -412,6 +433,13 @@ def _litellm_model(model):
     if not model:
         return model
     model = _strip_prefix(model, "litellm/")
+    if model.startswith(ATLASCLOUD_MODEL_PREFIX):
+        atlas_model = model[len(ATLASCLOUD_MODEL_PREFIX):]
+        if not atlas_model:
+            raise ValueError("Atlas Cloud model must be provided after 'atlascloud/'.")
+        # Atlas Cloud speaks the OpenAI wire format; the endpoint arrives as a
+        # completion kwarg from _atlascloud_kwargs().
+        return f"openai/{atlas_model}"
     if "/" not in model:
         model = f"openai/{model}"
     import litellm
@@ -554,7 +582,8 @@ def _call_kwargs(model, params):
     reasoning_effort to `model` (_llm_effort) unless `params` set one,
     then `params`."""
     carry = {} if "reasoning_effort" in params else (_llm_effort.get() or {}).get(model, {})
-    return _joined(_llm_backend.get() or {}, carry, params)
+    # Atlas Cloud's endpoint/key come first so an explicit backend or param wins
+    return _joined(_atlascloud_kwargs(model), _llm_backend.get() or {}, carry, params)
 
 
 def llm_completion(model, prompt, chat_history=None, return_finish_reason=False):

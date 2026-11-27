@@ -728,14 +728,23 @@ def _openai_model(protocol: str, model_name: str, backend=None):
         raise PageIndexAPIError(
             f"'{model_name}' routes through LiteLLM, which failed to "
             f"import: {exc}") from exc
-    from .utils import _litellm_model, _mute_litellm_bridge_usage_warning
+    from .utils import (_atlascloud_kwargs, _litellm_model,
+                        _mute_litellm_bridge_usage_warning)
     _mute_litellm_bridge_usage_warning()
     try:
         wire = _litellm_model(model_name)
     except litellm.NotFoundError as exc:
         raise PageIndexAPIError(str(exc)) from exc
-    return LitellmModel(wire, api_key=(backend or {}).get("api_key"),
-                        base_url=(backend or {}).get("base_url"))
+    try:
+        # atlascloud/ models ride the openai/ wire form, so the endpoint and
+        # key must be supplied here; an explicit chat_backend still wins.
+        atlas = _atlascloud_kwargs(model_name)
+    except ValueError as exc:
+        raise PageIndexAPIError(str(exc)) from exc
+    return LitellmModel(
+        wire,
+        api_key=(backend or {}).get("api_key") or atlas.get("api_key"),
+        base_url=(backend or {}).get("base_url") or atlas.get("api_base"))
 
 
 def _reported_model(model_name: str) -> str:
