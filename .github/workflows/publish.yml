@@ -1,12 +1,13 @@
 name: Publish to PyPI
 
-# Release flow (the git tag IS the version — nothing to bump in the repo):
-#   1. git tag -a v0.2.9 -m "Release 0.2.9"
-#   2. git push origin v0.2.9
-#   3. This workflow derives the version from the tag, injects it into
-#      pyproject.toml, builds, publishes to PyPI via OIDC trusted publishing
-#      (no stored secret), and creates a GitHub Release with generated notes
-#      (dev tags publish to PyPI only — no GitHub Release).
+# Release flow:
+#   1. Set `version` in pyproject.toml to the new version on the commit you tag.
+#   2. git tag -a v0.2.9 -m "Release 0.2.9"
+#   3. git push origin v0.2.9
+#   4. This workflow checks the tag matches pyproject.toml, builds, publishes
+#      to PyPI via OIDC trusted publishing (no stored secret), and creates a
+#      GitHub Release with generated notes (dev tags publish to PyPI only — no
+#      GitHub Release).
 #
 # The tag must be a PEP 440 version with a leading `v`:
 #   v0.2.9   v0.2.9rc1   v0.2.9.dev1
@@ -71,7 +72,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Set version from tag and build
+      - name: Check version and build
         run: |
           set -euo pipefail
           python -m pip install --upgrade build packaging
@@ -80,10 +81,7 @@ jobs:
           # Fail early on a malformed tag instead of publishing a junk version.
           export VERSION
           python -c "import os; from packaging.version import Version; Version(os.environ['VERSION'])"
-          # The git tag is the single source of truth; overwrite the static
-          # placeholder in [tool.poetry] so the built artifacts carry $VERSION.
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-          grep '^version = ' pyproject.toml
+          grep -qxF "version = \"$VERSION\"" pyproject.toml || { echo "::error::Tag $GITHUB_REF_NAME does not match the version in pyproject.toml"; exit 1; }
           python -m build
 
       - name: Publish to PyPI
