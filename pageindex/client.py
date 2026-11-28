@@ -3409,9 +3409,10 @@ class PageIndexLocalClient(PageIndexClient):
 
 
 def _cloud_client(api_key: Optional[str], client: Optional[PageIndexClient],
-                  name: str, own_key: str) -> PageIndexClient:
+                  name: str, own_key: Optional[str]) -> PageIndexClient:
     """The cloud PageIndexClient that a cloud-only client works through.
-    ``own_key`` is the environment variable its product's key was kept in."""
+    ``own_key`` is the environment variable its product's key was kept in,
+    if it had one of its own."""
     if client is None:
         # Its own product's key before the other's: a person's two keys may
         # belong to two accounts.

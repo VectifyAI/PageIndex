@@ -1011,3 +1011,86 @@ class CloudAPI:
                 f"Failed to delete extract job: {response.text}",
                 status_code=response.status_code)
         return response.json()
+
+    # ---------- CLASSIFY ----------
+
+    def create_classify(
+        self,
+        configuration: Dict[str, Any],
+        doc_id: Optional[str] = None,
+        file_path: Optional[str] = None,
+        collection_id: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Start a classify job on an uploaded document, or on a PDF sent with
+        it, which is kept as a document.
+
+        Args:
+            configuration (dict): {"classes": [{"name", "description"}],
+                "granularity", "target_pages"}.
+            doc_id (str, optional): Document ID.
+            file_path (str, optional): A PDF's path, in place of doc_id.
+            collection_id (str, optional): The collection a PDF sent is kept in.
+            folder_id (str, optional): The folder a PDF sent is kept in.
+
+        Returns:
+            dict: The job, pending: {"id", "status", "doc_id", "configuration",
+                "created_at", "updated_at"}. A PDF stored already whose
+                document is still processing: {"doc_id", "duplicate": True},
+                and no job.
+        """
+        data: Dict[str, Any] = {"configuration": json.dumps(configuration)}
+        if file_path is None:
+            data["doc_id"] = doc_id
+            response = self._http.post(
+                f"{self.BASE_URL}/classify/",
+                headers=self._headers(),
+                data=data,
+                timeout=60
+            )
+        else:
+            if collection_id is not None:
+                data["collection_id"] = collection_id
+            if folder_id is not None:
+                data["folder_id"] = folder_id
+            with open(file_path, "rb") as f:
+                response = self._http.post(
+                    f"{self.BASE_URL}/classify/",
+                    headers=self._headers(),
+                    files={"file": (sanitize_filename(Path(file_path).name), f)},
+                    data=data
+                )
+            if response.status_code == 409:
+                try:
+                    stored = response.json()["detail"]["doc_id"]
+                except (ValueError, KeyError, TypeError):
+                    stored = None
+                if stored:
+                    return {"doc_id": stored, "duplicate": True}
+        if response.status_code != 202:
+            raise PageIndexAPIError(
+                f"Failed to start classify job: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def get_classify(self, job_id: str) -> Dict[str, Any]:
+        """
+        Get a classify job, with its result once completed.
+
+        Returns:
+            dict: {"id", "status", "doc_id", "configuration", "created_at",
+                "updated_at"}; completed: "class" and "confidence" (document)
+                or "pages" (page), "failed_pages" and "usage" too; failed:
+                "error_message" too.
+        """
+        response = self._http.get(
+            f"{self.BASE_URL}/classify/{_enc(job_id)}/",
+            headers=self._headers(),
+            timeout=60
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get classify job: {response.text}",
+                status_code=response.status_code)
+        return response.json()
