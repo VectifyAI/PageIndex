@@ -44,9 +44,9 @@ class PageSearchClient:
         timeout: float = 1800.0,
     ) -> dict[str, Any]:
         """
-        Upload a PDF to search. Its pages are stored and no outline index is
+        Upload a PDF to search. Its pages are stored and no outline is
         built, so the upload is charged less than one that builds it;
-        ``PageIndexClient.build_outline_index()`` builds one later. Uploading
+        ``PageIndexClient.build_outline()`` builds one later. Uploading
         the same file to the same place again returns the stored document.
 
         Args:

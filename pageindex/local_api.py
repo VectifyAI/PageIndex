@@ -91,6 +91,7 @@ class LocalAPI:
         folder_id: str | None = None,
         metadata: dict | None = None,
         collection_id: str | None = None,
+        outline_structure: str | None = None,
     ) -> dict[str, Any]:
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             raise PageIndexAPIError(
@@ -109,6 +110,10 @@ class LocalAPI:
         if collection_id is not None:
             raise PageIndexAPIError(
                 "Failed to submit document: collections are not supported in local mode."
+            )
+        if outline_structure is not None:
+            raise PageIndexAPIError(
+                "Failed to submit document: outline_structure is not supported in local mode."
             )
         if metadata is not None:
             if not isinstance(metadata, dict):
