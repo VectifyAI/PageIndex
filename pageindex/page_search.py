@@ -182,9 +182,9 @@ class PageSearchClient:
             raise PageIndexAPIError(
                 "Pass max_documents or document_top_k, not both.")
         most = next((n for n in (document_top_k, max_documents) if n is not None), 3)
-        if not 1 <= most <= 10:
+        if isinstance(most, bool) or not isinstance(most, int) or not 1 <= most <= 10:
             raise PageIndexAPIError(
-                "max_documents and document_top_k are from 1 to 10.")
+                "max_documents and document_top_k must be integers from 1 to 10.")
 
         started = time.monotonic()
         judged = api.search_documents(

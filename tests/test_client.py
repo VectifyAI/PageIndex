@@ -2339,6 +2339,37 @@ def test_search_refuses_arguments_that_do_not_go_together(searching):
     assert calls == []
 
 
+@pytest.mark.parametrize("parameter", ["max_documents", "document_top_k"])
+@pytest.mark.parametrize("value", [1.5, 2.0, True, False, "2", [], {}, 0, 11])
+def test_search_rejects_non_integer_document_limits_before_request(searching, parameter, value):
+    client, calls, answers = searching
+    answers.to = lambda method, path, kw: (
+        _documents_found([_found_document("a", 0.9)], [])
+        if path == "/docs/search/" else _pages_found(path, kw))
+
+    with pytest.raises(PageIndexAPIError, match="from 1 to 10"):
+        client.search(["q1", "q2"], **{parameter: value})
+
+    # Document relevance judging is billable: invalid local slicing limits
+    # must be refused before even that first request leaves the client.
+    assert calls == []
+
+
+@pytest.mark.parametrize("parameter", ["max_documents", "document_top_k"])
+@pytest.mark.parametrize("value", [1, 10])
+def test_search_accepts_integer_document_limit_boundaries(searching, parameter, value):
+    client, calls, answers = searching
+    answers.to = lambda method, path, kw: _documents_found([], [])
+
+    assert client.search(["q1", "q2"], **{parameter: value})["results"] == [
+        {"question": "q1", "documents": []}, {"question": "q2", "documents": []}]
+    assert len(calls) == 1
+    if parameter == "document_top_k":
+        assert calls[0]["json"]["top_k"] == value
+    else:
+        assert "top_k" not in calls[0]["json"]
+
+
 def test_search_documents_wiring(searching):
     client, calls, answers = searching
     answers.to = lambda method, path, kw: {"id": "srch_1", "results": []}
