@@ -332,7 +332,7 @@ class CloudAPI:
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/index",
             headers=self._headers(),
             json=({"outline_structure": outline_structure}
-                  if outline_structure else None),
+                  if outline_structure is not None else None),
             timeout=30
         )
         if response.status_code != 200:

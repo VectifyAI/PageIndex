@@ -913,7 +913,8 @@ class PageIndexClient:
                 "hierarchical" nests them, each with its level, at $2 per
                 1,000 pages. With it, ``wait=True`` also waits for the
                 outline, and raises PageIndexAPIError if it could not be
-                built. A file that is stored already gets the outline named.
+                built. A file that is stored already gets the outline named,
+                which replaces the tree of one uploaded with ``mode="flash"``.
 
         Returns:
             dict: {'doc_id': ..., 'name': ...}. 'name' is the stored document
@@ -1185,6 +1186,8 @@ class PageIndexClient:
         "hierarchical" nests them, each with its level, at $2 per 1,000
         pages, or $1 for a document with a flat outline. An outline the
         document has is free, and a hierarchical one serves as the flat one.
+        A document uploaded with ``mode="flash"`` has no outline: the one
+        named replaces its tree.
         Cloud-only: local mode raises PageIndexAPIError.
 
         Args:

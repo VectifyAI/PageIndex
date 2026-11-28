@@ -2216,6 +2216,10 @@ def test_build_outline_index_is_the_deprecated_name_of_build_outline(serving):
 
     assert record[0].filename == __file__
     assert (calls[0]["path"], calls[0]["json"]) == ("/doc/pi-1/index", None)
+    serve((422, {"detail": "Input should be 'flat' or 'hierarchical'"}))
+    with pytest.raises(PageIndexAPIError):
+        client.build_outline("pi-1", False)
+    assert calls[0]["json"] == {"outline_structure": False}
 
 
 def test_get_outline_returns_the_headings_under_result(serving):
