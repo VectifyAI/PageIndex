@@ -1386,3 +1386,37 @@ def test_tounicode_parser_gets_past_a_stray_delimiter(stray):
     res = subprocess.run([sys.executable, "-c", code], capture_output=True,
                          cwd=Path(__file__).parent.parent, timeout=15)
     assert res.stdout.strip() == b"{1: 'A', 2: 'B'}", res.stderr.decode()
+
+
+def test_a_form_every_page_paints_is_tokenized_once(monkeypatch):
+    """attention-residuals.pdf paints the same logo Form XObject, a 1 MB
+    vector drawing nested inside it, on all 21 pages. The parse tokenizes
+    it once per document, and a page comes out as it does when its walk
+    tokenizes every form afresh."""
+    import PyPDF2
+    import pypdfium2 as pdfium
+
+    from pageindex.flash.parser_pdfium_charlevel import code_walk
+    from pageindex.flash.parser_pdfium_charlevel import pipeline as mod
+
+    path = str(PDF.parent / "attention-residuals.pdf")
+    real = code_walk._tokenize_show_operators
+    sizes = []
+    monkeypatch.setattr(code_walk, "_tokenize_show_operators",
+                        lambda stream, tz=1.0: sizes.append(len(stream)) or real(stream, tz))
+    mod.parse_charlevel_meta(path)
+    biggest = max(sizes)
+    assert biggest > 1_000_000 and sizes.count(biggest) == 1
+
+    pdf = pdfium.PdfDocument(path)
+    pdf_doc = mod._PdfDoc(PyPDF2.PdfReader(path))
+    form_tokens: dict = {}
+    for i in range(3):
+        cached = mod._page_pass1(pdf, pdf_doc, i, {}, {}, form_tokens)
+        fresh = mod._page_pass1(pdf, pdf_doc, i, {}, {})
+        assert (_fields(mod._page_spans(mod._page_pass2(cached[1], cached[2], {})))
+                == _fields(mod._page_spans(mod._page_pass2(fresh[1], fresh[2], {}))))
+        cached[0].close()
+        fresh[0].close()
+    pdf_doc.close()
+    pdf.close()
