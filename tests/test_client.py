@@ -2178,6 +2178,38 @@ def test_build_outline_index_builds_the_index_of_a_document_stored_without_one(s
     assert raised.value.status_code == 402
 
 
+def test_outline_builds_the_structure_asked_for_and_returns_it_once_built(served, monkeypatch):
+    client, calls, answers = served
+    monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
+    def serve(*replies):
+        del calls[:]
+        replies = iter(replies)
+        answers.to = lambda method, path, kw: next(replies)
+    queued = {"doc_id": "pi/1", "index_status": "queued", "usage": {"credits": 0.4}}
+    outline = {"pages": 2, "outline": [{"title": "Intro", "level": 1, "page": 1}]}
+
+    serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"},
+          {"index_status": "completed", "structure": "hierarchical", "result": outline})
+    assert client.outline("pi/1", "hierarchical") == {
+        **queued, "index_status": "completed", **outline}
+    assert [c["method"] for c in calls] == ["POST", "GET", "GET", "GET"]
+    assert calls[0]["json"] == {"structure": "hierarchical"}
+    assert calls[3]["path"].endswith("?type=outline")
+
+    serve(dict(queued))
+    assert client.outline("pi/1", "flat", wait=False) == queued
+    serve(dict(queued), {"index_status": "failed"})
+    with pytest.raises(PageIndexAPIError, match="could not be built"):
+        client.outline("pi/1", "flat")
+    serve(dict(queued), {"index_status": "completed"},
+          {"index_status": "completed", "structure": "flat", "result": outline})
+    with pytest.raises(PageIndexAPIError, match="keeps the outline it had"):
+        client.outline("pi/1", "hierarchical")
+    serve(dict(queued))
+    with pytest.raises(PageIndexAPIError, match="Timed out"):
+        client.outline("pi/1", "flat", timeout=-1)
+
+
 def test_get_tree_of_a_document_without_an_outline_index_says_how_to_build_it(served):
     client, _, answers = served
     answers.to = lambda method, path, kw: {
