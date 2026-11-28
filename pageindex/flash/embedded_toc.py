@@ -405,6 +405,16 @@ def merge_bookmark_skeleton(
                 break
         return idx
 
+    def own_chapter(node: dict, idx: int) -> Optional[dict]:
+        # Several chapters can open on the node's page: it may repeat any of
+        # them, not only the last one chapter_index returns.
+        for index in range(idx, -1, -1):
+            if chapters[index]["page"] < node["start_index"] - 1:
+                break
+            if _same_heading(node, chapter_nodes[index]):
+                return chapter_nodes[index]
+        return None
+
     front: list[dict] = []
 
     def place(node: dict) -> None:
@@ -419,13 +429,14 @@ def merge_bookmark_skeleton(
                     place(child)
             return
         target = chapter_nodes[idx]
+        own = own_chapter(node, idx)
         if _subtree_max_start(node) < range_end[idx]:
-            if _same_heading(node, target):
-                target["nodes"].extend(children)
+            if own is not None:
+                own["nodes"].extend(children)
             else:
                 target["nodes"].append(node)
             return
-        if not _same_heading(node, target):
+        if own is None:
             target["nodes"].append(dict(node, nodes=[]))
         for child in children:
             place(child)
