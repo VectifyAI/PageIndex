@@ -68,6 +68,8 @@ class ColumnDetectionContext:
         self.option_slot = secondary_item.measure_slot
         self.measure_slot = 1.5 * secondary_item.primary_slot
 DOT_LEADER_RE = re_module.compile(r"([.][" + _UNICODE_WHITESPACE_CLASS + r"]*){5,}\Z")
+# A line that is nothing but a section number of three parts or more ("10.1.3", "A.2.1"), no decimal of a table.
+SECTION_NUMBER_RE = re_module.compile(r"(?:[A-Z]|\d+)(?:\.\d+){2,}\.?\Z")
 
 
 # --------------------------------------------------------------------------- #
@@ -129,7 +131,7 @@ def _score_gutter_gap(
     max_edge = -math.inf
     event_count = 0
     lower_accumulator = math.inf
-    candidate_item = group_value = max_char_count = state_item = 0
+    candidate_item = group_value = max_char_count = state_item = hanging_numbers = 0
     sample_item = limit_number
     while sample_item >= 0:
         sweep_event = reference_items[sample_item]
@@ -168,6 +170,8 @@ def _score_gutter_gap(
         if next_number == 1:
             if sweep_line.char_count() <= 5 and numbering_kind(sweep_line) != 0:
                 candidate_item += 1
+            elif SECTION_NUMBER_RE.match(text_of_line(sweep_line).strip()):
+                hanging_numbers += 1
             if sweep_line.char_count() <= 10:
                 text = text_of_line(sweep_line)
                 if (text.startswith("[") and text.endswith("]")) or (
@@ -179,9 +183,9 @@ def _score_gutter_gap(
         max_char_count = max(max_char_count, sweep_line.char_count())
         sample_item -= 1
 
-    # Sanity gates
+    # Sanity gates. A margin holding nothing but section numbers, however long, is no column of its own.
     if (
-        candidate_item >= measure_item
+        candidate_item + hanging_numbers >= measure_item
         or candidate_item >= max(2, measure_item / 2)
         or group_value >= measure_item
         or state_item >= max(2, measure_item / 2)

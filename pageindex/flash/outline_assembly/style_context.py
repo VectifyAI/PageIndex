@@ -305,7 +305,7 @@ def _apply_heading_to_state(state: OutlineState, other_heading_candidate: Headin
 # --------------------------------------------------------------------------- #
 
 
-def compare_heading_depth(heading_candidate: HeadingCandidate, other_heading_candidate: HeadingCandidate, clique: Optional[StyleCluster] = None) -> int:
+def compare_heading_depth(heading_candidate: HeadingCandidate, other_heading_candidate: HeadingCandidate, clique: Optional[StyleCluster] = None, ranks: Optional[dict] = None) -> int:
     """Compare two heading candidates for relative nesting depth. Returns ``-1`` when the first candidate should be shallower, ``1`` when it should be deeper, and ``0`` when both candidates should share a level. The decision combines special heading types, numbering depth, structural numbering, style prominence, centered layout, clique membership, and bold weight. """
     special = heading_candidate.type in (8, 9, 10)
     other_special = other_heading_candidate.type in (8, 9, 10)
@@ -357,9 +357,41 @@ def compare_heading_depth(heading_candidate: HeadingCandidate, other_heading_can
     # clique containment asymmetric
     if (heading_in_clique and other_heading_candidate.type != 4) or (in_value and heading_candidate.type != 4):
         return 1 if heading_in_clique else -1
-    # Bold comparison.
+    # Bold comparison: of two unnumbered prints the one the document sets further left is the shallower, else the bold one.
     bold = heading_block.bold_frac() > 0.5
     other_bold = block.bold_frac() > 0.5
     if bold != other_bold:
-        return 1 if bold else -1
+        unnumbered = not heading_candidate.numbering and not other_heading_candidate.numbering
+        rank = (ranks or {}).get((_print_key(heading_block), _print_key(block))) if unnumbered else None
+        return rank or (1 if bold else -1)
     return 0
+
+
+def _print_key(block) -> tuple:
+    return round(dominant_font_size(block), 1), block.bold_frac() > 0.5
+
+
+def position_ranks(candidates: list[HeadingCandidate]) -> dict:
+    """For two unnumbered heading prints, 1 where the first starts further left than the second on most pages setting one above the other, -1 where the second does."""
+    on_page: dict = {}
+    for candidate in candidates:
+        block = candidate.group_slot
+        if block is not None and not block.isolated_centered and not candidate.numbering:
+            on_page.setdefault(id(candidate.page), {})[id(block)] = block
+    votes: dict = {}
+    for blocks in on_page.values():
+        blocks = list(blocks.values())
+        for index, first in enumerate(blocks):
+            for second in blocks[index + 1:]:
+                reach = min(dominant_font_size(first), dominant_font_size(second)) / 2
+                if (first.left_edge() < second.right_edge() and second.left_edge() < first.right_edge()
+                        and abs(first.left_edge() - second.left_edge()) > reach
+                        and not center_aligned(first, second, reach)):
+                    left, right = (first, second) if first.left_edge() < second.left_edge() else (second, first)
+                    pair = _print_key(left), _print_key(right)
+                    votes[pair] = votes.get(pair, 0) + 1
+    ranks = {}
+    for (left, right), count in votes.items():
+        if count > votes.get((right, left), 0):
+            ranks[left, right], ranks[right, left] = 1, -1
+    return ranks
