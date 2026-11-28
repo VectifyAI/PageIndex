@@ -679,6 +679,39 @@ def get_json_content(response):
     return json_content
          
 
+def _python_none_to_null(text):
+    """Replace the bare token None with null, leaving string values alone."""
+    out = []
+    i, n = 0, len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == '\\' and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if (text.startswith('None', i)
+                and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == '_'))
+                and (i + 4 == n or not (text[i + 4].isalnum() or text[i + 4] == '_'))):
+            out.append('null')
+            i += 4
+            continue
+        out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
 def extract_json(content):
     try:
         # First, try to extract JSON enclosed within ```json and ```
@@ -692,7 +725,7 @@ def extract_json(content):
             json_content = content.strip()
 
         # Clean up common issues that might cause parsing errors
-        json_content = json_content.replace('None', 'null')  # Replace Python None with JSON null
+        json_content = _python_none_to_null(json_content)  # Python None -> JSON null, outside strings only
         json_content = json_content.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
         json_content = ' '.join(json_content.split())  # Normalize whitespace
 
