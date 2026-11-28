@@ -18,7 +18,7 @@ class PageExtractClient:
         job["extract_result"]
 
     A PDF given by its path is uploaded to the "Page Extract" collection,
-    with no outline index built. The documents are the ones
+    with no outline built. The documents are the ones
     ``PageIndexClient`` and ``PageSearchClient`` see with the same key;
     ``client.documents`` is that ``PageIndexClient``, for listing and
     deleting them.
@@ -60,7 +60,7 @@ class PageExtractClient:
 
         Args:
             document (str): A PDF's path: the file is uploaded to
-                ``collection`` with the job, with no outline index built.
+                ``collection`` with the job, with no outline built.
                 Only the extraction is charged, once the job completes, and
                 the file is kept as a document from then on; a job that fails
                 or is cancelled is not charged, and leaves a file it uploaded

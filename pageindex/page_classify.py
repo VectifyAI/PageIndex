@@ -35,7 +35,7 @@ class PageClassifyClient:
         job["class"]
 
     A PDF given by its path is uploaded to the "Page Classify" collection,
-    with no outline index built. The documents are the ones
+    with no outline built. The documents are the ones
     ``PageIndexClient``, ``PageSearchClient`` and ``PageExtractClient`` see
     with the same key; ``client.documents`` is that ``PageIndexClient``, for
     listing and deleting them.
@@ -74,7 +74,7 @@ class PageClassifyClient:
 
         Args:
             document (str): A PDF's path: the file is uploaded to
-                ``collection`` with the job, with no outline index built, and
+                ``collection`` with the job, with no outline built, and
                 kept as a document from then on. Only the classification is
                 charged, once the job completes; a job that fails is not
                 charged, and leaves a file it uploaded as a failed document,

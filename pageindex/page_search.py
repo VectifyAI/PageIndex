@@ -14,7 +14,7 @@ class PageSearchClient:
         doc = client.upload("report.pdf")
         client.search("What was revenue in 2024?", document=doc["doc_id"])
 
-    ``upload()`` stores a document's pages and builds no outline index. The
+    ``upload()`` stores a document's pages and builds no outline. The
     documents are the ones ``PageIndexClient`` and ``PageExtractClient`` see
     with the same key; ``client.documents`` is that ``PageIndexClient``, for
     listing and deleting them, collections and metadata.
