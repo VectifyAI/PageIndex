@@ -32,26 +32,34 @@ async def generate_summaries_for_structure_md(structure, summary_token_threshold
 def extract_nodes_from_markdown(markdown_content):
     header_pattern = r'^(#{1,6})\s+(.+)$'
     bold_heading_pattern = r'^\*\*(.+?)\*\*\s*$'
-    code_block_pattern = r'^```'
+    code_block_pattern = r'^ {0,3}(`{3,}|~{3,})(.*)$'
     node_list = []
     
     lines = markdown_content.split('\n')
-    in_code_block = False
+    fence = None
     
     for line_num, line in enumerate(lines, 1):
         stripped_line = line.strip()
         
-        # Check for code block delimiters (triple backticks)
-        if re.match(code_block_pattern, stripped_line):
-            in_code_block = not in_code_block
+        delimiter = re.match(code_block_pattern, line)
+        if fence is not None:
+            if (delimiter and delimiter.group(1)[0] == fence[0]
+                    and len(delimiter.group(1)) >= len(fence)
+                    and not delimiter.group(2).strip()):
+                fence = None
             continue
-        
+        if delimiter:
+            marker, info = delimiter.groups()
+            if marker[0] != '`' or '`' not in info:
+                fence = marker
+                continue
+
         # Skip empty lines
         if not stripped_line:
             continue
         
         # Only look for headers when not inside a code block
-        if not in_code_block:
+        if fence is None:
             match = re.match(header_pattern, stripped_line)
             if match:
                 title = match.group(2).strip()
