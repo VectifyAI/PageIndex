@@ -2150,42 +2150,132 @@ def test_an_upload_to_search_builds_no_index(searching, sample_pdf, monkeypatch)
     assert len(calls) == 1 and calls[0]["data"] == {"algorithm": "none"}
 
 
-def test_build_outline_index_builds_the_index_of_a_document_stored_without_one(served, monkeypatch):
+@pytest.fixture
+def serving(served, monkeypatch):
+    """served, whose serve(*replies) answers the next requests in turn."""
     client, calls, answers = served
     monkeypatch.setattr("pageindex.client.time.sleep", lambda s: None)
     def serve(*replies):
         del calls[:]
         replies = iter(replies)
         answers.to = lambda method, path, kw: next(replies)
+    return client, calls, serve
+
+
+def test_build_outline_builds_the_outline_of_a_document_stored_without_one(serving):
+    client, calls, serve = serving
     queued = {"doc_id": "pi/1", "index_status": "queued"}
 
     serve(dict(queued), {"index_status": "processing"}, {"index_status": "completed"})
-    assert client.build_outline_index("pi/1") == {"doc_id": "pi/1", "index_status": "completed"}
+    assert client.build_outline("pi/1") == {"doc_id": "pi/1", "index_status": "completed"}
     assert (calls[0]["method"], calls[0]["path"]) == ("POST", "/doc/pi%2F1/index")
-    assert len(calls) == 3
+    assert calls[0]["json"] is None
+    assert [c["path"] for c in calls[1:]] == ["/doc/pi%2F1/?type=outline"] * 2
 
     serve(dict(queued))
-    assert client.build_outline_index("pi/1", wait=False)["index_status"] == "queued"
+    assert client.build_outline("pi/1", wait=False)["index_status"] == "queued"
     serve(dict(queued), {"index_status": "failed"})
     with pytest.raises(PageIndexAPIError, match="could not be built"):
-        client.build_outline_index("pi/1")
+        client.build_outline("pi/1")
     serve(dict(queued))
     with pytest.raises(PageIndexAPIError, match="Timed out"):
-        client.build_outline_index("pi/1", timeout=-1)
+        client.build_outline("pi/1", timeout=-1)
     serve((402, {"detail": "Insufficient credits."}))
     with pytest.raises(PageIndexAPIError, match="Insufficient credits") as raised:
-        client.build_outline_index("pi/1")
+        client.build_outline("pi/1")
     assert raised.value.status_code == 402
 
 
-def test_get_tree_of_a_document_without_an_outline_index_says_how_to_build_it(served):
+def test_build_outline_makes_the_outline_the_one_named_or_raises(serving):
+    client, calls, serve = serving
+    queued = {"doc_id": "pi/1", "index_status": "queued", "usage": {"credits": 0.4}}
+    built = {"index_status": "completed", "outline_structure": "hierarchical"}
+    kept = {"index_status": "completed", "outline_structure": "flat"}
+
+    serve(dict(queued), {"index_status": "processing"}, built)
+    assert client.build_outline("pi/1", "hierarchical") == {
+        **queued, "index_status": "completed"}
+    assert calls[0]["json"] == {"outline_structure": "hierarchical"}
+    assert len(calls) == 3
+
+    serve({"doc_id": "pi/1", "index_status": "completed"}, built)
+    assert client.build_outline("pi/1", "flat")["index_status"] == "completed"
+    serve(dict(queued), kept)
+    with pytest.raises(PageIndexAPIError, match="keeps the outline it had"):
+        client.build_outline("pi/1", "hierarchical")
+    serve(dict(queued))
+    assert client.build_outline("pi/1", "hierarchical", wait=False) == queued
+
+
+def test_build_outline_index_is_the_deprecated_name_of_build_outline(serving):
+    client, calls, serve = serving
+    serve({"doc_id": "pi-1", "index_status": "queued"})
+
+    with pytest.warns(DeprecationWarning, match=r"now build_outline\(\)") as record:
+        assert client.build_outline_index("pi-1", False)["index_status"] == "queued"
+
+    assert record[0].filename == __file__
+    assert (calls[0]["path"], calls[0]["json"]) == ("/doc/pi-1/index", None)
+    serve((422, {"detail": "Input should be 'flat' or 'hierarchical'"}))
+    with pytest.raises(PageIndexAPIError):
+        client.build_outline("pi-1", False)
+    assert calls[0]["json"] == {"outline_structure": False}
+
+
+def test_get_outline_returns_the_headings_under_result(serving):
+    client, calls, serve = serving
+    read = {"doc_id": "pi/1", "status": "completed", "index_status": "completed",
+            "outline_structure": "flat",
+            "result": {"pages": 2, "outline": [{"title": "Intro", "page": 1}]}}
+
+    serve(dict(read))
+    assert client.get_outline("pi/1") == read
+    assert (calls[0]["method"], calls[0]["path"]) == ("GET", "/doc/pi%2F1/?type=outline")
+
+    serve({"doc_id": "pi/1", "index_status": "processing", "result": None})
+    assert client.get_outline("pi/1")["index_status"] == "processing"
+    serve({"doc_id": "pi/1", "index_status": "skipped", "result": None})
+    with pytest.raises(PageIndexAPIError, match=r"no outline.*build_outline\(doc_id\)"):
+        client.get_outline("pi/1")
+
+
+def test_an_upload_that_names_its_outline_waits_for_it_too(serving, sample_pdf):
+    client, calls, serve = serving
+    stored = {"doc_id": "pi-1", "name": "sample.pdf"}
+    ready = {"id": "pi-1", "status": "completed"}
+
+    serve(dict(stored), dict(ready), {"index_status": "processing"},
+          {"index_status": "completed", "outline_structure": "hierarchical"})
+    assert client.submit_document(
+        sample_pdf, outline_structure="hierarchical", wait=True) == stored
+    assert calls[0]["data"] == {"if_retrieval": True,
+                                "outline_structure": "hierarchical"}
+    assert [c["path"] for c in calls[2:]] == ["/doc/pi-1/?type=outline"] * 2
+
+    serve(dict(stored), dict(ready), {"index_status": "failed"})
+    with pytest.raises(PageIndexAPIError, match="could not be built"):
+        client.submit_document(sample_pdf, outline_structure="flat", wait=True)
+    serve(dict(stored))
+    client.submit_document(sample_pdf, outline_structure="flat")
+    assert len(calls) == 1
+    serve(dict(stored), dict(ready))
+    client.submit_document(sample_pdf, wait=True)
+    assert len(calls) == 2
+
+    serve()
+    with pytest.raises(PageIndexAPIError, match="mode='flash'"):
+        client.submit_document(sample_pdf, mode="flash", outline_structure="flat")
+    assert calls == []
+
+
+def test_get_tree_of_a_document_without_an_outline_says_how_to_build_it(served):
     client, _, answers = served
     answers.to = lambda method, path, kw: {
         "doc_id": "pi-1", "status": "completed", "index_status": "skipped"}
     with pytest.raises(PageIndexAPIError,
-                       match=r"no outline index.*build_outline_index\(doc_id\)"):
+                       match=r"no outline.*build_outline\(doc_id\)"):
         client.get_tree("pi-1")
-    with pytest.raises(PageIndexAPIError, match="no outline index"):
+    with pytest.raises(PageIndexAPIError, match="no outline"):
         client.get_document_structure("pi-1")
 
     answers.to = lambda method, path, kw: {
@@ -2193,9 +2283,13 @@ def test_get_tree_of_a_document_without_an_outline_index_says_how_to_build_it(se
     assert client.get_tree("pi-1")["index_status"] == "processing"
 
 
-def test_build_outline_index_is_cloud_only(local_client):
-    with pytest.raises(PageIndexAPIError, match="build_outline_index is cloud-only"):
-        local_client.build_outline_index("d")
+def test_outlines_are_cloud_only(local_client, sample_pdf):
+    with pytest.raises(PageIndexAPIError, match="build_outline is cloud-only"):
+        local_client.build_outline("d")
+    with pytest.raises(PageIndexAPIError, match="get_outline is cloud-only"):
+        local_client.get_outline("d")
+    with pytest.raises(PageIndexAPIError, match="outline_structure is not supported"):
+        local_client.submit_document(sample_pdf, outline_structure="flat")
 
 
 def test_search_one_document(searching):

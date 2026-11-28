@@ -56,6 +56,7 @@ class CloudAPI:
         collection_id: Optional[str] = None,
         index: bool = True,
         extract: Optional[Dict[str, Any]] = None,
+        outline_structure: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Upload a PDF document for processing; the tree is built in the background,
@@ -77,6 +78,8 @@ class CloudAPI:
                 once it completes. A job that does not complete leaves the
                 document this upload made failed, with its name and file but
                 no pages, until you delete it.
+            outline_structure (str, optional): The outline the default
+                pipeline builds, "flat" (the default) or "hierarchical".
 
         Returns:
             dict: {'doc_id': ...} — plus 'name', the stored document name
@@ -107,6 +110,14 @@ class CloudAPI:
             data['collection_id'] = collection_id
         if extract is not None:
             data['extract'] = json.dumps(extract)
+        if outline_structure is not None:
+            if mode == "flash":
+                raise PageIndexAPIError(
+                    "Failed to submit document: outline_structure names the "
+                    "outline the default cloud pipeline builds; mode='flash' "
+                    "builds a Flash tree instead."
+                )
+            data['outline_structure'] = outline_structure
 
         with open(file_path, "rb") as f:
             response = self._http.post(
@@ -287,9 +298,32 @@ class CloudAPI:
                 status_code=response.status_code)
         return response.json()
 
-    def build_outline_index(self, doc_id: str) -> Dict[str, Any]:
+    def get_outline(self, doc_id: str) -> Dict[str, Any]:
         """
-        Build the tree of a document stored without one.
+        Get a document's outline.
+
+        Returns:
+            dict: API response with 'index_status', 'outline_structure'
+            ("flat", "hierarchical" or None) and, as 'result', {'pages',
+            'outline'}.
+        """
+        response = self._http.get(
+            f"{self.BASE_URL}/doc/{_enc(doc_id)}/?type=outline",
+            headers=self._headers(),
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise PageIndexAPIError(
+                f"Failed to get outline: {response.text}",
+                status_code=response.status_code)
+        return response.json()
+
+    def build_outline(self, doc_id: str,
+                      outline_structure: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Build the outline of a document stored without one, or, with
+        ``outline_structure`` ("flat" or "hierarchical"), build that outline
+        unless the document has it.
 
         Returns:
             dict: {'doc_id', 'index_status'}.
@@ -297,6 +331,8 @@ class CloudAPI:
         response = self._http.post(
             f"{self.BASE_URL}/doc/{_enc(doc_id)}/index",
             headers=self._headers(),
+            json=({"outline_structure": outline_structure}
+                  if outline_structure is not None else None),
             timeout=30
         )
         if response.status_code != 200:

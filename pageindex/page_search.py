@@ -14,7 +14,7 @@ class PageSearchClient:
         doc = client.upload("report.pdf")
         client.search("What was revenue in 2024?", document=doc["doc_id"])
 
-    ``upload()`` stores a document's pages and builds no outline index. The
+    ``upload()`` stores a document's pages and builds no outline. The
     documents are the ones ``PageIndexClient`` and ``PageExtractClient`` see
     with the same key; ``client.documents`` is that ``PageIndexClient``, for
     listing and deleting them, collections and metadata.
@@ -44,9 +44,9 @@ class PageSearchClient:
         timeout: float = 1800.0,
     ) -> dict[str, Any]:
         """
-        Upload a PDF to search. Its pages are stored and no outline index is
+        Upload a PDF to search. Its pages are stored and no outline is
         built, so the upload is charged less than one that builds it;
-        ``PageIndexClient.build_outline_index()`` builds one later. Uploading
+        ``PageIndexClient.build_outline()`` builds one later. Uploading
         the same file to the same place again returns the stored document.
 
         Args:
