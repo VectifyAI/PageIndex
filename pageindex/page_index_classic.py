@@ -190,8 +190,11 @@ def toc_detector_single_page(content, model=None):
     Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
 
     response = llm_completion(model=model, prompt=prompt)
-    json_content = extract_json(response)    
-    return json_content.get('toc_detected', 'no')
+    json_content = extract_json(response)
+    if not isinstance(json_content, dict):
+        return 'no'
+    toc_detected = str(json_content.get('toc_detected', 'no')).strip().lower()
+    return toc_detected if toc_detected in ('yes', 'no') else 'no'
 
 
 def check_if_toc_extraction_is_complete(content, toc, model=None):
@@ -507,6 +510,13 @@ def calculate_page_offset(pairs):
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
+    if offset is None:
+        # calculate_page_offset found no TOC entry it could match to a
+        # physical page, so there is nothing to infer the offset from.
+        # Assume the printed page numbers are the physical ones rather
+        # than fail the whole run on `page + None`.
+        print('[PageIndex] WARNING: could not infer the TOC page offset; assuming printed page numbers are physical page numbers (offset 0).')
+        offset = 0
     for i in range(len(data)):
         if data[i].get('page') is not None and isinstance(data[i]['page'], int):
             data[i]['physical_index'] = data[i]['page'] + offset
