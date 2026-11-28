@@ -29,6 +29,7 @@ from .text_checks import (
     matches_references,
     has_substantive_content,
     is_cover_page,
+    similar_style,
 )
 from .neighbors import (
     neighbor_above,
@@ -422,7 +423,7 @@ def build_doc_heading_candidates(doc, labeled: Optional[list] = None) -> list[He
     return doc_collector.state_slot
 
 
-def find_section_openers(doc, start_page_idx: int) -> list:
+def find_section_openers(doc, start_page_idx: int, title_blocks=()) -> list:
     """Find the first valid heading on each page, then clique-filter the result."""
     from ..outline_assembly import has_conflict_in_context, OutlineContext, OutlineNode
 
@@ -453,15 +454,29 @@ def find_section_openers(doc, start_page_idx: int) -> list:
     if len(item_list) <= 1:
         return []
 
+    # An unnumbered heading styled as the document title, right before plain
+    # numbering starts over at 1, opens another document bound into this one,
+    # so it is no conflict. "Chapter N" numbering restarts on its own.
+    def starts_numbering(candidate):
+        return candidate.type == 1 and candidate.numbering == [1]
+
+    opens_document = [False] * len(item_list)
+    seen_first = False
+    for index in range(len(item_list) - 1):
+        current_candidate = item_list[index]
+        seen_first = seen_first or starts_numbering(current_candidate)
+        opens_document[index] = (seen_first and not current_candidate.numbering and starts_numbering(item_list[index + 1])
+                                 and any(similar_style(current_candidate.group_slot, block) for block in title_blocks))
+
     # Compare candidates against the full context and against the accepted subset.
     bundle = OutlineContext(item_list)
     accepted_context = OutlineContext([])
     out = []
-    for current_candidate in item_list:
+    for current_candidate, document_title in zip(item_list, opens_document):
         if accepted_context.has_nearby_duplicate(current_candidate):
             current_candidate.group_slot.type = 12
             continue
-        if has_conflict_in_context(bundle, current_candidate):
+        if not document_title and has_conflict_in_context(bundle, current_candidate):
             continue
         accepted_context.add(current_candidate)
         out.append(OutlineNode(current_candidate))
